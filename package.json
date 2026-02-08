@@ -1,0 +1,24 @@
+{
+  "name": "hoboken",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "check": "tsc",
+    "lint": "eslint .",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@homebridge/hap-nodejs": "^2.1.0",
+    "mqtt": "^5.15.0",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@types/bun": "^1.2.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^10.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.54.0"
+  }
+}
