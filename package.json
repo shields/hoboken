@@ -6,7 +6,7 @@
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "check": "tsc",
     "lint": "eslint .",
-    "test": "bun test"
+    "test": "bun test --preload ./test/preload.ts"
   },
   "dependencies": {
     "@homebridge/hap-nodejs": "^2.1.0",
