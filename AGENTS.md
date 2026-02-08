@@ -74,7 +74,7 @@ Each module is independently testable with dependency injection:
 
 ## Config Validation Rules
 
-- `bridge.username`: MAC format `XX:XX:XX:XX:XX:XX` (hex digits)
+- `bridge.mac`: MAC format `XX:XX:XX:XX:XX:XX` (hex digits)
 - `bridge.pincode`: format `XXX-XX-XXX` (digits)
 - `bridge.port`: positive integer
 - `devices`: non-empty array

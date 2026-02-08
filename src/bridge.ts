@@ -31,7 +31,7 @@ export async function startBridge(
 
   const bridge = new Bridge(
     config.bridge.name,
-    uuid.generate(config.bridge.username),
+    uuid.generate(config.bridge.mac),
   );
 
   const accessoryMap = new Map<
@@ -100,7 +100,7 @@ export async function startBridge(
 
   await bridge.publish({
     username: config.bridge
-      .username as `${string}:${string}:${string}:${string}:${string}:${string}`,
+      .mac as `${string}:${string}:${string}:${string}:${string}:${string}`,
     pincode: config.bridge.pincode as `${string}-${string}-${string}`,
     port: config.bridge.port,
     category: 2 /* Categories.BRIDGE */,

@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hoboken
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: hoboken
+  template:
+    metadata:
+      labels:
+        app: hoboken
+    spec:
+      hostNetwork: true
+      containers:
+        - name: hoboken
+          image: hoboken:latest
+          env:
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            - name: PERSIST_PATH
+              value: /persist
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 128Mi
+          livenessProbe:
+            tcpSocket:
+              port: 51826
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: persist
+              mountPath: /persist
+      volumes:
+        - name: config
+          configMap:
+            name: hoboken-config # kubectl create configmap hoboken-config --from-file=config.yaml
+        - name: persist
+          persistentVolumeClaim:
+            claimName: hoboken-persist
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hoboken-persist
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 64Mi

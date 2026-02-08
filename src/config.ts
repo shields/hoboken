@@ -24,7 +24,7 @@ export interface DeviceConfig {
 
 export interface BridgeConfig {
   name: string;
-  username: string;
+  mac: string;
   pincode: string;
   port: number;
 }
@@ -40,7 +40,7 @@ export interface Config {
   devices: DeviceConfig[];
 }
 
-const MAC_RE = /^[\dA-F]{2}(:[\dA-F]{2}){5}$/;
+const MAC_RE = /^[\dA-Fa-f]{2}(:[\dA-Fa-f]{2}){5}$/;
 const PIN_RE = /^\d{3}-\d{2}-\d{3}$/;
 
 export function validateConfig(data: unknown): Config {
@@ -59,9 +59,9 @@ export function validateConfig(data: unknown): Config {
   if (typeof bridge.name !== "string" || bridge.name.length === 0) {
     throw new Error("bridge.name must be a non-empty string");
   }
-  if (typeof bridge.username !== "string" || !MAC_RE.test(bridge.username)) {
+  if (typeof bridge.mac !== "string" || !MAC_RE.test(bridge.mac)) {
     throw new Error(
-      "bridge.username must be a MAC address (XX:XX:XX:XX:XX:XX)",
+      "bridge.mac must be a MAC address (e.g. AA:BB:CC:DD:EE:FF)",
     );
   }
   if (typeof bridge.pincode !== "string" || !PIN_RE.test(bridge.pincode)) {
@@ -97,10 +97,18 @@ export function validateConfig(data: unknown): Config {
     validateDevice(d, i),
   );
 
+  const topics = new Set<string>();
+  for (const device of devices) {
+    if (topics.has(device.topic)) {
+      throw new Error(`duplicate device topic "${device.topic}"`);
+    }
+    topics.add(device.topic);
+  }
+
   return {
     bridge: {
       name: bridge.name as string,
-      username: bridge.username as string,
+      mac: (bridge.mac as string).toUpperCase(),
       pincode: bridge.pincode as string,
       port: bridge.port as number,
     },

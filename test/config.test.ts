@@ -8,7 +8,7 @@ function validConfig() {
   return {
     bridge: {
       name: "Hoboken",
-      username: "0E:42:A1:B2:C3:D4",
+      mac: "0E:42:A1:B2:C3:D4",
       pincode: "031-45-154",
       port: 51826,
     },
@@ -83,14 +83,15 @@ describe("validateConfig", () => {
 
   test("rejects invalid MAC format", () => {
     const data = validConfig();
-    data.bridge.username = "not-a-mac";
+    data.bridge.mac = "not-a-mac";
     expect(() => validateConfig(data)).toThrow("MAC address");
   });
 
-  test("rejects lowercase MAC", () => {
+  test("accepts and normalizes lowercase MAC", () => {
     const data = validConfig();
-    data.bridge.username = "0e:42:a1:b2:c3:d4";
-    expect(() => validateConfig(data)).toThrow("MAC address");
+    data.bridge.mac = "0e:42:a1:b2:c3:d4";
+    const config = validateConfig(data);
+    expect(config.bridge.mac).toBe("0E:42:A1:B2:C3:D4");
   });
 
   test("rejects invalid PIN format", () => {
@@ -206,6 +207,18 @@ describe("validateConfig", () => {
       "scenes[0].name must be a non-empty string",
     );
   });
+
+  test("rejects duplicate device topics", () => {
+    const data = validConfig();
+    (data.devices as unknown[]).push({
+      name: "Duplicate",
+      topic: "living_room_light",
+      capabilities: ["on_off"],
+    });
+    expect(() => validateConfig(data)).toThrow(
+      'duplicate device topic "living_room_light"',
+    );
+  });
 });
 
 describe("loadConfig", () => {
@@ -219,7 +232,7 @@ describe("loadConfig", () => {
       `
 bridge:
   name: "Test"
-  username: "AA:BB:CC:DD:EE:FF"
+  mac: "AA:BB:CC:DD:EE:FF"
   pincode: "111-22-333"
   port: 51826
 mqtt:

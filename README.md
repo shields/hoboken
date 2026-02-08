@@ -60,8 +60,8 @@ publishes `{"scene_recall": <id>}` to Z2M. The switch auto-resets to off after
 ```yaml
 bridge:
   name: "Hoboken"
-  username: "0E:42:A1:B2:C3:D4" # Stable MAC — HomeKit pairing identity
-  pincode: "031-45-154"
+  mac: "AA:BB:CC:DD:EE:FF" # generate a unique MAC for your bridge
+  pincode: "123-45-678" # change this before pairing
   port: 51826
 
 mqtt:

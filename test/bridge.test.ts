@@ -44,7 +44,7 @@ function testConfig(): Config {
   return {
     bridge: {
       name: "Test Bridge",
-      username: "0E:42:A1:B2:C3:D4",
+      mac: "0E:42:A1:B2:C3:D4",
       pincode: "031-45-154",
       port: 0,
     },
@@ -166,8 +166,13 @@ describe("startBridge", () => {
   test("MQTT error does not crash", async () => {
     const { shutdown } = await startBridge(testConfig());
 
-    // Should log but not throw
-    mockClient.emit("error", new Error("connection refused"));
+    const origError = console.error;
+    console.error = () => {};
+    try {
+      mockClient.emit("error", new Error("connection refused"));
+    } finally {
+      console.error = origError;
+    }
     await shutdown();
   });
 

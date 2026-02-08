@@ -1,0 +1,21 @@
+bridge:
+  name: "Hoboken"
+  mac: "AA:BB:CC:DD:EE:FF" # generate a unique MAC for your bridge
+  pincode: "123-45-678" # change this before pairing
+  port: 51826
+
+mqtt:
+  url: "mqtt://mosquitto:1883"
+  topic_prefix: "zigbee2mqtt"
+
+devices:
+  - name: "Living Room Light"
+    topic: "living_room_light"
+    capabilities: [on_off, brightness, color_temp]
+    scenes:
+      - name: "Movie Mode"
+        id: 1
+
+  - name: "Bedroom Light"
+    topic: "bedroom_light"
+    capabilities: [on_off, brightness, color_temp, color_hs]
