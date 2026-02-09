@@ -1,5 +1,6 @@
 import {
   Accessory,
+  Categories,
   Characteristic,
   Service,
   uuid,
@@ -23,7 +24,7 @@ export function createLightAccessory(
     device.name,
     uuid.generate(`hoboken:light:${device.topic}`),
   );
-  accessory.category = 5 /* Categories.LIGHTBULB */;
+  accessory.category = Categories.LIGHTBULB;
 
   const service = accessory.addService(Service.Lightbulb, device.name);
 
@@ -54,7 +55,7 @@ export function createSceneAccessory(
     scene.name,
     uuid.generate(`hoboken:scene:${device.topic}:${String(scene.id)}`),
   );
-  accessory.category = 8 /* Categories.SWITCH */;
+  accessory.category = Categories.SWITCH;
 
   const service = accessory.addService(Service.Switch, scene.name);
   const on = service.getCharacteristic(Characteristic.On);

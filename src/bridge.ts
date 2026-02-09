@@ -1,4 +1,10 @@
-import { Bridge, HapStatusError, uuid } from "@homebridge/hap-nodejs";
+import {
+  Bridge,
+  Categories,
+  HAPStatus,
+  HapStatusError,
+  uuid,
+} from "@homebridge/hap-nodejs";
 import { connect } from "mqtt";
 import type { Config } from "./config.ts";
 import {
@@ -16,9 +22,7 @@ export async function startBridge(
 
   const publish: PublishFn = (topic, payload) => {
     if (!mqttClient.connected) {
-      throw new HapStatusError(
-        -70402 /* HAPStatus.SERVICE_COMMUNICATION_FAILURE */,
-      );
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     mqttClient.publish(
       `${config.mqtt.topic_prefix}/${topic}`,
@@ -100,7 +104,7 @@ export async function startBridge(
       .mac as `${string}:${string}:${string}:${string}:${string}:${string}`,
     pincode: config.bridge.pincode as `${string}-${string}-${string}`,
     port: config.bridge.port,
-    category: 2 /* Categories.BRIDGE */,
+    category: Categories.BRIDGE,
   });
 
   return {

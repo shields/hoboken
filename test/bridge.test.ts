@@ -3,7 +3,12 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Characteristic, HAPStorage, Service } from "@homebridge/hap-nodejs";
+import {
+  Characteristic,
+  HAPStatus,
+  HAPStorage,
+  Service,
+} from "@homebridge/hap-nodejs";
 import type { Config } from "../src/config.ts";
 
 HAPStorage.setCustomStoragePath(mkdtempSync(join(tmpdir(), "hoboken-test-")));
@@ -213,7 +218,7 @@ describe("startBridge", () => {
 
     on.setValue(true);
     // HAP-nodejs catches the HapStatusError and stores it as statusCode
-    expect(on.statusCode).toBe(-70402);
+    expect(on.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
 
     await shutdown();
   });
