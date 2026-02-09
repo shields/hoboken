@@ -1,6 +1,5 @@
 import { Bridge, HapStatusError, uuid } from "@homebridge/hap-nodejs";
 import { connect } from "mqtt";
-import type { MqttClient } from "mqtt";
 import type { Config } from "./config.ts";
 import {
   createLightAccessory,
@@ -11,12 +10,12 @@ import type { PublishFn, Z2MState } from "./accessories.ts";
 
 export async function startBridge(
   config: Config,
-): Promise<{ shutdown: () => Promise<void> }> {
+): Promise<{ bridge: Bridge; shutdown: () => Promise<void> }> {
   const stateCache = new Map<string, Z2MState>();
-  let mqttClient: MqttClient | undefined;
+  const mqttClient = connect(config.mqtt.url);
 
   const publish: PublishFn = (topic, payload) => {
-    if (!mqttClient?.connected) {
+    if (!mqttClient.connected) {
       throw new HapStatusError(
         -70402 /* HAPStatus.SERVICE_COMMUNICATION_FAILURE */,
       );
@@ -55,8 +54,6 @@ export async function startBridge(
     }
   }
 
-  mqttClient = connect(config.mqtt.url);
-
   mqttClient.on("error", (err) => {
     console.error("MQTT error:", err.message);
   });
@@ -65,10 +62,10 @@ export async function startBridge(
     const topics = config.devices.map(
       (d) => `${config.mqtt.topic_prefix}/${d.topic}`,
     );
-    mqttClient!.subscribe(topics);
+    mqttClient.subscribe(topics);
 
     for (const device of config.devices) {
-      mqttClient!.publish(
+      mqttClient.publish(
         `${config.mqtt.topic_prefix}/${device.topic}/get`,
         JSON.stringify({ state: "" }),
       );
@@ -107,16 +104,13 @@ export async function startBridge(
   });
 
   return {
+    bridge,
     shutdown: async () => {
       await bridge.unpublish();
       await new Promise<void>((resolve) => {
-        if (mqttClient) {
-          mqttClient.end(false, () => {
-            resolve();
-          });
-        } else {
+        mqttClient.end(false, () => {
           resolve();
-        }
+        });
       });
     },
   };

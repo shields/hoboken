@@ -2,6 +2,7 @@ import { HAPStorage } from "@homebridge/hap-nodejs";
 import { loadConfig } from "./config.ts";
 import { startBridge } from "./bridge.ts";
 
+// eslint-disable-next-line prefer-const -- assigned via destructuring after signal handlers are installed
 let shutdown: (() => Promise<void>) | undefined;
 const onShutdown = () => {
   if (shutdown) {

@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HAPStorage } from "@homebridge/hap-nodejs";
+import { Characteristic, HAPStorage, Service } from "@homebridge/hap-nodejs";
 import type { Config } from "../src/config.ts";
 
 HAPStorage.setCustomStoragePath(mkdtempSync(join(tmpdir(), "hoboken-test-")));
@@ -11,7 +11,7 @@ HAPStorage.setCustomStoragePath(mkdtempSync(join(tmpdir(), "hoboken-test-")));
 class MockMqttClient extends EventEmitter {
   connected = false;
   subscriptions: string[][] = [];
-  published: Array<{ topic: string; message: string }> = [];
+  published: { topic: string; message: string }[] = [];
 
   subscribe(topics: string[]): this {
     this.subscriptions.push(topics);
@@ -167,12 +167,54 @@ describe("startBridge", () => {
     const { shutdown } = await startBridge(testConfig());
 
     const origError = console.error;
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
     console.error = () => {};
     try {
       mockClient.emit("error", new Error("connection refused"));
     } finally {
       console.error = origError;
     }
+    await shutdown();
+  });
+
+  test("HomeKit set publishes to MQTT when connected", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Living Room",
+    )!;
+    const on = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.On);
+
+    on.setValue(true);
+    expect(
+      mockClient.published.some(
+        (p) =>
+          p.topic === "zigbee2mqtt/living_room/set" &&
+          p.message === JSON.stringify({ state: "ON" }),
+      ),
+    ).toBe(true);
+
+    await shutdown();
+  });
+
+  test("HomeKit set reports error when MQTT disconnected", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Living Room",
+    )!;
+    const on = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.On);
+
+    on.setValue(true);
+    // HAP-nodejs catches the HapStatusError and stores it as statusCode
+    expect(on.statusCode).toBe(-70402);
+
     await shutdown();
   });
 

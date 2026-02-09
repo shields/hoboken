@@ -73,7 +73,7 @@ describe("createLightAccessory", () => {
     expect(value2).toBe(false);
   });
 
-  test("onGet On returns false when no state cached", async () => {
+  test("onGet On returns false when no state cached", () => {
     const device = makeDevice({ capabilities: ["on_off"] });
     createLightAccessory(device, publish, getState);
 
@@ -93,6 +93,98 @@ describe("createLightAccessory", () => {
 
     on.setValue(false);
     expect(publish).toHaveBeenCalledWith("test_light/set", { state: "OFF" });
+  });
+
+  test("onGet brightness returns cached value", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "brightness"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const brightness = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.Brightness);
+
+    stateMap.set("test_light", { brightness: 254 });
+    const value = await brightness.handleGetRequest();
+    expect(value).toBe(100);
+  });
+
+  test("onGet brightness returns 0 when no state cached", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "brightness"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const brightness = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.Brightness);
+
+    const value = await brightness.handleGetRequest();
+    expect(value).toBe(0);
+  });
+
+  test("onGet color_temp returns cached value", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const ct = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.ColorTemperature);
+
+    stateMap.set("test_light", { color_temp: 350 });
+    const value = await ct.handleGetRequest();
+    expect(value).toBe(350);
+  });
+
+  test("onGet color_temp returns 140 when no state cached", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const ct = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.ColorTemperature);
+
+    const value = await ct.handleGetRequest();
+    expect(value).toBe(140);
+  });
+
+  test("onGet hue returns cached value", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const hue = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.Hue);
+
+    stateMap.set("test_light", { color: { hue: 200 } });
+    const value = await hue.handleGetRequest();
+    expect(value).toBe(200);
+  });
+
+  test("onGet hue returns 0 when no state cached", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const hue = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.Hue);
+
+    const value = await hue.handleGetRequest();
+    expect(value).toBe(0);
+  });
+
+  test("onGet saturation returns cached value", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const sat = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.Saturation);
+
+    stateMap.set("test_light", { color: { saturation: 75 } });
+    const value = await sat.handleGetRequest();
+    expect(value).toBe(75);
+  });
+
+  test("onGet saturation returns 0 when no state cached", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const sat = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.Saturation);
+
+    const value = await sat.handleGetRequest();
+    expect(value).toBe(0);
   });
 
   test("onSet brightness converts HomeKit to Z2M", () => {
@@ -184,7 +276,7 @@ describe("createSceneAccessory", () => {
       .getCharacteristic(Characteristic.On);
 
     const origSetTimeout = globalThis.setTimeout;
-    const timeouts: Array<{ fn: () => void; delay: number }> = [];
+    const timeouts: { fn: () => void; delay: number }[] = [];
     globalThis.setTimeout = ((fn: () => void, delay: number) => {
       timeouts.push({ fn, delay });
       return 0 as unknown as ReturnType<typeof setTimeout>;

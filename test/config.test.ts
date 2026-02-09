@@ -178,7 +178,7 @@ describe("validateConfig", () => {
 
   test("rejects unknown capability", () => {
     const data = validConfig();
-    (data.devices[0].capabilities as string[]).push("unknown");
+    data.devices[0].capabilities.push("unknown");
     expect(() => validateConfig(data)).toThrow('unknown capability "unknown"');
   });
 
@@ -186,6 +186,26 @@ describe("validateConfig", () => {
     const data = validConfig();
     data.devices[0].capabilities = ["on_off", "brightness", "on_off"];
     expect(() => validateConfig(data)).toThrow('duplicate capability "on_off"');
+  });
+
+  test("rejects non-object device", () => {
+    const data = validConfig();
+    (data.devices as unknown[])[0] = null;
+    expect(() => validateConfig(data)).toThrow("devices[0] must be an object");
+  });
+
+  test("rejects non-array scenes", () => {
+    const data = validConfig();
+    (data.devices[0] as Record<string, unknown>).scenes = "not an array";
+    expect(() => validateConfig(data)).toThrow(
+      "devices[0].scenes must be an array",
+    );
+  });
+
+  test("rejects non-object scene", () => {
+    const data = validConfig();
+    data.devices[0].scenes = [null as unknown as { name: string; id: number }];
+    expect(() => validateConfig(data)).toThrow("scenes[0] must be an object");
   });
 
   test("rejects scene with non-positive id", () => {

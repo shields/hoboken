@@ -107,14 +107,14 @@ export function validateConfig(data: unknown): Config {
 
   return {
     bridge: {
-      name: bridge.name as string,
-      mac: (bridge.mac as string).toUpperCase(),
-      pincode: bridge.pincode as string,
-      port: bridge.port as number,
+      name: bridge.name,
+      mac: (bridge.mac).toUpperCase(),
+      pincode: bridge.pincode,
+      port: bridge.port,
     },
     mqtt: {
-      url: mqtt.url as string,
-      topic_prefix: mqtt.topic_prefix as string,
+      url: mqtt.url,
+      topic_prefix: mqtt.topic_prefix,
     },
     devices,
   };
