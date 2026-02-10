@@ -151,3 +151,39 @@ reconciled automatically.
 - `strategy: Recreate` — single instance (MAC uniqueness)
 - PVC at `/persist` — pairing data survives restarts
 - ConfigMap at `/config/config.yaml`
+
+### Pairing with Apple Home
+
+1. Open the **Home** app on your iPhone or iPad.
+2. Tap **+** (top right) → **Add Accessory**.
+3. Tap **More options…** at the bottom. "Hoboken" should appear via mDNS.
+4. Select it, then enter the PIN from your config (e.g., `482-37-159`).
+5. Assign the bridge to a room when prompted.
+
+The PIN is only used during the initial pairing. After that, the pairing keys
+stored in `/persist` authenticate all communication. If you delete the PVC or
+change the MAC, you must remove the bridge from Home and re-pair.
+
+### Troubleshooting
+
+Verify mDNS advertisement from a Mac on the same network:
+
+```sh
+dns-sd -B _hap._tcp
+```
+
+Check that the HAP port is reachable from the network:
+
+```sh
+nc -z <node-ip> 51826
+```
+
+View logs for pairing diagnostics:
+
+```sh
+kubectl -n hoboken logs deploy/hoboken
+```
+
+The bridge logs lifecycle events: MQTT connection state, HAP server listening
+address, mDNS advertisement, identify requests, pair-setup completion, and
+connection close events.
