@@ -124,6 +124,27 @@ describe("validateConfig", () => {
     );
   });
 
+  test("rejects non-string bind", () => {
+    const data = validConfig();
+    (data.bridge as Record<string, unknown>).bind = 123;
+    expect(() => validateConfig(data)).toThrow(
+      "bridge.bind must be a string (interface name or IP)",
+    );
+  });
+
+  test("accepts valid bind interface name", () => {
+    const data = validConfig();
+    (data.bridge as Record<string, unknown>).bind = "eno1";
+    const config = validateConfig(data);
+    expect(config.bridge.bind).toBe("eno1");
+  });
+
+  test("omits bind when not specified", () => {
+    const data = validConfig();
+    const config = validateConfig(data);
+    expect(config.bridge.bind).toBeUndefined();
+  });
+
   test("rejects empty mqtt url", () => {
     const data = validConfig();
     data.mqtt.url = "";

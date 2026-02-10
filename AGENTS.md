@@ -77,6 +77,7 @@ Each module is independently testable with dependency injection:
 - `bridge.mac`: MAC format `XX:XX:XX:XX:XX:XX` (hex digits)
 - `bridge.pincode`: format `XXX-XX-XXX` (digits)
 - `bridge.port`: positive integer
+- `bridge.bind`: optional string (network interface name or IP for mDNS)
 - `devices`: non-empty array
 - Each device: `name`, `topic`, `capabilities` (non-empty, valid values)
 - Scene IDs: positive integers

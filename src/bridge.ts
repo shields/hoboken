@@ -160,6 +160,7 @@ export async function startBridge(
     pincode: config.bridge.pincode as `${string}-${string}-${string}`,
     port: config.bridge.port,
     category: Categories.BRIDGE,
+    ...(config.bridge.bind ? { bind: config.bridge.bind } : {}),
   });
 
   // _server is a private hap-nodejs API, but it's the only way to log

@@ -66,6 +66,7 @@ bridge:
   mac: "AA:BB:CC:DD:EE:FF" # generate a unique MAC for your bridge
   pincode: "123-45-678" # change this before pairing
   port: 51826
+  bind: "eno1" # optional: network interface for mDNS (needed in k8s with hostNetwork)
 
 mqtt:
   url: "mqtt://mosquitto:1883"
@@ -86,6 +87,14 @@ devices:
 
 Neither `username` nor `pincode` are secrets. The MAC is broadcast via mDNS.
 The PIN is only used during initial pairing and is not reusable afterward.
+
+### Bind Interface
+
+The optional `bind` field restricts the HAP server and mDNS advertisement to a
+specific network interface. Without it, hap-nodejs advertises on all interfaces,
+which in Kubernetes with `hostNetwork: true` can cause mDNS to advertise a
+cluster-internal IP (e.g., `cni0`) instead of the LAN IP. Set `bind` to the
+host's LAN interface name (e.g., `eno1`) so HomeKit clients can reach the bridge.
 
 ### MAC and PIN Generation
 

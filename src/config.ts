@@ -27,6 +27,7 @@ export interface BridgeConfig {
   mac: string;
   pincode: string;
   port: number;
+  bind?: string;
 }
 
 export interface MqttConfig {
@@ -105,12 +106,17 @@ export function validateConfig(data: unknown): Config {
     topics.add(device.topic);
   }
 
+  if (bridge.bind !== undefined && typeof bridge.bind !== "string") {
+    throw new Error("bridge.bind must be a string (interface name or IP)");
+  }
+
   return {
     bridge: {
       name: bridge.name,
-      mac: (bridge.mac).toUpperCase(),
+      mac: bridge.mac.toUpperCase(),
       pincode: bridge.pincode,
       port: bridge.port,
+      ...(typeof bridge.bind === "string" ? { bind: bridge.bind } : {}),
     },
     mqtt: {
       url: mqtt.url,
