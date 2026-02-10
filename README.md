@@ -84,6 +84,27 @@ devices:
 Neither `username` nor `pincode` are secrets. The MAC is broadcast via mDNS.
 The PIN is only used during initial pairing and is not reusable afterward.
 
+### MAC and PIN Generation
+
+The bridge MAC must be a locally-administered unicast address (bit 1 of the
+first octet set, bit 0 clear). The PIN is 8 random digits formatted as
+`XXX-XX-XXX` and must not be a HAP-excluded value (e.g., `000-00-000`,
+`111-11-111`, `123-45-678`).
+
+Generate both with:
+
+```sh
+python3 -c "import random; b=random.randbytes(6); print(f'MAC: {b[0]|2&~1:02X}:{b[1]:02X}:{b[2]:02X}:{b[3]:02X}:{b[4]:02X}:{b[5]:02X}'); d=[random.randint(0,9) for _ in range(8)]; print(f'PIN: {d[0]}{d[1]}{d[2]}-{d[3]}{d[4]}-{d[5]}{d[6]}{d[7]}')"
+```
+
+### Z2M Groups as Devices
+
+Hoboken can target Z2M groups by using the group's friendly name as the device
+topic. Commands are broadcast to all group members at the Zigbee level. Devices
+that don't support a given cluster silently ignore it, so capabilities should
+match the most capable member. This is preferable to homebridge-z2m's approach
+of intersecting capabilities.
+
 ## Development
 
 ### Prerequisites
