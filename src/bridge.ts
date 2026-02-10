@@ -45,7 +45,14 @@ export async function startBridge(
     }
   >();
 
+  console.log(
+    `Configuring bridge "${config.bridge.name}" with ${String(config.devices.length)} device(s)`,
+  );
+
   for (const device of config.devices) {
+    console.log(
+      `  Adding device "${device.name}" (topic: ${device.topic}, capabilities: ${device.capabilities.join(", ")})`,
+    );
     const accessory = createLightAccessory(device, publish, getState);
     bridge.addBridgedAccessory(accessory);
     accessoryMap.set(device.topic, { accessory, device });
@@ -58,11 +65,26 @@ export async function startBridge(
     }
   }
 
+  console.log(`Connecting to MQTT at ${config.mqtt.url}`);
+
   mqttClient.on("error", (err) => {
     console.error("MQTT error:", err.message);
   });
 
+  mqttClient.on("close", () => {
+    console.log("MQTT connection closed");
+  });
+
+  mqttClient.on("reconnect", () => {
+    console.log("MQTT reconnecting");
+  });
+
+  mqttClient.on("offline", () => {
+    console.log("MQTT client offline");
+  });
+
   mqttClient.on("connect", () => {
+    console.log("MQTT connected");
     const topics = config.devices.map(
       (d) => `${config.mqtt.topic_prefix}/${d.topic}`,
     );
@@ -91,12 +113,45 @@ export async function startBridge(
       return;
     }
 
+    // Verbose, but essential for diagnosing device/state issues during bring-up.
+    // Consider removing once the deployment is stable.
+    console.log(
+      `State update for "${entry.device.name}": ${JSON.stringify(state)}`,
+    );
+
     const existing = stateCache.get(deviceTopic);
     stateCache.set(deviceTopic, { ...existing, ...state });
 
     // Pass the partial update, not the merged state — updateAccessoryState
     // uses "key in state" checks to only push characteristics that changed.
     updateAccessoryState(entry.accessory, state, entry.device.capabilities);
+  });
+
+  bridge.on("identify", (paired, callback) => {
+    console.log(`Identify requested (paired=${String(paired)})`);
+    callback();
+  });
+
+  bridge.on("listening", (port, address) => {
+    console.log(`HAP server listening on ${address}:${String(port)}`);
+  });
+
+  bridge.on("advertised", () => {
+    console.log("mDNS advertisement active");
+  });
+
+  bridge.on("paired", () => {
+    console.log("Pairing complete");
+  });
+
+  bridge.on("unpaired", () => {
+    console.log("Accessory unpaired");
+  });
+
+  bridge.on("characteristic-warning", (warning) => {
+    console.warn(
+      `Characteristic warning [${warning.type}]: ${warning.message}`,
+    );
   });
 
   await bridge.publish({
@@ -106,6 +161,23 @@ export async function startBridge(
     port: config.bridge.port,
     category: Categories.BRIDGE,
   });
+
+  // _server is a private hap-nodejs API, but it's the only way to log
+  // connection-level events (pair-setup completion, disconnects) not exposed
+  // by the public Accessory API. Guarded by an if-check so a future library
+  // change that removes the property degrades gracefully (no logging, no crash).
+  const server = bridge._server;
+  if (server) {
+    server.on("pair", (username) => {
+      console.log(`Pair-setup finished for ${username}`);
+    });
+
+    server.on("connection-closed", (connection) => {
+      console.log(
+        `HAP connection closed from ${connection.remoteAddress}:${String(connection.remotePort)}`,
+      );
+    });
+  }
 
   return {
     bridge,

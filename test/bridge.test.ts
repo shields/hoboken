@@ -254,4 +254,93 @@ describe("startBridge", () => {
     const { shutdown } = await startBridge(testConfig());
     await shutdown();
   });
+
+  test("MQTT close event logs without crashing", async () => {
+    const { shutdown } = await startBridge(testConfig());
+    mockClient.emit("close");
+    await shutdown();
+  });
+
+  test("MQTT reconnect event logs without crashing", async () => {
+    const { shutdown } = await startBridge(testConfig());
+    mockClient.emit("reconnect");
+    await shutdown();
+  });
+
+  test("MQTT offline event logs without crashing", async () => {
+    const { shutdown } = await startBridge(testConfig());
+    mockClient.emit("offline");
+    await shutdown();
+  });
+
+  test("bridge identify event logs without crashing", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    let callbackCalled = false;
+    bridge.emit("identify", false, () => {
+      callbackCalled = true;
+    });
+    expect(callbackCalled).toBe(true);
+    await shutdown();
+  });
+
+  test("bridge listening event logs without crashing", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    bridge.emit("listening", 51826, "0.0.0.0");
+    await shutdown();
+  });
+
+  test("bridge advertised event logs without crashing", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    bridge.emit("advertised");
+    await shutdown();
+  });
+
+  test("bridge paired event logs without crashing", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    bridge.emit("paired");
+    await shutdown();
+  });
+
+  test("bridge unpaired event logs without crashing", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    bridge.emit("unpaired");
+    await shutdown();
+  });
+
+  test("bridge characteristic-warning event logs without crashing", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    const warning = {
+      characteristic: {},
+      type: "slow-write",
+      message: "test warning",
+      originatorChain: [],
+    };
+    bridge.emit("characteristic-warning", warning as never);
+    await shutdown();
+  });
+
+  test("HAP server pair event logs without crashing", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    const server = bridge._server;
+    expect(server).toBeDefined();
+    // Accessory's own pair handler calls the callback; our listener only logs.
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    server!.emit("pair", "AB:CD:EF:01:23:45", Buffer.from("key"), () => {});
+    await shutdown();
+  });
+
+  test("HAP server connection-closed event logs without crashing", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    const server = bridge._server;
+    expect(server).toBeDefined();
+    const fakeConnection = {
+      remoteAddress: "192.168.1.100",
+      remotePort: 54321,
+      getRegisteredEvents: () => [],
+      clearRegisteredEvents: () => undefined,
+      close: () => undefined,
+    };
+    server!.emit("connection-closed", fakeConnection as never);
+    await shutdown();
+  });
 });
