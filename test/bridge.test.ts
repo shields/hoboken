@@ -1,9 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   Characteristic,
   HAPStatus,
@@ -14,14 +14,13 @@ import type { Config } from "../src/config.ts";
 
 HAPStorage.setCustomStoragePath(mkdtempSync(join(tmpdir(), "hoboken-test-")));
 
-const pkgPath = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "package.json",
-);
-const pkgVersion = (
-  JSON.parse(readFileSync(pkgPath, "utf-8")) as { version: string }
-).version;
+const expectedVersion = execFileSync(
+  "git",
+  ["describe", "--always", "--dirty"],
+  {
+    encoding: "utf-8",
+  },
+).trim();
 
 class MockMqttClient extends EventEmitter {
   connected = false;
@@ -106,7 +105,7 @@ describe("startBridge", () => {
       "0E:42:A1:B2:C3:D4",
     );
     expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
-      pkgVersion,
+      expectedVersion,
     );
     await shutdown();
   });
@@ -127,7 +126,7 @@ describe("startBridge", () => {
       "living_room",
     );
     expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
-      pkgVersion,
+      expectedVersion,
     );
     await shutdown();
   });
@@ -146,7 +145,7 @@ describe("startBridge", () => {
       "living_room:scene:1",
     );
     expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
-      pkgVersion,
+      expectedVersion,
     );
     await shutdown();
   });

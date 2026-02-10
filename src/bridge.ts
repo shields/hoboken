@@ -8,7 +8,8 @@ import {
   uuid,
 } from "@homebridge/hap-nodejs";
 import type { Server } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { connect } from "mqtt";
 import { Registry } from "prom-client";
 import type { Config } from "./config.ts";
@@ -89,16 +90,20 @@ export async function startBridge(
 
   const getState = (topic: string) => stateCache.get(topic);
 
-  let version = "0.0.0";
+  let version = "unknown";
   try {
-    const data = JSON.parse(
-      await readFile(new URL("../package.json", import.meta.url), "utf-8"),
-    ) as { version?: string };
-    if (data.version) {
-      version = data.version;
-    }
+    version = readFileSync(
+      new URL("../VERSION", import.meta.url),
+      "utf-8",
+    ).trim();
   } catch {
-    // package.json may not be present in all deployment layouts
+    try {
+      version = execFileSync("git", ["describe", "--always", "--dirty"], {
+        encoding: "utf-8",
+      }).trim();
+    } catch {
+      // Neither VERSION file nor git available
+    }
   }
 
   const bridge = new Bridge(
