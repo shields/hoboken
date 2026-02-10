@@ -34,6 +34,8 @@ class MockMqttClient extends EventEmitter {
   }
 }
 
+// Each startBridge() call invokes connect(), creating a fresh MockMqttClient.
+// No state leaks between tests.
 let mockClient: MockMqttClient;
 
 mock.module("mqtt", () => ({
@@ -219,6 +221,31 @@ describe("startBridge", () => {
     on.setValue(true);
     // HAP-nodejs catches the HapStatusError and stores it as statusCode
     expect(on.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+
+    await shutdown();
+  });
+
+  test("HomeKit get returns cached MQTT state", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    // emit is synchronous; the message handler updates the state cache inline.
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/living_room",
+      Buffer.from(JSON.stringify({ state: "ON" })),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Living Room",
+    )!;
+    const on = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.On);
+
+    const value = await on.handleGetRequest();
+    expect(value).toBe(true);
 
     await shutdown();
   });

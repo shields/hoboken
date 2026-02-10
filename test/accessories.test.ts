@@ -253,7 +253,7 @@ describe("createSceneAccessory", () => {
     expect(publish).toHaveBeenCalledWith("test_light/set", { scene_recall: 1 });
   });
 
-  test("onGet always returns false", () => {
+  test("onGet always returns false", async () => {
     const publish = mock<PublishFn>();
     const device = makeDevice();
     const scene = { name: "Movie Mode", id: 1 };
@@ -262,8 +262,8 @@ describe("createSceneAccessory", () => {
       .getService(Service.Switch)!
       .getCharacteristic(Characteristic.On);
 
-    // The onGet handler always returns false (momentary switch)
-    expect(on.value).toBe(false);
+    const value = await on.handleGetRequest();
+    expect(value).toBe(false);
   });
 
   test("auto-resets to off after timeout", () => {
