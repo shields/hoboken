@@ -7,6 +7,7 @@ import {
 } from "@homebridge/hap-nodejs";
 import { connect } from "mqtt";
 import type { Config } from "./config.ts";
+import * as log from "./log.ts";
 import {
   createLightAccessory,
   createSceneAccessory,
@@ -18,7 +19,39 @@ export async function startBridge(
   config: Config,
 ): Promise<{ bridge: Bridge; shutdown: () => Promise<void> }> {
   const stateCache = new Map<string, Z2MState>();
+
+  let sanitizedUrl: string;
+  try {
+    const parsed = new URL(config.mqtt.url);
+    parsed.password = "";
+    parsed.username = "";
+    sanitizedUrl = parsed.href;
+  } catch {
+    // Strip userinfo (user:pass@) via regex for URLs that new URL() can't parse
+    // but mqtt.connect() accepts (e.g. bare hostnames).
+    sanitizedUrl = config.mqtt.url.replace(/\/\/[^@/]*@/, "//");
+  }
+  log.log(`Connecting to MQTT at ${sanitizedUrl}`);
+
+  // mqtt.connect() is more lenient than new URL() — it handles bare hostnames,
+  // missing protocols, etc. — so an unparseable URL here is not an error.
   const mqttClient = connect(config.mqtt.url);
+
+  mqttClient.on("error", (err) => {
+    log.error(`MQTT error: ${err.message}`);
+  });
+
+  mqttClient.on("close", () => {
+    log.log("MQTT connection closed");
+  });
+
+  mqttClient.on("reconnect", () => {
+    log.log("MQTT reconnecting");
+  });
+
+  mqttClient.on("offline", () => {
+    log.log("MQTT client offline");
+  });
 
   const publish: PublishFn = (topic, payload) => {
     if (!mqttClient.connected) {
@@ -45,12 +78,12 @@ export async function startBridge(
     }
   >();
 
-  console.log(
+  log.log(
     `Configuring bridge "${config.bridge.name}" with ${String(config.devices.length)} device(s)`,
   );
 
   for (const device of config.devices) {
-    console.log(
+    log.log(
       `  Adding device "${device.name}" (topic: ${device.topic}, capabilities: ${device.capabilities.join(", ")})`,
     );
     const accessory = createLightAccessory(device, publish, getState);
@@ -65,26 +98,8 @@ export async function startBridge(
     }
   }
 
-  console.log(`Connecting to MQTT at ${config.mqtt.url}`);
-
-  mqttClient.on("error", (err) => {
-    console.error("MQTT error:", err.message);
-  });
-
-  mqttClient.on("close", () => {
-    console.log("MQTT connection closed");
-  });
-
-  mqttClient.on("reconnect", () => {
-    console.log("MQTT reconnecting");
-  });
-
-  mqttClient.on("offline", () => {
-    console.log("MQTT client offline");
-  });
-
   mqttClient.on("connect", () => {
-    console.log("MQTT connected");
+    log.log("MQTT connected");
     const topics = config.devices.map(
       (d) => `${config.mqtt.topic_prefix}/${d.topic}`,
     );
@@ -113,9 +128,10 @@ export async function startBridge(
       return;
     }
 
-    // Verbose, but essential for diagnosing device/state issues during bring-up.
-    // Consider removing once the deployment is stable.
-    console.log(
+    // Intentionally verbose — essential for diagnosing device/state issues
+    // during bring-up. Device count is small (single household), so volume
+    // is manageable. Remove once the deployment is stable.
+    log.log(
       `State update for "${entry.device.name}": ${JSON.stringify(state)}`,
     );
 
@@ -128,30 +144,28 @@ export async function startBridge(
   });
 
   bridge.on("identify", (paired, callback) => {
-    console.log(`Identify requested (paired=${String(paired)})`);
+    log.log(`Identify requested (paired=${String(paired)})`);
     callback();
   });
 
   bridge.on("listening", (port, address) => {
-    console.log(`HAP server listening on ${address}:${String(port)}`);
+    log.log(`HAP server listening on ${address}:${String(port)}`);
   });
 
   bridge.on("advertised", () => {
-    console.log("mDNS advertisement active");
+    log.log("mDNS advertisement active");
   });
 
   bridge.on("paired", () => {
-    console.log("Pairing complete");
+    log.log("Pairing complete");
   });
 
   bridge.on("unpaired", () => {
-    console.log("Accessory unpaired");
+    log.log("Accessory unpaired");
   });
 
   bridge.on("characteristic-warning", (warning) => {
-    console.warn(
-      `Characteristic warning [${warning.type}]: ${warning.message}`,
-    );
+    log.warn(`Characteristic warning [${warning.type}]: ${warning.message}`);
   });
 
   await bridge.publish({
@@ -170,11 +184,11 @@ export async function startBridge(
   const server = bridge._server;
   if (server) {
     server.on("pair", (username) => {
-      console.log(`Pair-setup finished for ${username}`);
+      log.log(`Pair-setup finished for ${username}`);
     });
 
     server.on("connection-closed", (connection) => {
-      console.log(
+      log.log(
         `HAP connection closed from ${connection.remoteAddress}:${String(connection.remotePort)}`,
       );
     });

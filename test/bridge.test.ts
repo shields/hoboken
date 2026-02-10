@@ -329,6 +329,13 @@ describe("startBridge", () => {
     await shutdown();
   });
 
+  test("unparseable MQTT URL logs fallback without crashing", async () => {
+    const cfg = testConfig();
+    cfg.mqtt.url = "not a valid url";
+    const { shutdown } = await startBridge(cfg);
+    await shutdown();
+  });
+
   test("HAP server connection-closed event logs without crashing", async () => {
     const { bridge, shutdown } = await startBridge(testConfig());
     const server = bridge._server;
