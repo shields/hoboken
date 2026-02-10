@@ -1,0 +1,7 @@
+.git
+node_modules
+test
+k8s
+.github
+.claude
+.playwright-mcp
