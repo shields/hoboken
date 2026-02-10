@@ -6,6 +6,9 @@ Home for HomePod voice commands.
 Built with [`@homebridge/hap-nodejs`](https://github.com/homebridge/HAP-NodeJS)
 directly — no Homebridge or Matterbridge framework.
 
+It's called "Hoboken" because that has some of the same letters as
+"HomeKit Bridge".
+
 ## Why
 
 Matterbridge and Homebridge are too complex to troubleshoot. Hoboken does one
