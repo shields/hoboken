@@ -28,6 +28,7 @@ Apple Home ↔ HomeKit (HAP) ↔ Hoboken ↔ MQTT ↔ Zigbee2MQTT ↔ Zigbee dev
 | `src/convert.ts`     | Value conversion (Z2M ↔ HomeKit)      |
 | `src/accessories.ts` | Create HAP accessories and scenes     |
 | `src/bridge.ts`      | MQTT client, bridge wiring, lifecycle |
+| `src/metrics.ts`     | Prometheus metrics and HTTP server    |
 | `src/main.ts`        | Entry point                           |
 
 Modules are split for testability. Each has clear inputs/outputs and minimal
@@ -58,6 +59,22 @@ publishes `{"scene_recall": <id>}` to Z2M. The switch auto-resets to off after
 - **MQTT reconnect**: re-subscribes and refreshes state automatically
 - **Config changes**: restart the container (no hot reload)
 
+### Metrics
+
+Opt-in Prometheus metrics via `prom-client`. Add a `metrics` section to
+`config.yaml` with a `port` to enable.
+
+| Metric                                  | Type    | Labels   |
+| --------------------------------------- | ------- | -------- |
+| `hoboken_mqtt_connected`                | Gauge   |          |
+| `hoboken_mqtt_messages_received_total`  | Counter | `device` |
+| `hoboken_mqtt_messages_published_total` | Counter |          |
+| `hoboken_mqtt_errors_total`             | Counter |          |
+| `hoboken_devices_configured`            | Gauge   |          |
+
+Default Node.js process metrics (CPU, memory, event loop lag) are also included.
+The `k8s/deployment.yaml` includes Prometheus scrape annotations.
+
 ## Config
 
 ```yaml
@@ -71,6 +88,10 @@ bridge:
 mqtt:
   url: "mqtt://mosquitto:1883"
   topic_prefix: "zigbee2mqtt"
+
+# metrics:
+#   port: 9090
+#   bind: "127.0.0.1" # optional: defaults to 0.0.0.0
 
 devices:
   - name: "Living Room Light"

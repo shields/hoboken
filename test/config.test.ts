@@ -260,6 +260,74 @@ describe("validateConfig", () => {
       'duplicate device topic "living_room_light"',
     );
   });
+
+  test("accepts config without metrics", () => {
+    const config = validateConfig(validConfig());
+    expect(config.metrics).toBeUndefined();
+  });
+
+  test("accepts valid metrics config", () => {
+    const data = validConfig();
+    (data as Record<string, unknown>).metrics = { port: 9090 };
+    const config = validateConfig(data);
+    expect(config.metrics).toEqual({ port: 9090 });
+  });
+
+  test("rejects non-object metrics", () => {
+    const data = validConfig();
+    (data as Record<string, unknown>).metrics = "not an object";
+    expect(() => validateConfig(data)).toThrow("metrics must be an object");
+  });
+
+  test("rejects metrics with non-integer port", () => {
+    const data = validConfig();
+    (data as Record<string, unknown>).metrics = { port: 1.5 };
+    expect(() => validateConfig(data)).toThrow(
+      "metrics.port must be an integer between 1 and 65535",
+    );
+  });
+
+  test("rejects metrics with port 0", () => {
+    const data = validConfig();
+    (data as Record<string, unknown>).metrics = { port: 0 };
+    expect(() => validateConfig(data)).toThrow(
+      "metrics.port must be an integer between 1 and 65535",
+    );
+  });
+
+  test("rejects metrics with port above 65535", () => {
+    const data = validConfig();
+    (data as Record<string, unknown>).metrics = { port: 70000 };
+    expect(() => validateConfig(data)).toThrow(
+      "metrics.port must be an integer between 1 and 65535",
+    );
+  });
+
+  test("rejects metrics with missing port", () => {
+    const data = validConfig();
+    (data as Record<string, unknown>).metrics = {};
+    expect(() => validateConfig(data)).toThrow(
+      "metrics.port must be an integer between 1 and 65535",
+    );
+  });
+
+  test("accepts metrics with bind address", () => {
+    const data = validConfig();
+    (data as Record<string, unknown>).metrics = {
+      port: 9090,
+      bind: "127.0.0.1",
+    };
+    const config = validateConfig(data);
+    expect(config.metrics).toEqual({ port: 9090, bind: "127.0.0.1" });
+  });
+
+  test("rejects non-string metrics bind", () => {
+    const data = validConfig();
+    (data as Record<string, unknown>).metrics = { port: 9090, bind: 123 };
+    expect(() => validateConfig(data)).toThrow(
+      "metrics.bind must be a string (IP address or hostname)",
+    );
+  });
 });
 
 describe("loadConfig", () => {

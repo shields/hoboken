@@ -8,6 +8,10 @@ mqtt:
   url: "mqtt://mosquitto:1883"
   topic_prefix: "zigbee2mqtt"
 
+# metrics:
+#   port: 9090
+#   bind: "127.0.0.1" # optional: defaults to 0.0.0.0
+
 devices:
   - name: "Living Room Light"
     topic: "living_room_light"

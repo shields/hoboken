@@ -13,6 +13,11 @@ spec:
     metadata:
       labels:
         app: hoboken
+      # Uncomment when metrics are enabled in config.yaml:
+      # annotations:
+      #   prometheus.io/scrape: "true"
+      #   prometheus.io/port: "9090"
+      #   prometheus.io/path: "/metrics"
     spec:
       hostNetwork: true
       containers:

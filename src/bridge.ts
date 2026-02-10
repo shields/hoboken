@@ -7,8 +7,10 @@ import {
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
+import type { Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { connect } from "mqtt";
+import { Registry } from "prom-client";
 import type { Config } from "./config.ts";
 import * as log from "./log.ts";
 import {
@@ -17,11 +19,26 @@ import {
   updateAccessoryState,
 } from "./accessories.ts";
 import type { PublishFn, Z2MState } from "./accessories.ts";
+import { createMetrics, startMetricsServer } from "./metrics.ts";
+import type { Metrics } from "./metrics.ts";
 
 export async function startBridge(
   config: Config,
 ): Promise<{ bridge: Bridge; shutdown: () => Promise<void> }> {
   const stateCache = new Map<string, Z2MState>();
+
+  let metrics: Metrics | undefined;
+  let metricsServer: Server | undefined;
+  let metricsRegister: Registry | undefined;
+  if (config.metrics) {
+    metricsRegister = new Registry();
+    metrics = createMetrics(metricsRegister);
+    metricsServer = startMetricsServer(
+      config.metrics.port,
+      metricsRegister,
+      config.metrics.bind,
+    );
+  }
 
   let sanitizedUrl: string;
   try {
@@ -42,10 +59,12 @@ export async function startBridge(
 
   mqttClient.on("error", (err) => {
     log.error(`MQTT error: ${err.message}`);
+    metrics?.mqttErrors.inc();
   });
 
   mqttClient.on("close", () => {
     log.log("MQTT connection closed");
+    metrics?.mqttConnected.set(0);
   });
 
   mqttClient.on("reconnect", () => {
@@ -54,6 +73,7 @@ export async function startBridge(
 
   mqttClient.on("offline", () => {
     log.log("MQTT client offline");
+    metrics?.mqttConnected.set(0);
   });
 
   const publish: PublishFn = (topic, payload) => {
@@ -64,6 +84,7 @@ export async function startBridge(
       `${config.mqtt.topic_prefix}/${topic}`,
       JSON.stringify(payload),
     );
+    metrics?.mqttMessagesPublished.inc();
   };
 
   const getState = (topic: string) => stateCache.get(topic);
@@ -129,8 +150,11 @@ export async function startBridge(
     }
   }
 
+  metrics?.devicesConfigured.set(config.devices.length);
+
   mqttClient.on("connect", () => {
     log.log("MQTT connected");
+    metrics?.mqttConnected.set(1);
     const topics = config.devices.map(
       (d) => `${config.mqtt.topic_prefix}/${d.topic}`,
     );
@@ -151,6 +175,8 @@ export async function startBridge(
     const deviceTopic = topic.slice(prefix.length);
     const entry = accessoryMap.get(deviceTopic);
     if (!entry) return;
+
+    metrics?.mqttMessagesReceived.labels(deviceTopic).inc();
 
     let state: Z2MState;
     try {
@@ -234,6 +260,15 @@ export async function startBridge(
           resolve();
         });
       });
+      if (metricsServer) {
+        await new Promise<void>((resolve, reject) => {
+          metricsServer.close((err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+      }
+      metrics?.dispose();
     },
   };
 }

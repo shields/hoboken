@@ -35,10 +35,16 @@ export interface MqttConfig {
   topic_prefix: string;
 }
 
+export interface MetricsConfig {
+  port: number;
+  bind?: string;
+}
+
 export interface Config {
   bridge: BridgeConfig;
   mqtt: MqttConfig;
   devices: DeviceConfig[];
+  metrics?: MetricsConfig;
 }
 
 const MAC_RE = /^[\dA-Fa-f]{2}(:[\dA-Fa-f]{2}){5}$/;
@@ -110,6 +116,29 @@ export function validateConfig(data: unknown): Config {
     throw new Error("bridge.bind must be a string (interface name or IP)");
   }
 
+  let metrics: MetricsConfig | undefined;
+  if (obj.metrics !== undefined) {
+    if (typeof obj.metrics !== "object" || obj.metrics === null) {
+      throw new Error("metrics must be an object");
+    }
+    const m = obj.metrics as Record<string, unknown>;
+    if (
+      typeof m.port !== "number" ||
+      !Number.isInteger(m.port) ||
+      m.port < 1 ||
+      m.port > 65535
+    ) {
+      throw new Error("metrics.port must be an integer between 1 and 65535");
+    }
+    if (m.bind !== undefined && typeof m.bind !== "string") {
+      throw new Error("metrics.bind must be a string (IP address or hostname)");
+    }
+    metrics = {
+      port: m.port,
+      ...(typeof m.bind === "string" ? { bind: m.bind } : {}),
+    };
+  }
+
   return {
     bridge: {
       name: bridge.name,
@@ -123,6 +152,7 @@ export function validateConfig(data: unknown): Config {
       topic_prefix: mqtt.topic_prefix,
     },
     devices,
+    ...(metrics ? { metrics } : {}),
   };
 }
 
