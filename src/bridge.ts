@@ -1,10 +1,13 @@
 import {
   Bridge,
   Categories,
+  Characteristic,
   HAPStatus,
   HapStatusError,
+  Service,
   uuid,
 } from "@homebridge/hap-nodejs";
+import { readFile } from "node:fs/promises";
 import { connect } from "mqtt";
 import type { Config } from "./config.ts";
 import * as log from "./log.ts";
@@ -65,9 +68,29 @@ export async function startBridge(
 
   const getState = (topic: string) => stateCache.get(topic);
 
+  let version = "0.0.0";
+  try {
+    const data = JSON.parse(
+      await readFile(new URL("../package.json", import.meta.url), "utf-8"),
+    ) as { version?: string };
+    if (data.version) {
+      version = data.version;
+    }
+  } catch {
+    // package.json may not be present in all deployment layouts
+  }
+
   const bridge = new Bridge(
     config.bridge.name,
     uuid.generate(config.bridge.mac),
+  );
+
+  setAccessoryInfo(
+    bridge,
+    "Hoboken",
+    "MQTT Bridge",
+    config.bridge.mac,
+    version,
   );
 
   const accessoryMap = new Map<
@@ -87,12 +110,20 @@ export async function startBridge(
       `  Adding device "${device.name}" (topic: ${device.topic}, capabilities: ${device.capabilities.join(", ")})`,
     );
     const accessory = createLightAccessory(device, publish, getState);
+    setAccessoryInfo(accessory, "Hoboken", device.topic, device.topic, version);
     bridge.addBridgedAccessory(accessory);
     accessoryMap.set(device.topic, { accessory, device });
 
     if (device.scenes) {
       for (const scene of device.scenes) {
         const sceneAccessory = createSceneAccessory(device, scene, publish);
+        setAccessoryInfo(
+          sceneAccessory,
+          "Hoboken",
+          "Scene",
+          `${device.topic}:scene:${String(scene.id)}`,
+          version,
+        );
         bridge.addBridgedAccessory(sceneAccessory);
       }
     }
@@ -205,4 +236,21 @@ export async function startBridge(
       });
     },
   };
+}
+
+function setAccessoryInfo(
+  accessory: { getService: typeof Bridge.prototype.getService },
+  manufacturer: string,
+  model: string,
+  serialNumber: string,
+  firmwareRevision: string,
+): void {
+  const info = accessory.getService(Service.AccessoryInformation);
+  if (info) {
+    info
+      .setCharacteristic(Characteristic.Manufacturer, manufacturer)
+      .setCharacteristic(Characteristic.Model, model)
+      .setCharacteristic(Characteristic.SerialNumber, serialNumber)
+      .setCharacteristic(Characteristic.FirmwareRevision, firmwareRevision);
+  }
 }

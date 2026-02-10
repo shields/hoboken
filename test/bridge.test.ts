@@ -1,8 +1,9 @@
 import { describe, expect, mock, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   Characteristic,
   HAPStatus,
@@ -12,6 +13,15 @@ import {
 import type { Config } from "../src/config.ts";
 
 HAPStorage.setCustomStoragePath(mkdtempSync(join(tmpdir(), "hoboken-test-")));
+
+const pkgPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "package.json",
+);
+const pkgVersion = (
+  JSON.parse(readFileSync(pkgPath, "utf-8")) as { version: string }
+).version;
 
 class MockMqttClient extends EventEmitter {
   connected = false;
@@ -79,6 +89,65 @@ describe("startBridge", () => {
   test("creates bridge and connects MQTT", async () => {
     const { shutdown } = await startBridge(testConfig());
     expect(mockClient).toBeDefined();
+    await shutdown();
+  });
+
+  test("sets AccessoryInformation on the bridge", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    const info = bridge.getService(Service.AccessoryInformation);
+    expect(info).toBeDefined();
+    expect(info?.getCharacteristic(Characteristic.Manufacturer).value).toBe(
+      "Hoboken",
+    );
+    expect(info?.getCharacteristic(Characteristic.Model).value).toBe(
+      "MQTT Bridge",
+    );
+    expect(info?.getCharacteristic(Characteristic.SerialNumber).value).toBe(
+      "0E:42:A1:B2:C3:D4",
+    );
+    expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
+      pkgVersion,
+    );
+    await shutdown();
+  });
+
+  test("sets AccessoryInformation on light accessories", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Living Room",
+    );
+    const info = accessory?.getService(Service.AccessoryInformation);
+    expect(info?.getCharacteristic(Characteristic.Manufacturer).value).toBe(
+      "Hoboken",
+    );
+    expect(info?.getCharacteristic(Characteristic.Model).value).toBe(
+      "living_room",
+    );
+    expect(info?.getCharacteristic(Characteristic.SerialNumber).value).toBe(
+      "living_room",
+    );
+    expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
+      pkgVersion,
+    );
+    await shutdown();
+  });
+
+  test("sets AccessoryInformation on scene accessories", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Movie Mode",
+    );
+    const info = accessory?.getService(Service.AccessoryInformation);
+    expect(info?.getCharacteristic(Characteristic.Manufacturer).value).toBe(
+      "Hoboken",
+    );
+    expect(info?.getCharacteristic(Characteristic.Model).value).toBe("Scene");
+    expect(info?.getCharacteristic(Characteristic.SerialNumber).value).toBe(
+      "living_room:scene:1",
+    );
+    expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
+      pkgVersion,
+    );
     await shutdown();
   });
 
