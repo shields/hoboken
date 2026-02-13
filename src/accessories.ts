@@ -6,7 +6,11 @@ import {
   uuid,
 } from "@homebridge/hap-nodejs";
 import type { Capability, DeviceConfig, SceneConfig } from "./config.ts";
-import { homeKitBrightnessToZ2M, z2mBrightnessToHomeKit } from "./convert.ts";
+import {
+  clampColorTemp,
+  homeKitBrightnessToZ2M,
+  z2mBrightnessToHomeKit,
+} from "./convert.ts";
 
 export type Z2MState = Record<string, unknown>;
 export type PublishFn = (
@@ -95,9 +99,12 @@ export function updateAccessoryState(
   }
 
   if (capabilities.includes("color_temp") && "color_temp" in state) {
+    // Z2M devices can report color_temp values outside the HAP-valid range
+    // (140–500 mireds). Without clamping, hap-nodejs logs characteristic
+    // warnings and HomeKit may reject the value.
     service
       .getCharacteristic(Characteristic.ColorTemperature)
-      .updateValue(state.color_temp as number);
+      .updateValue(clampColorTemp(state.color_temp as number));
   }
 
   if (capabilities.includes("color_hs") && "color" in state) {
@@ -162,7 +169,9 @@ function addColorTempCharacteristic(
 
   ct.onGet(() => {
     const state = getState(topic);
-    return (state?.color_temp as number | undefined) ?? 140;
+    // Clamp to HAP-valid range (140–500 mireds) — Z2M devices may report
+    // out-of-range values that cause characteristic warnings.
+    return clampColorTemp((state?.color_temp as number | undefined) ?? 140);
   });
 
   ct.onSet((value) => {

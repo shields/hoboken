@@ -130,6 +130,20 @@ describe("createLightAccessory", () => {
     expect(value).toBe(350);
   });
 
+  test("onGet color_temp clamps out-of-range cached value", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const ct = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.ColorTemperature);
+
+    stateMap.set("test_light", { color_temp: 50 });
+    expect(await ct.handleGetRequest()).toBe(140);
+
+    stateMap.set("test_light", { color_temp: 600 });
+    expect(await ct.handleGetRequest()).toBe(500);
+  });
+
   test("onGet color_temp returns 140 when no state cached", async () => {
     const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
     const accessory = createLightAccessory(device, publish, getState);
@@ -350,6 +364,26 @@ describe("updateAccessoryState", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.ColorTemperature);
     expect(ct.value).toBe(350);
+  });
+
+  test("clamps out-of-range color_temp to HAP limits", () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const ct = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.ColorTemperature);
+
+    updateAccessoryState(accessory, { color_temp: 50 }, [
+      "on_off",
+      "color_temp",
+    ]);
+    expect(ct.value).toBe(140);
+
+    updateAccessoryState(accessory, { color_temp: 600 }, [
+      "on_off",
+      "color_temp",
+    ]);
+    expect(ct.value).toBe(500);
   });
 
   test("updates hue and saturation", () => {

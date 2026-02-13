@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  clampColorTemp,
   homeKitBrightnessToZ2M,
   z2mBrightnessToHomeKit,
 } from "../src/convert.ts";
@@ -57,6 +58,25 @@ describe("homeKitBrightnessToZ2M", () => {
     expect(() => homeKitBrightnessToZ2M(NaN)).toThrow(
       "brightness must be a number",
     );
+  });
+});
+
+describe("clampColorTemp", () => {
+  test("passes through values in range", () => {
+    expect(clampColorTemp(140)).toBe(140);
+    expect(clampColorTemp(300)).toBe(300);
+    expect(clampColorTemp(500)).toBe(500);
+  });
+
+  test("clamps values below 140", () => {
+    expect(clampColorTemp(0)).toBe(140);
+    expect(clampColorTemp(100)).toBe(140);
+    expect(clampColorTemp(139)).toBe(140);
+  });
+
+  test("clamps values above 500", () => {
+    expect(clampColorTemp(501)).toBe(500);
+    expect(clampColorTemp(1000)).toBe(500);
   });
 });
 
