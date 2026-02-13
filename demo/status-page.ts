@@ -20,7 +20,12 @@ const data: StatusData = {
         { name: "Movie Mode", id: 1 },
         { name: "Relax", id: 2 },
       ],
-      state: { state: "ON", brightness: 200, color_temp: 370 },
+      state: {
+        state: "ON",
+        brightness: 200,
+        color_temp: 370,
+        last_seen: new Date(Date.now() - 47 * 60_000).toISOString(),
+      },
     },
     {
       name: "Bedroom",

@@ -544,6 +544,161 @@ describe("status page (GET /)", () => {
     expect(body).toContain('class="swatch"');
   });
 
+  test("last_seen annotation shows time ago", async () => {
+    const register = new Registry();
+    const recent = new Date(Date.now() - 3 * 60_000).toISOString();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            state: { last_seen: recent },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("\u2192 3m ago");
+  });
+
+  test("last_seen annotation with hours", async () => {
+    const register = new Registry();
+    const hoursAgo = new Date(
+      Date.now() - (2 * 3600_000 + 15 * 60_000),
+    ).toISOString();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            state: { last_seen: hoursAgo },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("\u2192 2h 15m ago");
+  });
+
+  test("last_seen annotation with exact hours", async () => {
+    const register = new Registry();
+    const exactHours = new Date(Date.now() - 5 * 3600_000).toISOString();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            state: { last_seen: exactHours },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("\u2192 5h ago");
+    expect(body).not.toContain("5h 0m");
+  });
+
+  test("last_seen annotation with days", async () => {
+    const register = new Registry();
+    const daysAgo = new Date(
+      Date.now() - (3 * 86400_000 + 7 * 3600_000),
+    ).toISOString();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            state: { last_seen: daysAgo },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("\u2192 3d 7h ago");
+  });
+
+  test("last_seen annotation with exact days", async () => {
+    const register = new Registry();
+    const exactDays = new Date(Date.now() - 2 * 86400_000).toISOString();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            state: { last_seen: exactDays },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("\u2192 2d ago");
+    expect(body).not.toContain("2d 0h");
+  });
+
+  test("last_seen annotation ignores invalid dates", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            state: { last_seen: "not-a-date" },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).not.toContain("ago");
+  });
+
   test("no annotations for unrecognized keys", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>

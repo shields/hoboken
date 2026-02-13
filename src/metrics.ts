@@ -203,7 +203,31 @@ function formatHint(
     if (typeof h !== "number" || typeof s !== "number") return "";
     return `<span class="swatch" style="background:hsl(${String(h)},${String(s)}%,50%)"></span>`;
   }
+  if (key === "last_seen" && typeof value === "string") {
+    const ms = Date.now() - new Date(value).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    return `<span class="hint">\u2192 ${formatDuration(ms)} ago</span>`;
+  }
   return "";
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${String(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${String(minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return remainingMinutes > 0
+      ? `${String(hours)}h ${String(remainingMinutes)}m`
+      : `${String(hours)}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0
+    ? `${String(days)}d ${String(remainingHours)}h`
+    : `${String(days)}d`;
 }
 
 function renderConnectionsList(connections: HapConnection[]): string {
