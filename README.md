@@ -75,6 +75,21 @@ Opt-in Prometheus metrics via `prom-client`. Add a `metrics` section to
 Default Node.js process metrics (CPU, memory, event loop lag) are also included.
 The `k8s/deployment.yaml` includes Prometheus scrape annotations.
 
+#### Status Page
+
+When metrics are enabled, `GET /` serves an HTML status page showing:
+
+- Bridge name and version
+- MQTT connection status and active HAP connection count
+- Each device with its topic, capabilities, scenes, and current state
+
+This is useful for quick diagnostics without checking logs or Prometheus. To
+preview the status page with sample data:
+
+```sh
+bun run demo:status
+```
+
 ## Config
 
 ```yaml

@@ -77,7 +77,7 @@ mock.module("mqtt", () => ({
   },
 }));
 
-const { startBridge } = await import("../src/bridge.ts");
+const { startBridge, buildStatusData } = await import("../src/bridge.ts");
 
 function testConfig(): Config {
   return {
@@ -458,12 +458,34 @@ describe("startBridge with metrics", () => {
 
   test("metrics server serves /metrics endpoint", async () => {
     const cfg = metricsConfig();
-    const { shutdown } = await startBridge(cfg);
+    const { metricsPort, shutdown } = await startBridge(cfg);
+    expect(metricsPort).toBeGreaterThan(0);
 
-    // The metrics server uses port 0 (random), so we need to find it.
-    // We'll query the metrics endpoint indirectly by checking the registry
-    // via the bridge's behavior. Since we can't easily get the port,
-    // we verify metrics update correctly via MQTT events instead.
+    const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("hoboken_mqtt_connected");
+    await shutdown();
+  });
+
+  test("status page reflects bridge state", async () => {
+    const cfg = metricsConfig();
+    const { metricsPort, shutdown } = await startBridge(cfg);
+
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    // Simulate a state update
+    const payload = Buffer.from(JSON.stringify({ state: "ON" }));
+    mockClient.emit("message", "zigbee2mqtt/living_room", payload);
+
+    const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/html");
+
+    const body = await res.text();
+    expect(body).toContain("Test Bridge");
+    expect(body).toContain("Living Room");
+    expect(body).toContain("mqtt://localhost:1883");
     await shutdown();
   });
 
@@ -597,5 +619,52 @@ describe("startBridge with metrics", () => {
     conn.emit("authenticated", "AB:CD:EF:01:23:45");
 
     await shutdown();
+  });
+});
+
+describe("buildStatusData", () => {
+  test("returns status snapshot with cached state", () => {
+    const cfg = testConfig();
+    const stateCache = new Map<string, Record<string, unknown>>([
+      ["living_room", { state: "ON", brightness: 200 }],
+    ]);
+    const connections = [
+      { remoteAddress: "192.168.1.10", authenticated: true },
+      { remoteAddress: "192.168.1.20", authenticated: false },
+      { remoteAddress: "192.168.1.30", authenticated: true },
+    ];
+    const mqtt = { url: "mqtt://localhost:1883", connected: true };
+    const result = buildStatusData(
+      cfg,
+      stateCache,
+      mqtt,
+      connections,
+      "abc123",
+    );
+
+    expect(result.mqtt).toEqual(mqtt);
+    expect(result.hap.connections).toEqual(connections);
+    expect(result.bridge.name).toBe("Test Bridge");
+    expect(result.bridge.version).toBe("abc123");
+    expect(result.devices).toHaveLength(2);
+    expect(result.devices[0].name).toBe("Living Room");
+    expect(result.devices[0].topic).toBe("living_room");
+    expect(result.devices[0].capabilities).toEqual(["on_off", "brightness"]);
+    expect(result.devices[0].scenes).toEqual([{ name: "Movie Mode", id: 1 }]);
+    expect(result.devices[0].state).toEqual({ state: "ON", brightness: 200 });
+    expect(result.devices[1].name).toBe("Bedroom");
+    expect(result.devices[1].state).toBeNull();
+  });
+
+  test("returns null state for uncached devices", () => {
+    const cfg = testConfig();
+    const stateCache = new Map<string, Record<string, unknown>>();
+    const mqtt = { url: "mqtt://localhost:1883", connected: false };
+    const result = buildStatusData(cfg, stateCache, mqtt, [], "v1");
+
+    expect(result.mqtt).toEqual(mqtt);
+    for (const device of result.devices) {
+      expect(device.state).toBeNull();
+    }
   });
 });

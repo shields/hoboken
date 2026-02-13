@@ -1,7 +1,7 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { Registry } from "prom-client";
 import { createMetrics, startMetricsServer } from "../src/metrics.ts";
-import type { MetricsServer } from "../src/metrics.ts";
+import type { GetStatusFn, MetricsServer, StatusData } from "../src/metrics.ts";
 import type { Server } from "node:http";
 
 function addr(server: Server): number {
@@ -238,5 +238,349 @@ describe("startMetricsServer", () => {
     const after = await fetch(`http://127.0.0.1:${String(port)}/readyz`);
     expect(after.status).toBe(200);
     expect(await after.text()).toBe("ok");
+  });
+});
+
+function makeStatus(overrides?: Partial<StatusData>): StatusData {
+  return {
+    mqtt: { url: "mqtt://localhost:1883", connected: true },
+    hap: {
+      connections: [
+        { remoteAddress: "192.168.1.10", authenticated: true },
+        { remoteAddress: "192.168.1.20", authenticated: false },
+      ],
+    },
+    bridge: { name: "Test Bridge", version: "1.0.0" },
+    devices: [
+      {
+        name: "Desk Lamp",
+        topic: "desk_lamp",
+        capabilities: ["on_off", "brightness"],
+        state: { state: "ON", brightness: 200 },
+      },
+    ],
+    ...overrides,
+  };
+}
+
+describe("status page (GET /)", () => {
+  let ms: MetricsServer | undefined;
+
+  afterEach(async () => {
+    if (ms) {
+      await new Promise<void>((resolve, reject) => {
+        ms!.server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      ms = undefined;
+    }
+  });
+
+  test("returns HTML status page", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const res = await fetch(`http://127.0.0.1:${String(port)}/`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/html");
+
+    const body = await res.text();
+    expect(body).toContain("Test Bridge");
+    expect(body).toContain("Version 1.0.0");
+    expect(body).toContain("mqtt://localhost:1883");
+    expect(body).toContain("\u2713");
+    expect(body).toContain("Desk Lamp");
+    expect(body).toContain("desk_lamp");
+  });
+
+  test("returns 404 when no getStatus provided", async () => {
+    const register = new Registry();
+    ms = startMetricsServer(0, register);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const res = await fetch(`http://127.0.0.1:${String(port)}/`);
+    expect(res.status).toBe(404);
+  });
+
+  test("includes device state values", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Bulb",
+            topic: "bulb",
+            capabilities: ["on_off"],
+            state: { state: "OFF", brightness: 128 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("OFF");
+    expect(body).toContain("128");
+  });
+
+  test("shows null state for uncached devices", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "New Bulb",
+            topic: "new_bulb",
+            capabilities: ["on_off"],
+            state: null,
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("No state received");
+  });
+
+  test("POST / returns 404", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const res = await fetch(`http://127.0.0.1:${String(port)}/`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  test("escapes HTML in state values", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Evil",
+            topic: "evil",
+            capabilities: ["on_off"],
+            state: { xss: '<script>alert("xss")</script>' },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).not.toContain("<script>");
+    expect(body).toContain("&lt;script&gt;");
+  });
+
+  test("shows scenes when present", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            scenes: [{ name: "Relax", id: 1 }],
+            state: { state: "ON" },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("Relax");
+    expect(body).toContain("id: 1");
+  });
+
+  test("shows MQTT disconnected status", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({ mqtt: { url: "mqtt://localhost:1883", connected: false } });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("disconnected");
+  });
+
+  test("renders connection IPs and auth status", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("192.168.1.10");
+    expect(body).toContain("192.168.1.20");
+    expect(body).toContain("\u2713");
+    expect(body).toContain("pairing");
+  });
+
+  test("renders 'none' when no connections", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({ hap: { connections: [] } });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("none");
+  });
+
+  test("brightness annotation shows percentage", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "brightness"],
+            state: { brightness: 200 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("\u2192 79%");
+  });
+
+  test("color_temp annotation shows Kelvin", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "color_temp"],
+            state: { color_temp: 370 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("\u2192 2703 K");
+  });
+
+  test("color_hs annotation shows swatch", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "color_hs"],
+            state: { color: { hue: 240, saturation: 80 } },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("hsl(240,80%,50%)");
+    expect(body).toContain('class="swatch"');
+  });
+
+  test("no annotations for unrecognized keys", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            state: { state: "ON", custom_key: 42 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).not.toContain('class="hint"');
+    expect(body).not.toContain('class="swatch"');
+  });
+
+  test("does not render Key/Value table header", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).not.toContain("<thead>");
+    expect(body).not.toContain("<th>");
   });
 });

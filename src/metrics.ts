@@ -76,6 +76,28 @@ export function createMetrics(register: Registry): Metrics {
   };
 }
 
+export interface HapConnection {
+  remoteAddress: string;
+  authenticated: boolean;
+}
+
+export interface DeviceStatus {
+  name: string;
+  topic: string;
+  capabilities: string[];
+  scenes?: { name: string; id: number }[];
+  state: Record<string, unknown> | null;
+}
+
+export interface StatusData {
+  mqtt: { url: string; connected: boolean };
+  hap: { connections: HapConnection[] };
+  bridge: { name: string; version: string };
+  devices: DeviceStatus[];
+}
+
+export type GetStatusFn = () => StatusData;
+
 export interface MetricsServer {
   server: Server;
   setReady: () => void;
@@ -85,11 +107,16 @@ export function startMetricsServer(
   port: number,
   register: Registry,
   bind?: string,
+  getStatus?: GetStatusFn,
 ): MetricsServer {
   let ready = false;
 
   const server = createServer((req, res) => {
-    if (req.url === "/healthz" && req.method === "GET") {
+    if (req.url === "/" && req.method === "GET" && getStatus) {
+      const html = renderStatusPage(getStatus());
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(html);
+    } else if (req.url === "/healthz" && req.method === "GET") {
       res.writeHead(200);
       res.end("ok");
     } else if (req.url === "/readyz" && req.method === "GET") {
@@ -133,4 +160,153 @@ export function startMetricsServer(
       ready = true;
     },
   };
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatHint(
+  key: string,
+  value: unknown,
+  capabilities: string[],
+): string {
+  if (
+    key === "brightness" &&
+    typeof value === "number" &&
+    capabilities.includes("brightness")
+  ) {
+    return `<span class="hint">\u2192 ${String(Math.round((value / 254) * 100))}%</span>`;
+  }
+  if (
+    key === "color_temp" &&
+    typeof value === "number" &&
+    capabilities.includes("color_temp")
+  ) {
+    return `<span class="hint">\u2192 ${String(Math.round(1_000_000 / value))} K</span>`;
+  }
+  if (
+    key === "color" &&
+    typeof value === "object" &&
+    value !== null &&
+    "hue" in value &&
+    "saturation" in value &&
+    capabilities.includes("color_hs")
+  ) {
+    const h = (value as Record<string, unknown>).hue;
+    const s = (value as Record<string, unknown>).saturation;
+    if (typeof h !== "number" || typeof s !== "number") return "";
+    return `<span class="swatch" style="background:hsl(${String(h)},${String(s)}%,50%)"></span>`;
+  }
+  return "";
+}
+
+function renderConnectionsList(connections: HapConnection[]): string {
+  if (connections.length === 0) {
+    return '<span class="na">none</span>';
+  }
+  const items = connections
+    .map((c) => {
+      const auth = c.authenticated
+        ? '<span class="check">\u2713</span>'
+        : '<span class="na">pairing</span>';
+      return `<li>${escapeHtml(c.remoteAddress)} ${auth}</li>`;
+    })
+    .join("");
+  return `<ul class="conn-list">${items}</ul>`;
+}
+
+function renderStatusPage(data: StatusData): string {
+  let devicesHtml = "";
+  for (const device of data.devices) {
+    const caps = device.capabilities.map((c) => escapeHtml(c)).join(", ");
+
+    let scenesHtml = "";
+    if (device.scenes?.length) {
+      const items = device.scenes
+        .map((s) => `<li>${escapeHtml(s.name)} (id: ${String(s.id)})</li>`)
+        .join("");
+      scenesHtml = `<div class="label">Scenes</div><ul>${items}</ul>`;
+    }
+
+    let stateHtml: string;
+    if (device.state === null) {
+      stateHtml = '<span class="na">No state received</span>';
+    } else {
+      const rows = Object.entries(device.state)
+        .map(([k, v]) => {
+          // Z2MState values originate from JSON.parse, so v is never undefined
+          const display = typeof v === "string" ? v : JSON.stringify(v);
+          const hint = formatHint(k, v, device.capabilities);
+          return `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(display)}${hint}</td></tr>`;
+        })
+        .join("");
+      stateHtml = rows
+        ? `<table><tbody>${rows}</tbody></table>`
+        : '<span class="na">Empty state</span>';
+    }
+
+    devicesHtml += `
+      <div class="device">
+        <h2>${escapeHtml(device.name)} <span class="topic">${escapeHtml(device.topic)}</span></h2>
+        <div class="subtitle">${caps}</div>
+        ${scenesHtml}
+        <div class="label">State</div>
+        ${stateHtml}
+      </div>`;
+  }
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(data.bridge.name)}</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 1rem; background: #f5f5f5; color: #333; }
+  h1 { margin-bottom: 0.25rem; }
+  .version { color: #888; font-size: 0.9rem; margin-bottom: 1rem; }
+  .status { display: flex; gap: 2rem; align-items: start; margin-bottom: 1.5rem; padding: 1rem; background: #fff; border-radius: 8px; }
+  .status-section { }
+  .status-label { font-weight: bold; margin-bottom: 0.25rem; }
+  .status .ok { color: #2a2; font-weight: bold; }
+  .status .err { color: #c22; font-weight: bold; }
+  .device { background: #fff; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+  .device h2 { margin-top: 0; margin-bottom: 0.15rem; }
+  .topic { font-weight: normal; font-family: monospace; color: #888; font-size: 0.75em; margin-left: 0.4em; }
+  .subtitle { font-family: monospace; font-size: 0.9rem; color: #666; margin-bottom: 0.5rem; }
+  .label { font-weight: bold; margin-top: 0.5rem; }
+  .value { font-family: monospace; }
+  .na { color: #888; font-style: italic; }
+  table { border-collapse: collapse; width: auto; margin-top: 0.25rem; font-family: monospace; font-size: 0.9rem; }
+  td { text-align: left; padding: 0.15rem 0.5rem; border-bottom: 1px solid #eee; }
+  td:first-child { min-width: 10ch; }
+  .hint { color: #888; margin-left: 0.5em; }
+  .swatch { display: inline-block; width: 1em; height: 1em; border-radius: 2px; vertical-align: middle; border: 1px solid #ccc; margin-left: 0.5em; }
+  .conn-list { list-style: none; margin: 0; padding: 0; font-family: monospace; font-size: 0.9rem; }
+  .check { color: #2a2; font-weight: bold; font-size: 0.9rem; }
+  ul { margin: 0.25rem 0; padding-left: 1.5rem; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(data.bridge.name)}</h1>
+<div class="version">Version ${escapeHtml(data.bridge.version)}</div>
+<div class="status">
+  <div class="status-section">
+    <div class="status-label">MQTT</div>
+    <div class="conn-list">${escapeHtml(data.mqtt.url)} ${data.mqtt.connected ? '<span class="check">\u2713</span>' : '<span class="err">disconnected</span>'}</div>
+  </div>
+  <div class="status-section">
+    <div class="status-label">HAP</div>
+    ${renderConnectionsList(data.hap.connections)}
+  </div>
+</div>
+${devicesHtml}
+</body>
+</html>`;
 }

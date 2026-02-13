@@ -21,24 +21,50 @@ import {
 } from "./accessories.ts";
 import type { PublishFn, Z2MState } from "./accessories.ts";
 import { createMetrics, startMetricsServer } from "./metrics.ts";
-import type { Metrics, MetricsServer } from "./metrics.ts";
+import type {
+  HapConnection,
+  Metrics,
+  MetricsServer,
+  StatusData,
+} from "./metrics.ts";
 
-export async function startBridge(
+export function buildStatusData(
   config: Config,
-): Promise<{ bridge: Bridge; shutdown: () => Promise<void> }> {
+  stateCache: ReadonlyMap<string, Z2MState>,
+  mqtt: { url: string; connected: boolean },
+  hapConnections: HapConnection[],
+  version: string,
+): StatusData {
+  return {
+    mqtt,
+    hap: { connections: hapConnections },
+    bridge: { name: config.bridge.name, version },
+    devices: config.devices.map((d) => ({
+      name: d.name,
+      topic: d.topic,
+      capabilities: [...d.capabilities],
+      scenes: d.scenes,
+      state: stateCache.get(d.topic) ?? null,
+    })),
+  };
+}
+
+interface BridgeHandle {
+  bridge: Bridge;
+  metricsPort?: number;
+  shutdown: () => Promise<void>;
+}
+
+export async function startBridge(config: Config): Promise<BridgeHandle> {
   const stateCache = new Map<string, Z2MState>();
 
   let metrics: Metrics | undefined;
   let metricsServer: MetricsServer | undefined;
   let metricsRegister: Registry | undefined;
+  const hapConnections = new Map<EventEmitter, HapConnection>();
   if (config.metrics) {
     metricsRegister = new Registry();
     metrics = createMetrics(metricsRegister);
-    metricsServer = startMetricsServer(
-      config.metrics.port,
-      metricsRegister,
-      config.metrics.bind,
-    );
   }
 
   let sanitizedUrl: string;
@@ -104,6 +130,23 @@ export async function startBridge(
     } catch {
       // Neither VERSION file nor git available
     }
+  }
+
+  if (metricsRegister && config.metrics) {
+    const getStatus = () =>
+      buildStatusData(
+        config,
+        stateCache,
+        { url: sanitizedUrl, connected: mqttClient.connected },
+        [...hapConnections.values()],
+        version,
+      );
+    metricsServer = startMetricsServer(
+      config.metrics.port,
+      metricsRegister,
+      config.metrics.bind,
+      getStatus,
+    );
   }
 
   const bridge = new Bridge(
@@ -255,6 +298,7 @@ export async function startBridge(
       log.log(
         `HAP connection closed from ${connection.remoteAddress}:${String(connection.remotePort)}`,
       );
+      hapConnections.delete(connection as unknown as EventEmitter);
       metrics?.hapConnectionsActive.dec();
     });
 
@@ -266,11 +310,18 @@ export async function startBridge(
     if (httpServer) {
       httpServer.on(
         "connection-opened",
-        (connection: EventEmitter & { remoteAddress: string }) => {
-          log.log(`HAP connection opened from ${connection.remoteAddress}`);
+        (connection: EventEmitter & { remoteAddress?: string }) => {
+          const addr = connection.remoteAddress ?? "unknown";
+          log.log(`HAP connection opened from ${addr}`);
+          const entry: HapConnection = {
+            remoteAddress: addr,
+            authenticated: false,
+          };
+          hapConnections.set(connection, entry);
           metrics?.hapConnectionsActive.inc();
 
           connection.on("authenticated", () => {
+            entry.authenticated = true;
             metrics?.hapPairVerify.inc();
           });
         },
@@ -278,8 +329,13 @@ export async function startBridge(
     }
   }
 
+  const msAddr = metricsServer?.server.address();
+  const metricsPort =
+    typeof msAddr === "object" && msAddr ? msAddr.port : undefined;
+
   return {
     bridge,
+    metricsPort,
     shutdown: async () => {
       log.log("Shutting down: unpublishing bridge (sending mDNS goodbye)");
       await bridge.unpublish();

@@ -47,6 +47,10 @@ Each module is independently testable with dependency injection:
   `HapStatusError(SERVICE_COMMUNICATION_FAILURE)` when MQTT is disconnected.
 - **No config reload**: restart the container for config changes.
 - **State cache**: `Map<string, Z2MState>` in bridge.ts, keyed by device topic.
+- **Status page audience**: The `GET /` status page is a developer/operator
+  diagnostic tool. It intentionally shows raw Z2M state values, JSON payloads,
+  MQTT topics, and internal IDs. Annotations (%, K, color swatches) are hints
+  alongside the raw data, not replacements for it.
 
 ## Capability Mapping
 

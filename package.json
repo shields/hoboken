@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "demo:status": "node --disable-warning=ExperimentalWarning demo/status-page.ts",
     "check": "tsc",
     "lint": "eslint .",
     "test": "bun test"
