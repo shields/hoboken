@@ -27,6 +27,8 @@ describe("createMetrics", () => {
     expect(names).toContain("hoboken_mqtt_messages_published_total");
     expect(names).toContain("hoboken_mqtt_errors_total");
     expect(names).toContain("hoboken_devices_configured");
+    expect(names).toContain("hoboken_hap_connections_active");
+    expect(names).toContain("hoboken_hap_pair_verify_total");
   });
 
   test("includes default process metrics", async () => {
@@ -72,6 +74,21 @@ describe("createMetrics", () => {
       "hoboken_devices_configured",
     );
     expect(devices).toContain("3");
+
+    metrics.hapConnectionsActive.inc();
+    metrics.hapConnectionsActive.inc();
+    metrics.hapConnectionsActive.dec();
+    const hapConn = await register.getSingleMetricAsString(
+      "hoboken_hap_connections_active",
+    );
+    expect(hapConn).toContain("1");
+
+    metrics.hapPairVerify.inc();
+    metrics.hapPairVerify.inc();
+    const hapPv = await register.getSingleMetricAsString(
+      "hoboken_hap_pair_verify_total",
+    );
+    expect(hapPv).toContain("2");
   });
 
   test("dispose clears the registry", async () => {

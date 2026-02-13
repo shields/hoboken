@@ -9,6 +9,8 @@ export interface Metrics {
   mqttMessagesPublished: Counter;
   mqttErrors: Counter;
   devicesConfigured: Gauge;
+  hapConnectionsActive: Gauge;
+  hapPairVerify: Counter;
   dispose: () => void;
 }
 
@@ -48,12 +50,26 @@ export function createMetrics(register: Registry): Metrics {
     registers: [register],
   });
 
+  const hapConnectionsActive = new Gauge({
+    name: "hoboken_hap_connections_active",
+    help: "Number of active HAP connections from HomeKit controllers",
+    registers: [register],
+  });
+
+  const hapPairVerify = new Counter({
+    name: "hoboken_hap_pair_verify_total",
+    help: "Total successful HAP pair-verify handshakes",
+    registers: [register],
+  });
+
   return {
     mqttConnected,
     mqttMessagesReceived,
     mqttMessagesPublished,
     mqttErrors,
     devicesConfigured,
+    hapConnectionsActive,
+    hapPairVerify,
     dispose() {
       register.clear();
     },

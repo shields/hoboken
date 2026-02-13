@@ -7,6 +7,7 @@ import {
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
+import type { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { connect } from "mqtt";
@@ -254,7 +255,27 @@ export async function startBridge(
       log.log(
         `HAP connection closed from ${connection.remoteAddress}:${String(connection.remotePort)}`,
       );
+      metrics?.hapConnectionsActive.dec();
     });
+
+    // EventedHTTPServer is the internal HTTP layer that emits connection-opened
+    // (HAPServer only surfaces connection-closed). Each HAPConnection emits
+    // "authenticated" after a successful pair-verify handshake.
+    const httpServer = (server as unknown as Record<string, EventEmitter>)
+      .httpServer as EventEmitter | undefined;
+    if (httpServer) {
+      httpServer.on(
+        "connection-opened",
+        (connection: EventEmitter & { remoteAddress: string }) => {
+          log.log(`HAP connection opened from ${connection.remoteAddress}`);
+          metrics?.hapConnectionsActive.inc();
+
+          connection.on("authenticated", () => {
+            metrics?.hapPairVerify.inc();
+          });
+        },
+      );
+    }
   }
 
   return {

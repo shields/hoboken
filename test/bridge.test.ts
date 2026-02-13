@@ -22,6 +22,29 @@ const expectedVersion = execFileSync(
   },
 ).trim();
 
+class FakeHAPConnection extends EventEmitter {
+  remoteAddress: string;
+  remotePort: number;
+
+  constructor(address: string, port: number) {
+    super();
+    this.remoteAddress = address;
+    this.remotePort = port;
+  }
+
+  getRegisteredEvents(): never[] {
+    return [];
+  }
+
+  clearRegisteredEvents(): void {
+    // noop
+  }
+
+  close(): void {
+    // noop
+  }
+}
+
 class MockMqttClient extends EventEmitter {
   connected = false;
   subscriptions: string[][] = [];
@@ -518,6 +541,61 @@ describe("startBridge with metrics", () => {
     const cfg = metricsConfig();
     const { shutdown } = await startBridge(cfg);
     // devicesConfigured is set synchronously during startBridge
+    await shutdown();
+  });
+
+  test("HAP connection-opened increments hapConnectionsActive", async () => {
+    const cfg = metricsConfig();
+    const { bridge, shutdown } = await startBridge(cfg);
+    const server = bridge._server;
+    expect(server).toBeDefined();
+
+    // connection-opened lives on the internal EventedHTTPServer (httpServer),
+    // not on HAPServer itself.
+    const httpServer = (server as unknown as Record<string, EventEmitter>)
+      .httpServer;
+    expect(httpServer).toBeDefined();
+
+    const conn1 = new FakeHAPConnection("192.168.1.50", 12345);
+    const conn2 = new FakeHAPConnection("192.168.1.51", 12346);
+
+    httpServer.emit("connection-opened", conn1);
+    httpServer.emit("connection-opened", conn2);
+
+    await shutdown();
+  });
+
+  test("HAP connection-closed decrements hapConnectionsActive", async () => {
+    const cfg = metricsConfig();
+    const { bridge, shutdown } = await startBridge(cfg);
+    const server = bridge._server;
+    expect(server).toBeDefined();
+
+    const httpServer = (server as unknown as Record<string, EventEmitter>)
+      .httpServer;
+
+    const conn = new FakeHAPConnection("192.168.1.50", 12345);
+    httpServer.emit("connection-opened", conn);
+    server!.emit("connection-closed", conn as never);
+
+    await shutdown();
+  });
+
+  test("HAP authenticated increments hapPairVerify", async () => {
+    const cfg = metricsConfig();
+    const { bridge, shutdown } = await startBridge(cfg);
+    const server = bridge._server;
+    expect(server).toBeDefined();
+
+    const httpServer = (server as unknown as Record<string, EventEmitter>)
+      .httpServer;
+
+    const conn = new FakeHAPConnection("192.168.1.50", 12345);
+    httpServer.emit("connection-opened", conn);
+
+    // HAPConnection emits "authenticated" after pair-verify succeeds
+    conn.emit("authenticated", "AB:CD:EF:01:23:45");
+
     await shutdown();
   });
 });
