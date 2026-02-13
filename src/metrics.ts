@@ -230,6 +230,16 @@ function formatDuration(ms: number): string {
     : `${String(days)}d`;
 }
 
+function formatValue(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (typeof v !== "object" || v === null || Array.isArray(v)) {
+    return JSON.stringify(v);
+  }
+  return Object.entries(v as Record<string, unknown>)
+    .map(([k, val]) => `${k}: ${JSON.stringify(val)}`)
+    .join("\n");
+}
+
 function renderConnectionsList(connections: HapConnection[]): string {
   if (connections.length === 0) {
     return '<span class="na">none</span>';
@@ -264,8 +274,7 @@ function renderStatusPage(data: StatusData): string {
     } else {
       const rows = Object.entries(device.state)
         .map(([k, v]) => {
-          // Z2MState values originate from JSON.parse, so v is never undefined
-          const display = typeof v === "string" ? v : JSON.stringify(v);
+          const display = formatValue(v);
           const hint = formatHint(k, v, device.capabilities);
           return `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(display)}${hint}</td></tr>`;
         })
@@ -308,7 +317,7 @@ function renderStatusPage(data: StatusData): string {
   .value { font-family: monospace; }
   .na { color: #888; font-style: italic; }
   table { border-collapse: collapse; width: auto; margin-top: 0.25rem; font-family: monospace; font-size: 0.9rem; }
-  td { text-align: left; padding: 0.15rem 0.5rem; border-bottom: 1px solid #eee; }
+  td { text-align: left; padding: 0.15rem 0.5rem; border-bottom: 1px solid #eee; white-space: pre-line; }
   td:first-child { min-width: 10ch; }
   .hint { color: #888; margin-left: 0.5em; }
   .swatch { display: inline-block; width: 1em; height: 1em; border-radius: 2px; vertical-align: middle; border: 1px solid #ccc; margin-left: 0.5em; }
