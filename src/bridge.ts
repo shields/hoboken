@@ -7,7 +7,6 @@ import {
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
-import type { Server } from "node:http";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { connect } from "mqtt";
@@ -21,7 +20,7 @@ import {
 } from "./accessories.ts";
 import type { PublishFn, Z2MState } from "./accessories.ts";
 import { createMetrics, startMetricsServer } from "./metrics.ts";
-import type { Metrics } from "./metrics.ts";
+import type { Metrics, MetricsServer } from "./metrics.ts";
 
 export async function startBridge(
   config: Config,
@@ -29,7 +28,7 @@ export async function startBridge(
   const stateCache = new Map<string, Z2MState>();
 
   let metrics: Metrics | undefined;
-  let metricsServer: Server | undefined;
+  let metricsServer: MetricsServer | undefined;
   let metricsRegister: Registry | undefined;
   if (config.metrics) {
     metricsRegister = new Registry();
@@ -239,6 +238,8 @@ export async function startBridge(
     ...(config.bridge.bind ? { bind: config.bridge.bind } : {}),
   });
 
+  metricsServer?.setReady();
+
   // _server is a private hap-nodejs API, but it's the only way to log
   // connection-level events (pair-setup completion, disconnects) not exposed
   // by the public Accessory API. Guarded by an if-check so a future library
@@ -259,21 +260,26 @@ export async function startBridge(
   return {
     bridge,
     shutdown: async () => {
+      log.log("Shutting down: unpublishing bridge (sending mDNS goodbye)");
       await bridge.unpublish();
+      log.log("Shutting down: closing MQTT connection");
       await new Promise<void>((resolve) => {
         mqttClient.end(false, () => {
           resolve();
         });
       });
-      if (metricsServer) {
+      const ms = metricsServer;
+      if (ms) {
+        log.log("Shutting down: stopping metrics server");
         await new Promise<void>((resolve, reject) => {
-          metricsServer.close((err) => {
+          ms.server.close((err?: Error) => {
             if (err) reject(err);
             else resolve();
           });
         });
       }
       metrics?.dispose();
+      log.log("Shutdown complete");
     },
   };
 }

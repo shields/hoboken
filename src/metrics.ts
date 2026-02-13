@@ -60,13 +60,26 @@ export function createMetrics(register: Registry): Metrics {
   };
 }
 
+export interface MetricsServer {
+  server: Server;
+  setReady: () => void;
+}
+
 export function startMetricsServer(
   port: number,
   register: Registry,
   bind?: string,
-): Server {
+): MetricsServer {
+  let ready = false;
+
   const server = createServer((req, res) => {
-    if (req.url === "/metrics" && req.method === "GET") {
+    if (req.url === "/healthz" && req.method === "GET") {
+      res.writeHead(200);
+      res.end("ok");
+    } else if (req.url === "/readyz" && req.method === "GET") {
+      res.writeHead(ready ? 200 : 503);
+      res.end(ready ? "ok" : "not ready");
+    } else if (req.url === "/metrics" && req.method === "GET") {
       void register
         .metrics()
         .then((body) => {
@@ -98,5 +111,10 @@ export function startMetricsServer(
     log.log(`Metrics server listening on ${host}:${String(boundPort)}`);
   });
 
-  return server;
+  return {
+    server,
+    setReady: () => {
+      ready = true;
+    },
+  };
 }

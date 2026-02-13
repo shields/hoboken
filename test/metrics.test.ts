@@ -1,7 +1,20 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { Registry } from "prom-client";
 import { createMetrics, startMetricsServer } from "../src/metrics.ts";
+import type { MetricsServer } from "../src/metrics.ts";
 import type { Server } from "node:http";
+
+function addr(server: Server): number {
+  const a = server.address();
+  return typeof a === "object" && a ? a.port : 0;
+}
+
+async function listening(server: Server): Promise<void> {
+  if (server.listening) return;
+  await new Promise<void>((resolve) => {
+    server.once("listening", resolve);
+  });
+}
 
 describe("createMetrics", () => {
   test("registers all custom metrics", async () => {
@@ -76,30 +89,27 @@ describe("createMetrics", () => {
 });
 
 describe("startMetricsServer", () => {
-  let server: Server | undefined;
+  let ms: MetricsServer | undefined;
 
   afterEach(async () => {
-    if (server) {
+    if (ms) {
       await new Promise<void>((resolve, reject) => {
-        server!.close((err) => {
+        ms!.server.close((err) => {
           if (err) reject(err);
           else resolve();
         });
       });
-      server = undefined;
+      ms = undefined;
     }
   });
 
   test("serves metrics on GET /metrics", async () => {
     const register = new Registry();
     createMetrics(register);
-    server = startMetricsServer(0, register);
+    ms = startMetricsServer(0, register);
 
-    await new Promise<void>((resolve) => {
-      server!.once("listening", resolve);
-    });
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    await listening(ms.server);
+    const port = addr(ms.server);
 
     const res = await fetch(`http://127.0.0.1:${String(port)}/metrics`);
     expect(res.status).toBe(200);
@@ -111,13 +121,10 @@ describe("startMetricsServer", () => {
 
   test("returns 404 for other paths", async () => {
     const register = new Registry();
-    server = startMetricsServer(0, register);
+    ms = startMetricsServer(0, register);
 
-    await new Promise<void>((resolve) => {
-      server!.once("listening", resolve);
-    });
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    await listening(ms.server);
+    const port = addr(ms.server);
 
     const res = await fetch(`http://127.0.0.1:${String(port)}/other`);
     expect(res.status).toBe(404);
@@ -125,13 +132,10 @@ describe("startMetricsServer", () => {
 
   test("returns 404 for non-GET requests to /metrics", async () => {
     const register = new Registry();
-    server = startMetricsServer(0, register);
+    ms = startMetricsServer(0, register);
 
-    await new Promise<void>((resolve) => {
-      server!.once("listening", resolve);
-    });
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    await listening(ms.server);
+    const port = addr(ms.server);
 
     const res = await fetch(`http://127.0.0.1:${String(port)}/metrics`, {
       method: "POST",
@@ -142,13 +146,10 @@ describe("startMetricsServer", () => {
   test("returns 500 when registry.metrics() rejects", async () => {
     const register = new Registry();
     register.metrics = () => Promise.reject(new Error("boom"));
-    server = startMetricsServer(0, register);
+    ms = startMetricsServer(0, register);
 
-    await new Promise<void>((resolve) => {
-      server!.once("listening", resolve);
-    });
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    await listening(ms.server);
+    const port = addr(ms.server);
 
     const res = await fetch(`http://127.0.0.1:${String(port)}/metrics`);
     expect(res.status).toBe(500);
@@ -159,13 +160,10 @@ describe("startMetricsServer", () => {
   test("accepts explicit bind address", async () => {
     const register = new Registry();
     createMetrics(register);
-    server = startMetricsServer(0, register, "127.0.0.1");
+    ms = startMetricsServer(0, register, "127.0.0.1");
 
-    await new Promise<void>((resolve) => {
-      server!.once("listening", resolve);
-    });
-    const addr = server.address();
-    const port = typeof addr === "object" && addr ? addr.port : 0;
+    await listening(ms.server);
+    const port = addr(ms.server);
 
     const res = await fetch(`http://127.0.0.1:${String(port)}/metrics`);
     expect(res.status).toBe(200);
@@ -183,17 +181,45 @@ describe("startMetricsServer", () => {
 
     try {
       const register = new Registry();
-      server = startMetricsServer(0, register);
+      ms = startMetricsServer(0, register);
 
-      await new Promise<void>((resolve) => {
-        server!.once("listening", resolve);
-      });
+      await listening(ms.server);
 
-      server.emit("error", new Error("EADDRINUSE"));
+      ms.server.emit("error", new Error("EADDRINUSE"));
       expect(exitCode).toBe(1);
     } finally {
       process.exit = origExit;
       console.error = origError;
     }
+  });
+
+  test("healthz returns 200", async () => {
+    const register = new Registry();
+    ms = startMetricsServer(0, register);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const res = await fetch(`http://127.0.0.1:${String(port)}/healthz`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("ok");
+  });
+
+  test("readyz returns 503 before setReady, 200 after", async () => {
+    const register = new Registry();
+    ms = startMetricsServer(0, register);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const before = await fetch(`http://127.0.0.1:${String(port)}/readyz`);
+    expect(before.status).toBe(503);
+    expect(await before.text()).toBe("not ready");
+
+    ms.setReady();
+
+    const after = await fetch(`http://127.0.0.1:${String(port)}/readyz`);
+    expect(after.status).toBe(200);
+    expect(await after.text()).toBe("ok");
   });
 });
