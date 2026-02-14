@@ -171,24 +171,37 @@ function escapeHtml(str: string): string {
     .replaceAll("'", "&#39;");
 }
 
+type HintPlacement = "key" | "value";
+
+interface Hint {
+  html: string;
+  placement: HintPlacement;
+}
+
 function formatHint(
   key: string,
   value: unknown,
   capabilities: string[],
-): string {
+): Hint | null {
   if (
     key === "brightness" &&
     typeof value === "number" &&
     capabilities.includes("brightness")
   ) {
-    return `<span class="hint">\u2192 ${String(Math.round((value / 254) * 100))}%</span>`;
+    return {
+      html: `<span class="hint">\u2192 ${String(Math.round((value / 254) * 100))}%</span>`,
+      placement: "value",
+    };
   }
   if (
     key === "color_temp" &&
     typeof value === "number" &&
     capabilities.includes("color_temp")
   ) {
-    return `<span class="hint">\u2192 ${String(Math.round(1_000_000 / value))} K</span>`;
+    return {
+      html: `<span class="hint">\u2192 ${String(Math.round(1_000_000 / value))} K</span>`,
+      placement: "value",
+    };
   }
   if (
     key === "color" &&
@@ -200,15 +213,21 @@ function formatHint(
   ) {
     const h = (value as Record<string, unknown>).hue;
     const s = (value as Record<string, unknown>).saturation;
-    if (typeof h !== "number" || typeof s !== "number") return "";
-    return `<span class="swatch" style="background:hsl(${String(h)},${String(s)}%,50%)"></span>`;
+    if (typeof h !== "number" || typeof s !== "number") return null;
+    return {
+      html: `<span class="swatch" style="background:hsl(${String(h)},${String(s)}%,50%)"></span>`,
+      placement: "key",
+    };
   }
   if (key === "last_seen" && typeof value === "string") {
     const ms = Date.now() - new Date(value).getTime();
-    if (!Number.isFinite(ms) || ms < 0) return "";
-    return `<span class="hint">\u2192 ${formatDuration(ms)} ago</span>`;
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    return {
+      html: `<span class="hint">\u2192 ${formatDuration(ms)} ago</span>`,
+      placement: "value",
+    };
   }
-  return "";
+  return null;
 }
 
 function formatDuration(ms: number): string {
@@ -279,7 +298,9 @@ function renderStatusPage(data: StatusData): string {
         .map(([k, v]) => {
           const display = formatValue(v);
           const hint = formatHint(k, v, device.capabilities);
-          return `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(display)}${hint}</td></tr>`;
+          const keyHint = hint?.placement === "key" ? hint.html : "";
+          const valueHint = hint?.placement === "value" ? hint.html : "";
+          return `<tr><td>${escapeHtml(k)}${keyHint}</td><td>${escapeHtml(display)}${valueHint}</td></tr>`;
         })
         .join("");
       stateHtml = rows
