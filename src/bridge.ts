@@ -92,6 +92,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   mqttClient.on("close", () => {
     log.log("MQTT connection closed");
     metrics?.mqttConnected.set(0);
+    metricsServer?.notifyStateChange();
   });
 
   mqttClient.on("reconnect", () => {
@@ -101,6 +102,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   mqttClient.on("offline", () => {
     log.log("MQTT client offline");
     metrics?.mqttConnected.set(0);
+    metricsServer?.notifyStateChange();
   });
 
   const publish: PublishFn = (topic, payload) => {
@@ -207,6 +209,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       (d) => `${config.mqtt.topic_prefix}/${d.topic}`,
     );
     mqttClient.subscribe(topics);
+    metricsServer?.notifyStateChange();
 
     for (const device of config.devices) {
       mqttClient.publish(
@@ -242,6 +245,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
     const existing = stateCache.get(deviceTopic);
     stateCache.set(deviceTopic, { ...existing, ...state });
+    metricsServer?.notifyStateChange();
 
     // Pass the partial update, not the merged state — updateAccessoryState
     // uses "key in state" checks to only push characteristics that changed.
@@ -300,6 +304,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       );
       hapConnections.delete(connection as unknown as EventEmitter);
       metrics?.hapConnectionsActive.dec();
+      metricsServer?.notifyStateChange();
     });
 
     // EventedHTTPServer is the internal HTTP layer that emits connection-opened
@@ -319,10 +324,12 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
           };
           hapConnections.set(connection, entry);
           metrics?.hapConnectionsActive.inc();
+          metricsServer?.notifyStateChange();
 
           connection.on("authenticated", () => {
             entry.authenticated = true;
             metrics?.hapPairVerify.inc();
+            metricsServer?.notifyStateChange();
           });
         },
       );

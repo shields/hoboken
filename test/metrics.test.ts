@@ -263,6 +263,158 @@ function makeStatus(overrides?: Partial<StatusData>): StatusData {
   };
 }
 
+describe("SSE (GET /events)", () => {
+  let ms: MetricsServer | undefined;
+
+  afterEach(async () => {
+    if (ms) {
+      const s = ms.server;
+      ms = undefined;
+      if (s.listening) {
+        await new Promise<void>((resolve, reject) => {
+          s.close((err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+        s.closeAllConnections();
+      }
+    }
+  });
+
+  test("startMetricsServer returns notifyStateChange function", () => {
+    const register = new Registry();
+    ms = startMetricsServer(0, register);
+    expect(typeof ms.notifyStateChange).toBe("function");
+  });
+
+  test("GET /events returns SSE headers", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const controller = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${String(port)}/events`, {
+      signal: controller.signal,
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+    controller.abort();
+  });
+
+  test("GET /events returns 404 without getStatus", async () => {
+    const register = new Registry();
+    ms = startMetricsServer(0, register);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const res = await fetch(`http://127.0.0.1:${String(port)}/events`);
+    expect(res.status).toBe(404);
+  });
+
+  test("initial SSE event contains current state", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const controller = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${String(port)}/events`, {
+      signal: controller.signal,
+    });
+    const reader = res.body!.getReader();
+    const { value } = await reader.read();
+    const text = new TextDecoder().decode(value);
+    expect(text).toContain("data:");
+    expect(text).toContain("Desk Lamp");
+    expect(text).toContain("mqtt://localhost:1883");
+    controller.abort();
+  });
+
+  test("notifyStateChange pushes events to connected clients", async () => {
+    const register = new Registry();
+    let state: Record<string, unknown> = { state: "ON", brightness: 200 };
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Desk Lamp",
+            topic: "desk_lamp",
+            capabilities: ["on_off", "brightness"],
+            state,
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const controller = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${String(port)}/events`, {
+      signal: controller.signal,
+    });
+    const reader = res.body!.getReader();
+    // Read and discard initial event
+    await reader.read();
+
+    // Update state and notify
+    state = { state: "OFF", brightness: 100 };
+    ms.notifyStateChange();
+
+    const { value } = await reader.read();
+    const text = new TextDecoder().decode(value);
+    expect(text).toContain("data:");
+    expect(text).toContain("OFF");
+    controller.abort();
+  });
+
+  test("disconnected clients are cleaned up without error", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const controller = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${String(port)}/events`, {
+      signal: controller.signal,
+    });
+    const reader = res.body!.getReader();
+    await reader.read();
+
+    // Disconnect
+    controller.abort();
+    // Small delay for close event to propagate
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Should not throw
+    ms.notifyStateChange();
+  });
+
+  test("POST /events returns 404", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const res = await fetch(`http://127.0.0.1:${String(port)}/events`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe("status page (GET /)", () => {
   let ms: MetricsServer | undefined;
 
@@ -359,6 +511,21 @@ describe("status page (GET /)", () => {
     expect(body).toContain("No state received");
   });
 
+  test("includes EventSource script and content wrapper", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain('id="content"');
+    expect(body).toContain('EventSource("/events")');
+  });
+
   test("POST / returns 404", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () => makeStatus();
@@ -394,7 +561,7 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).not.toContain("<script>");
+    expect(body).not.toContain('<script>alert("xss")</script>');
     expect(body).toContain("&lt;script&gt;");
   });
 

@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import type { Server } from "node:http";
+import type { Server, ServerResponse } from "node:http";
 import { Counter, Gauge, Registry, collectDefaultMetrics } from "prom-client";
 import * as log from "./log.ts";
 
@@ -101,6 +101,7 @@ export type GetStatusFn = () => StatusData;
 export interface MetricsServer {
   server: Server;
   setReady: () => void;
+  notifyStateChange: () => void;
 }
 
 export function startMetricsServer(
@@ -110,9 +111,25 @@ export function startMetricsServer(
   getStatus?: GetStatusFn,
 ): MetricsServer {
   let ready = false;
+  const sseClients = new Set<ServerResponse>();
 
   const server = createServer((req, res) => {
-    if (req.url === "/" && req.method === "GET" && getStatus) {
+    if (req.url === "/events" && req.method === "GET" && getStatus) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      res.flushHeaders();
+      // No explicit error handler needed: Node's HTTP server catches response
+      // stream errors internally. The req "close" event reliably fires on
+      // disconnect and removes the client from sseClients.
+      sendSseEvent(res, renderStatusContent(getStatus()));
+      sseClients.add(res);
+      req.on("close", () => {
+        sseClients.delete(res);
+      });
+    } else if (req.url === "/" && req.method === "GET" && getStatus) {
       const html = renderStatusPage(getStatus());
       res.writeHead(200, { "Content-Type": "text/html" });
       res.end(html);
@@ -159,7 +176,22 @@ export function startMetricsServer(
     setReady: () => {
       ready = true;
     },
+    notifyStateChange: () => {
+      if (!getStatus) return;
+      const content = renderStatusContent(getStatus());
+      for (const client of sseClients) {
+        sendSseEvent(client, content);
+      }
+    },
   };
+}
+
+// No res.writable guard needed: res.write() never throws — it returns false
+// on a broken connection. The req "close" handler removes clients from
+// sseClients, so stale entries are short-lived (one event loop tick at most).
+function sendSseEvent(res: ServerResponse, content: string): void {
+  const lines = content.split("\n").map((line) => `data: ${line}`);
+  res.write(`${lines.join("\n")}\n\n`);
 }
 
 function escapeHtml(str: string): string {
@@ -274,7 +306,7 @@ function renderConnectionsList(connections: HapConnection[]): string {
   return `<ul class="conn-list">${items}</ul>`;
 }
 
-function renderStatusPage(data: StatusData): string {
+function renderStatusContent(data: StatusData): string {
   let devicesHtml = "";
   const sortedDevices = [...data.devices].sort((a, b) =>
     a.name.localeCompare(b.name),
@@ -318,6 +350,24 @@ function renderStatusPage(data: StatusData): string {
       </div>`;
   }
 
+  return `<h1>${escapeHtml(data.bridge.name)}</h1>
+<div class="version">Version ${escapeHtml(data.bridge.version)}</div>
+<div class="status">
+  <div class="status-section">
+    <div class="status-label">MQTT</div>
+    <div class="conn-list">${escapeHtml(data.mqtt.url)} ${data.mqtt.connected ? '<span class="check">\u2713</span>' : '<span class="err">disconnected</span>'}</div>
+  </div>
+  <div class="status-section">
+    <div class="status-label">HAP</div>
+    ${renderConnectionsList(data.hap.connections)}
+  </div>
+</div>
+${devicesHtml}`;
+}
+
+function renderStatusPage(data: StatusData): string {
+  const content = renderStatusContent(data);
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -351,19 +401,13 @@ function renderStatusPage(data: StatusData): string {
 </style>
 </head>
 <body>
-<h1>${escapeHtml(data.bridge.name)}</h1>
-<div class="version">Version ${escapeHtml(data.bridge.version)}</div>
-<div class="status">
-  <div class="status-section">
-    <div class="status-label">MQTT</div>
-    <div class="conn-list">${escapeHtml(data.mqtt.url)} ${data.mqtt.connected ? '<span class="check">\u2713</span>' : '<span class="err">disconnected</span>'}</div>
-  </div>
-  <div class="status-section">
-    <div class="status-label">HAP</div>
-    ${renderConnectionsList(data.hap.connections)}
-  </div>
-</div>
-${devicesHtml}
+<div id="content">${content}</div>
+<script>
+const src = new EventSource("/events");
+src.onmessage = (e) => {
+  document.getElementById("content").innerHTML = e.data;
+};
+</script>
 </body>
 </html>`;
 }
