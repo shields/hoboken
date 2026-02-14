@@ -257,7 +257,10 @@ function renderConnectionsList(connections: HapConnection[]): string {
 
 function renderStatusPage(data: StatusData): string {
   let devicesHtml = "";
-  for (const device of data.devices) {
+  const sortedDevices = [...data.devices].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  for (const device of sortedDevices) {
     const caps = device.capabilities.map((c) => escapeHtml(c)).join(", ");
 
     let scenesHtml = "";
