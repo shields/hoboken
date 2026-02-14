@@ -12,14 +12,17 @@ const onShutdown = (signal: string) => {
   log.log(`Received ${signal}`);
   if (shutdown) {
     void shutdown()
+      // eslint-disable-next-line unicorn/no-process-exit -- HAP server keeps handles open
       .then(() => process.exit(0))
       .catch((err: unknown) => {
         log.error(
           `Shutdown error: ${err instanceof Error ? err.message : String(err)}`,
         );
+        // eslint-disable-next-line unicorn/no-process-exit -- must terminate despite active handles
         process.exit(1);
       });
   } else {
+    // eslint-disable-next-line unicorn/no-process-exit -- no shutdown handler registered yet
     process.exit(0);
   }
 };

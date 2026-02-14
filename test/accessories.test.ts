@@ -299,9 +299,9 @@ describe("createSceneAccessory", () => {
     try {
       on.setValue(true);
       expect(timeouts).toHaveLength(1);
-      expect(timeouts[0].delay).toBe(1000);
+      expect(timeouts[0]!.delay).toBe(1000);
 
-      timeouts[0].fn();
+      timeouts[0]!.fn();
       expect(on.value).toBe(false);
     } finally {
       globalThis.setTimeout = origSetTimeout;
@@ -315,7 +315,9 @@ describe("updateAccessoryState", () => {
 
   beforeEach(() => {
     publish = mock<PublishFn>();
-    getState = () => undefined;
+    getState = (): Z2MState | undefined => {
+      return;
+    };
   });
 
   test("updates On characteristic from state", () => {

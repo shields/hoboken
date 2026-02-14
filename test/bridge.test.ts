@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import path from "node:path";
 import {
   Characteristic,
   HAPStatus,
@@ -12,16 +12,19 @@ import {
 } from "@homebridge/hap-nodejs";
 import type { Config } from "../src/config.ts";
 
-HAPStorage.setCustomStoragePath(mkdtempSync(join(tmpdir(), "hoboken-test-")));
+HAPStorage.setCustomStoragePath(
+  mkdtempSync(path.join(tmpdir(), "hoboken-test-")),
+);
 
 const expectedVersion = execFileSync(
   "git",
   ["describe", "--always", "--dirty"],
   {
-    encoding: "utf-8",
+    encoding: "utf8",
   },
 ).trim();
 
+// eslint-disable-next-line unicorn/prefer-event-target -- mocks hap-nodejs EventEmitter API
 class FakeHAPConnection extends EventEmitter {
   remoteAddress: string;
   remotePort: number;
@@ -45,6 +48,7 @@ class FakeHAPConnection extends EventEmitter {
   }
 }
 
+// eslint-disable-next-line unicorn/prefer-event-target -- mocks mqtt.js EventEmitter API
 class MockMqttClient extends EventEmitter {
   connected = false;
   subscriptions: string[][] = [];
@@ -195,8 +199,8 @@ describe("startBridge", () => {
       p.topic.endsWith("/get"),
     );
     expect(getMessages).toHaveLength(2);
-    expect(getMessages[0].topic).toBe("zigbee2mqtt/living_room/get");
-    expect(getMessages[1].topic).toBe("zigbee2mqtt/bedroom/get");
+    expect(getMessages[0]!.topic).toBe("zigbee2mqtt/living_room/get");
+    expect(getMessages[1]!.topic).toBe("zigbee2mqtt/bedroom/get");
     await shutdown();
   });
 
@@ -265,8 +269,9 @@ describe("startBridge", () => {
     const { shutdown } = await startBridge(testConfig());
 
     const origError = console.error;
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
-    console.error = () => {};
+    console.error = () => {
+      /* suppress */
+    };
     try {
       mockClient.emit("error", new Error("connection refused"));
     } finally {
@@ -435,8 +440,12 @@ describe("startBridge", () => {
       remoteAddress: "192.168.1.100",
       remotePort: 54321,
       getRegisteredEvents: () => [],
-      clearRegisteredEvents: () => undefined,
-      close: () => undefined,
+      clearRegisteredEvents: () => {
+        /* noop */
+      },
+      close: () => {
+        /* noop */
+      },
     };
     server!.emit("connection-closed", fakeConnection as never);
     await shutdown();
@@ -520,7 +529,9 @@ describe("startBridge with metrics", () => {
     const cfg = metricsConfig();
     const { shutdown } = await startBridge(cfg);
     const origError = console.error;
-    console.error = () => undefined;
+    console.error = () => {
+      /* suppress */
+    };
     try {
       mockClient.emit("error", new Error("test"));
     } finally {
@@ -575,7 +586,7 @@ describe("startBridge with metrics", () => {
     // connection-opened lives on the internal EventedHTTPServer (httpServer),
     // not on HAPServer itself.
     const httpServer = (server as unknown as Record<string, EventEmitter>)
-      .httpServer;
+      .httpServer!;
     expect(httpServer).toBeDefined();
 
     const conn1 = new FakeHAPConnection("192.168.1.50", 12345);
@@ -594,7 +605,7 @@ describe("startBridge with metrics", () => {
     expect(server).toBeDefined();
 
     const httpServer = (server as unknown as Record<string, EventEmitter>)
-      .httpServer;
+      .httpServer!;
 
     const conn = new FakeHAPConnection("192.168.1.50", 12345);
     httpServer.emit("connection-opened", conn);
@@ -610,7 +621,7 @@ describe("startBridge with metrics", () => {
     expect(server).toBeDefined();
 
     const httpServer = (server as unknown as Record<string, EventEmitter>)
-      .httpServer;
+      .httpServer!;
 
     const conn = new FakeHAPConnection("192.168.1.50", 12345);
     httpServer.emit("connection-opened", conn);
@@ -647,13 +658,13 @@ describe("buildStatusData", () => {
     expect(result.bridge.name).toBe("Test Bridge");
     expect(result.bridge.version).toBe("abc123");
     expect(result.devices).toHaveLength(2);
-    expect(result.devices[0].name).toBe("Living Room");
-    expect(result.devices[0].topic).toBe("living_room");
-    expect(result.devices[0].capabilities).toEqual(["on_off", "brightness"]);
-    expect(result.devices[0].scenes).toEqual([{ name: "Movie Mode", id: 1 }]);
-    expect(result.devices[0].state).toEqual({ state: "ON", brightness: 200 });
-    expect(result.devices[1].name).toBe("Bedroom");
-    expect(result.devices[1].state).toBeNull();
+    expect(result.devices[0]!.name).toBe("Living Room");
+    expect(result.devices[0]!.topic).toBe("living_room");
+    expect(result.devices[0]!.capabilities).toEqual(["on_off", "brightness"]);
+    expect(result.devices[0]!.scenes).toEqual([{ name: "Movie Mode", id: 1 }]);
+    expect(result.devices[0]!.state).toEqual({ state: "ON", brightness: 200 });
+    expect(result.devices[1]!.name).toBe("Bedroom");
+    expect(result.devices[1]!.state).toBeNull();
   });
 
   test("returns null state for uncached devices", () => {

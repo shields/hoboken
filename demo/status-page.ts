@@ -24,7 +24,7 @@ const data: StatusData = {
         state: "ON",
         brightness: 200,
         color_temp: 370,
-        last_seen: new Date(Date.now() - 47 * 60_000).toISOString(),
+        last_seen: new Date(Date.now() - 47 * 60000).toISOString(),
       },
     },
     {

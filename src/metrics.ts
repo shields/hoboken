@@ -161,6 +161,7 @@ export function startMetricsServer(
   // should exit rather than silently running without observability.
   server.on("error", (err) => {
     log.error(`Metrics server error: ${err.message}`);
+    // eslint-disable-next-line unicorn/no-process-exit -- fail-fast in async event handler
     process.exit(1);
   });
 
@@ -308,7 +309,7 @@ function renderConnectionsList(connections: HapConnection[]): string {
 
 function renderStatusContent(data: StatusData): string {
   let devicesHtml = "";
-  const sortedDevices = [...data.devices].sort((a, b) =>
+  const sortedDevices = data.devices.toSorted((a, b) =>
     a.name.localeCompare(b.name),
   );
   for (const device of sortedDevices) {

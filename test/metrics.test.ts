@@ -194,7 +194,9 @@ describe("startMetricsServer", () => {
     }) as never;
 
     const origError = console.error;
-    console.error = () => undefined;
+    console.error = () => {
+      /* suppress */
+    };
 
     try {
       const register = new Registry();
@@ -713,7 +715,7 @@ describe("status page (GET /)", () => {
 
   test("last_seen annotation shows time ago", async () => {
     const register = new Registry();
-    const recent = new Date(Date.now() - 3 * 60_000).toISOString();
+    const recent = new Date(Date.now() - 3 * 60000).toISOString();
     const getStatus: GetStatusFn = () =>
       makeStatus({
         devices: [
@@ -739,7 +741,7 @@ describe("status page (GET /)", () => {
   test("last_seen annotation with hours", async () => {
     const register = new Registry();
     const hoursAgo = new Date(
-      Date.now() - (2 * 3600_000 + 15 * 60_000),
+      Date.now() - (2 * 3_600_000 + 15 * 60000),
     ).toISOString();
     const getStatus: GetStatusFn = () =>
       makeStatus({
@@ -765,7 +767,7 @@ describe("status page (GET /)", () => {
 
   test("last_seen annotation with exact hours", async () => {
     const register = new Registry();
-    const exactHours = new Date(Date.now() - 5 * 3600_000).toISOString();
+    const exactHours = new Date(Date.now() - 5 * 3_600_000).toISOString();
     const getStatus: GetStatusFn = () =>
       makeStatus({
         devices: [
@@ -792,7 +794,7 @@ describe("status page (GET /)", () => {
   test("last_seen annotation with days", async () => {
     const register = new Registry();
     const daysAgo = new Date(
-      Date.now() - (3 * 86400_000 + 7 * 3600_000),
+      Date.now() - (3 * 86_400_000 + 7 * 3_600_000),
     ).toISOString();
     const getStatus: GetStatusFn = () =>
       makeStatus({
@@ -818,7 +820,7 @@ describe("status page (GET /)", () => {
 
   test("last_seen annotation with exact days", async () => {
     const register = new Registry();
-    const exactDays = new Date(Date.now() - 2 * 86400_000).toISOString();
+    const exactDays = new Date(Date.now() - 2 * 86_400_000).toISOString();
     const getStatus: GetStatusFn = () =>
       makeStatus({
         devices: [

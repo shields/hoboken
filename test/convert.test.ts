@@ -26,8 +26,8 @@ describe("z2mBrightnessToHomeKit", () => {
     expect(z2mBrightnessToHomeKit(300)).toBe(100);
   });
 
-  test("throws on NaN", () => {
-    expect(() => z2mBrightnessToHomeKit(NaN)).toThrow(
+  test("throws on Number.NaN", () => {
+    expect(() => z2mBrightnessToHomeKit(Number.NaN)).toThrow(
       "brightness must be a number",
     );
   });
@@ -54,8 +54,8 @@ describe("homeKitBrightnessToZ2M", () => {
     expect(homeKitBrightnessToZ2M(200)).toBe(254);
   });
 
-  test("throws on NaN", () => {
-    expect(() => homeKitBrightnessToZ2M(NaN)).toThrow(
+  test("throws on Number.NaN", () => {
+    expect(() => homeKitBrightnessToZ2M(Number.NaN)).toThrow(
       "brightness must be a number",
     );
   });

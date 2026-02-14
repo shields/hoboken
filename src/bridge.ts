@@ -43,7 +43,7 @@ export function buildStatusData(
       name: d.name,
       topic: d.topic,
       capabilities: [...d.capabilities],
-      scenes: d.scenes,
+      ...(d.scenes ? { scenes: d.scenes } : {}),
       state: stateCache.get(d.topic) ?? null,
     })),
   };
@@ -122,12 +122,12 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   try {
     version = readFileSync(
       new URL("../VERSION", import.meta.url),
-      "utf-8",
+      "utf8",
     ).trim();
   } catch {
     try {
       version = execFileSync("git", ["describe", "--always", "--dirty"], {
-        encoding: "utf-8",
+        encoding: "utf8",
       }).trim();
     } catch {
       // Neither VERSION file nor git available
@@ -311,7 +311,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     // (HAPServer only surfaces connection-closed). Each HAPConnection emits
     // "authenticated" after a successful pair-verify handshake.
     const httpServer = (server as unknown as Record<string, EventEmitter>)
-      .httpServer as EventEmitter | undefined;
+      .httpServer;
     if (httpServer) {
       httpServer.on(
         "connection-opened",
@@ -342,7 +342,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
   return {
     bridge,
-    metricsPort,
+    ...(metricsPort === undefined ? {} : { metricsPort }),
     shutdown: async () => {
       log.log("Shutting down: unpublishing bridge (sending mDNS goodbye)");
       await bridge.unpublish();

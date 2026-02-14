@@ -200,14 +200,19 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
   let scenes: SceneConfig[] | undefined;
   if (d.scenes !== undefined) {
     if (!Array.isArray(d.scenes)) {
-      throw new Error(`devices[${String(index)}].scenes must be an array`);
+      throw new TypeError(`devices[${String(index)}].scenes must be an array`);
     }
     scenes = d.scenes.map((s: unknown, si: number) =>
       validateScene(s, index, si),
     );
   }
 
-  return { name: d.name, topic: d.topic, capabilities, scenes };
+  return {
+    name: d.name,
+    topic: d.topic,
+    capabilities,
+    ...(scenes ? { scenes } : {}),
+  };
 }
 
 function validateScene(
@@ -238,7 +243,7 @@ function validateScene(
 }
 
 export function loadConfig(path: string): Config {
-  const content = readFileSync(path, "utf-8");
+  const content = readFileSync(path, "utf8");
   const data: unknown = parse(content);
   return validateConfig(data);
 }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig, validateConfig } from "../src/config.ts";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import path from "node:path";
 import { tmpdir } from "node:os";
 
 function validConfig() {
@@ -32,26 +32,26 @@ describe("validateConfig", () => {
     const config = validateConfig(validConfig());
     expect(config.bridge.name).toBe("Hoboken");
     expect(config.devices).toHaveLength(1);
-    expect(config.devices[0].scenes).toHaveLength(1);
+    expect(config.devices[0]!.scenes).toHaveLength(1);
   });
 
   test("accepts config without scenes", () => {
     const data = validConfig();
-    delete (data.devices[0] as Record<string, unknown>).scenes;
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
     const config = validateConfig(data);
-    expect(config.devices[0].scenes).toBeUndefined();
+    expect(config.devices[0]!.scenes).toBeUndefined();
   });
 
   test("accepts all capabilities", () => {
     const data = validConfig();
-    data.devices[0].capabilities = [
+    data.devices[0]!.capabilities = [
       "on_off",
       "brightness",
       "color_temp",
       "color_hs",
     ];
     const config = validateConfig(data);
-    expect(config.devices[0].capabilities).toHaveLength(4);
+    expect(config.devices[0]!.capabilities).toHaveLength(4);
   });
 
   test("rejects non-object config", () => {
@@ -179,19 +179,19 @@ describe("validateConfig", () => {
 
   test("rejects device with empty name", () => {
     const data = validConfig();
-    data.devices[0].name = "";
+    data.devices[0]!.name = "";
     expect(() => validateConfig(data)).toThrow("devices[0].name");
   });
 
   test("rejects device with empty topic", () => {
     const data = validConfig();
-    data.devices[0].topic = "";
+    data.devices[0]!.topic = "";
     expect(() => validateConfig(data)).toThrow("devices[0].topic");
   });
 
   test("rejects device with empty capabilities", () => {
     const data = validConfig();
-    data.devices[0].capabilities = [];
+    data.devices[0]!.capabilities = [];
     expect(() => validateConfig(data)).toThrow(
       "devices[0].capabilities must be a non-empty array",
     );
@@ -199,13 +199,13 @@ describe("validateConfig", () => {
 
   test("rejects unknown capability", () => {
     const data = validConfig();
-    data.devices[0].capabilities.push("unknown");
+    data.devices[0]!.capabilities.push("unknown");
     expect(() => validateConfig(data)).toThrow('unknown capability "unknown"');
   });
 
   test("rejects duplicate capabilities", () => {
     const data = validConfig();
-    data.devices[0].capabilities = ["on_off", "brightness", "on_off"];
+    data.devices[0]!.capabilities = ["on_off", "brightness", "on_off"];
     expect(() => validateConfig(data)).toThrow('duplicate capability "on_off"');
   });
 
@@ -217,7 +217,7 @@ describe("validateConfig", () => {
 
   test("rejects non-array scenes", () => {
     const data = validConfig();
-    (data.devices[0] as Record<string, unknown>).scenes = "not an array";
+    (data.devices[0]! as Record<string, unknown>).scenes = "not an array";
     expect(() => validateConfig(data)).toThrow(
       "devices[0].scenes must be an array",
     );
@@ -225,25 +225,25 @@ describe("validateConfig", () => {
 
   test("rejects non-object scene", () => {
     const data = validConfig();
-    data.devices[0].scenes = [null as unknown as { name: string; id: number }];
+    data.devices[0]!.scenes = [null as unknown as { name: string; id: number }];
     expect(() => validateConfig(data)).toThrow("scenes[0] must be an object");
   });
 
   test("rejects scene with non-positive id", () => {
     const data = validConfig();
-    data.devices[0].scenes = [{ name: "Bad", id: 0 }];
+    data.devices[0]!.scenes = [{ name: "Bad", id: 0 }];
     expect(() => validateConfig(data)).toThrow("positive integer");
   });
 
   test("rejects scene with non-integer id", () => {
     const data = validConfig();
-    data.devices[0].scenes = [{ name: "Bad", id: 1.5 }];
+    data.devices[0]!.scenes = [{ name: "Bad", id: 1.5 }];
     expect(() => validateConfig(data)).toThrow("positive integer");
   });
 
   test("rejects scene with empty name", () => {
     const data = validConfig();
-    data.devices[0].scenes = [{ name: "", id: 1 }];
+    data.devices[0]!.scenes = [{ name: "", id: 1 }];
     expect(() => validateConfig(data)).toThrow(
       "scenes[0].name must be a non-empty string",
     );
@@ -334,8 +334,8 @@ describe("loadConfig", () => {
   let tmpDir: string;
 
   test("loads valid YAML file", () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "hoboken-test-"));
-    const configPath = join(tmpDir, "config.yaml");
+    tmpDir = mkdtempSync(path.join(tmpdir(), "hoboken-test-"));
+    const configPath = path.join(tmpDir, "config.yaml");
     writeFileSync(
       configPath,
       `
