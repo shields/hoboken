@@ -103,6 +103,7 @@ export interface MetricsServer {
   server: Server;
   setReady: () => void;
   notifyStateChange: () => void;
+  close: () => Promise<void>;
 }
 
 export interface MetricsServerOptions {
@@ -200,6 +201,19 @@ export function startMetricsServer(
       for (const client of sseClients) {
         sendSseEvent(client, content);
       }
+    },
+    close: () => {
+      if (!server.listening) return Promise.resolve();
+      return new Promise<void>((resolve, reject) => {
+        for (const client of sseClients) {
+          client.destroy();
+        }
+        server.close((err?: Error) => {
+          if (err) reject(err);
+          else resolve();
+        });
+        server.closeAllConnections();
+      });
     },
   };
 }

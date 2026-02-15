@@ -649,6 +649,8 @@ describe("startBridge with metrics", () => {
 
     await shutdown();
   });
+
+
 });
 
 describe("buildStatusData", () => {

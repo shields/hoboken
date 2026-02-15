@@ -355,12 +355,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       const ms = metricsServer;
       if (ms) {
         log.log("Shutting down: stopping metrics server");
-        await new Promise<void>((resolve, reject) => {
-          ms.server.close((err?: Error) => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
+        await ms.close();
       }
       metrics?.dispose();
       log.log("Shutdown complete");

@@ -274,17 +274,9 @@ describe("SSE (GET /events)", () => {
 
   afterEach(async () => {
     if (ms) {
-      const s = ms.server;
+      const ref = ms;
       ms = undefined;
-      if (s.listening) {
-        await new Promise<void>((resolve, reject) => {
-          s.close((err) => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
-        s.closeAllConnections();
-      }
+      await ref.close();
     }
   });
 
@@ -431,6 +423,38 @@ describe("SSE (GET /events)", () => {
     const text = new TextDecoder().decode(value);
     expect(text).toContain(":heartbeat");
     controller.abort();
+  });
+
+  test("close() completes with active SSE connections", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    // Connect SSE client using raw http to avoid fetch stream errors
+    const http = await import("node:http");
+    await new Promise<void>((resolve) => {
+      const req = http.get(
+        `http://127.0.0.1:${String(port)}/events`,
+        (res) => {
+          res.once("data", () => {
+            resolve();
+          });
+          res.on("error", () => {
+            // Expected: connection force-closed during close()
+          });
+        },
+      );
+      req.on("error", () => {
+        // Expected: socket hang up during close()
+      });
+    });
+
+    // close() destroys SSE clients so server.close() doesn't hang
+    await ms.close();
+    ms = undefined; // already closed, skip afterEach close
   });
 
   test("POST /events returns 404", async () => {
