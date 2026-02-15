@@ -1,6 +1,10 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { Registry } from "prom-client";
-import { createMetrics, startMetricsServer } from "../src/metrics.ts";
+import {
+  createMetrics,
+  msUntilChange,
+  startMetricsServer,
+} from "../src/metrics.ts";
 import type { GetStatusFn, MetricsServer, StatusData } from "../src/metrics.ts";
 import type { Server } from "node:http";
 
@@ -865,7 +869,8 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).not.toContain("ago");
+    expect(body).not.toContain("data-ts=");
+    expect(body).not.toContain('class="hint"');
   });
 
   test("no annotations for unrecognized keys", async () => {
@@ -906,5 +911,85 @@ describe("status page (GET /)", () => {
     ).text();
     expect(body).not.toContain("<thead>");
     expect(body).not.toContain("<th>");
+  });
+
+  test("last_seen hint includes data-ts attribute", async () => {
+    const register = new Registry();
+    const ts = new Date(Date.now() - 120000).toISOString();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Sensor",
+            topic: "sensor",
+            capabilities: ["on_off"],
+            state: { last_seen: ts },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain(`data-ts="${ts}"`);
+    expect(body).toContain("2m ago");
+  });
+
+  test("last_seen data-ts attribute escapes HTML in timestamp", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Sensor",
+            topic: "sensor",
+            capabilities: ["on_off"],
+            state: { last_seen: '<script>"xss"</script>' },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).not.toContain('<script>"xss"</script>');
+  });
+});
+
+describe("msUntilChange", () => {
+  test("seconds range: next change in ~1s", () => {
+    expect(msUntilChange(0)).toBe(1000);
+    expect(msUntilChange(500)).toBe(500);
+    expect(msUntilChange(30000)).toBe(1000);
+    expect(msUntilChange(59000)).toBe(1000);
+    expect(msUntilChange(59500)).toBe(500);
+  });
+
+  test("minutes range: next change at minute boundary", () => {
+    expect(msUntilChange(60000)).toBe(60000);
+    expect(msUntilChange(90000)).toBe(30000);
+    expect(msUntilChange(3_540_000)).toBe(60000);
+    expect(msUntilChange(3_599_000)).toBe(1000);
+  });
+
+  test("hours range: next change at minute boundary", () => {
+    expect(msUntilChange(3_600_000)).toBe(60000);
+    expect(msUntilChange(7_200_000)).toBe(60000);
+    expect(msUntilChange(86_340_000)).toBe(60000);
+    expect(msUntilChange(86_399_000)).toBe(1000);
+  });
+
+  test("days range: next change at hour boundary", () => {
+    expect(msUntilChange(86_400_000)).toBe(3_600_000);
+    expect(msUntilChange(91_800_000)).toBe(1_800_000);
+    expect(msUntilChange(172_800_000)).toBe(3_600_000);
   });
 });

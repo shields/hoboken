@@ -35,6 +35,7 @@ const data: StatusData = {
         state: "OFF",
         brightness: 0,
         color: { hue: 240, saturation: 80 },
+        last_seen: new Date(Date.now() - 15000).toISOString(),
       },
     },
     {

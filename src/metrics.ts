@@ -256,7 +256,7 @@ function formatHint(
     const ms = Date.now() - new Date(value).getTime();
     if (!Number.isFinite(ms) || ms < 0) return null;
     return {
-      html: `<span class="hint">\u2192 ${formatDuration(ms)} ago</span>`,
+      html: `<span class="hint" data-ts="${escapeHtml(value)}">\u2192 ${formatDuration(ms)} ago</span>`,
       placement: "value",
     };
   }
@@ -280,6 +280,14 @@ function formatDuration(ms: number): string {
   return remainingHours > 0
     ? `${String(days)}d ${String(remainingHours)}h`
     : `${String(days)}d`;
+}
+
+export function msUntilChange(elapsedMs: number): number {
+  const seconds = Math.floor(elapsedMs / 1000);
+  if (seconds < 60) return 1000 - (elapsedMs % 1000);
+  const hours = Math.floor(seconds / 3600);
+  if (hours < 24) return 60000 - (elapsedMs % 60000);
+  return 3_600_000 - (elapsedMs % 3_600_000);
 }
 
 function formatValue(v: unknown): string {
@@ -404,9 +412,47 @@ function renderStatusPage(data: StatusData): string {
 <body>
 <div id="content">${content}</div>
 <script>
-const src = new EventSource("/events");
-src.onmessage = (e) => {
+function formatDuration(ms) {
+  var s = Math.floor(ms / 1000);
+  if (s < 60) return s + "s";
+  var m = Math.floor(s / 60);
+  if (m < 60) return m + "m";
+  var h = Math.floor(m / 60), rm = m % 60;
+  if (h < 24) return rm > 0 ? h + "h " + rm + "m" : h + "h";
+  var d = Math.floor(h / 24), rh = h % 24;
+  return rh > 0 ? d + "d " + rh + "h" : d + "d";
+}
+function msUntilChange(ms) {
+  var s = Math.floor(ms / 1000);
+  if (s < 60) return 1000 - (ms % 1000);
+  if (Math.floor(s / 3600) < 24) return 60000 - (ms % 60000);
+  return 3600000 - (ms % 3600000);
+}
+var timers = [];
+function scheduleUpdates() {
+  for (var i = 0; i < timers.length; i++) clearTimeout(timers[i]);
+  timers = [];
+  var els = document.querySelectorAll("[data-ts]");
+  for (var j = 0; j < els.length; j++) {
+    (function(el) {
+      var ts = new Date(el.getAttribute("data-ts")).getTime();
+      var update = function() {
+        var elapsed = Date.now() - ts;
+        if (elapsed < 0 || !isFinite(elapsed)) return;
+        el.textContent = "\u2192 " + formatDuration(elapsed) + " ago";
+        timers.push(setTimeout(update, msUntilChange(elapsed)));
+      };
+      var elapsed = Date.now() - ts;
+      if (elapsed >= 0 && isFinite(elapsed))
+        timers.push(setTimeout(update, msUntilChange(elapsed)));
+    })(els[j]);
+  }
+}
+scheduleUpdates();
+var src = new EventSource("/events");
+src.onmessage = function(e) {
   document.getElementById("content").innerHTML = e.data;
+  scheduleUpdates();
 };
 </script>
 </body>
