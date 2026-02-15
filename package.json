@@ -1,7 +1,9 @@
 {
   "name": "hoboken",
-  "version": "1.0.0",
+  "version": "0.0.0",
+  "private": true,
   "type": "module",
+  "license": "Apache-2.0",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "demo:status": "node --disable-warning=ExperimentalWarning demo/status-page.ts",
