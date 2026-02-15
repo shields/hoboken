@@ -554,6 +554,55 @@ describe("status page (GET /)", () => {
     expect(hkIndex).toBeLessThan(mqttIndex);
   });
 
+  test("HomeKit ColorTemperature shows mireds", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "color_temp"],
+            state: { state: "ON", color_temp: 370 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("ColorTemperature");
+    expect(body).toContain("370 mireds");
+  });
+
+  test("HomeKit ColorTemperature clamps out-of-range values", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "color_temp"],
+            state: { state: "ON", color_temp: 50 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("140 mireds");
+  });
+
   test("HomeKit Brightness shows percentage", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
