@@ -680,6 +680,7 @@ describe("status page (GET /)", () => {
     ).text();
     expect(body).toContain("ColorTemperature");
     expect(body).toContain("370 mireds");
+    expect(body).toContain("\u2192 2703 K");
   });
 
   test("HomeKit ColorTemperature clamps out-of-range values", async () => {
@@ -704,6 +705,7 @@ describe("status page (GET /)", () => {
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
     expect(body).toContain("140 mireds");
+    expect(body).toContain("\u2192 7143 K");
   });
 
   test("HomeKit Brightness shows percentage", async () => {

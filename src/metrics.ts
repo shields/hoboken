@@ -320,6 +320,7 @@ interface HomeKitRow {
   capability: string;
   name: string;
   value: string;
+  hint?: string | undefined;
 }
 
 function computeHomeKitValues(
@@ -350,13 +351,16 @@ function computeHomeKitValues(
       }
       case "color_temp": {
         const ct = state.color_temp;
+        const clamped = typeof ct === "number" ? clampColorTemp(ct) : undefined;
         rows.push({
           capability: "color_temp",
           name: "ColorTemperature",
           value:
-            typeof ct === "number"
-              ? `${String(clampColorTemp(ct))} mireds`
-              : "\u2014",
+            clamped === undefined ? "\u2014" : `${String(clamped)} mireds`,
+          hint:
+            clamped === undefined
+              ? undefined
+              : `<span class="hint">\u2192 ${String(Math.round(1_000_000 / clamped))} K</span>`,
         });
         break;
       }
@@ -396,14 +400,12 @@ function renderHomeKitSection(
     return `<div class="label">HomeKit</div>\n<span class="na">No state received</span>`;
   }
   const rows = computeHomeKitValues(state, capabilities);
-  if (rows.length === 0) {
-    return `<div class="label">HomeKit</div>`;
-  }
   const rowsHtml = rows
     .map((r) => {
       const vtName = `${vtPrefix}-hk-${r.name}`;
       const valClass = r.value === "\u2014" ? ' class="na"' : "";
-      return `<tr><td class="cap">${escapeHtml(r.capability)}</td><td>${escapeHtml(r.name)}</td><td${valClass} data-vt="${vtName}">${escapeHtml(r.value)}</td></tr>`;
+      const hint = r.hint ?? "";
+      return `<tr><td class="cap">${escapeHtml(r.capability)}</td><td>${escapeHtml(r.name)}</td><td${valClass} data-vt="${vtName}">${escapeHtml(r.value)}${hint}</td></tr>`;
     })
     .join("");
   return `<div class="label">HomeKit</div>\n<table><tbody>${rowsHtml}</tbody></table>`;
