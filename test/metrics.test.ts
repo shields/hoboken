@@ -579,7 +579,7 @@ describe("status page (GET /)", () => {
     expect(body).toContain('data-vt="v-desk-lamp-hk-Brightness"');
   });
 
-  test("HomeKit shows en-dash for missing state fields", async () => {
+  test("HomeKit shows em-dash for missing state fields", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
       makeStatus({
@@ -600,9 +600,34 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    // brightness, color_temp, hue, saturation should all show en-dash
-    const enDashCount = (body.match(/\u2014/g) ?? []).length;
-    expect(enDashCount).toBeGreaterThanOrEqual(4);
+    // brightness, color_temp, hue, saturation should all show em-dash
+    const emDashCount = (body.match(/\u2014/g) ?? []).length;
+    expect(emDashCount).toBeGreaterThanOrEqual(4);
+  });
+
+  test("HomeKit missing values are styled gray", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "brightness"],
+            state: { state: "ON" },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain('class="na"');
+    expect(body).toMatch(/class="na"[^>]*>\u2014</);
   });
 
   test("HomeKit Hue and Saturation from color_hs capability", async () => {

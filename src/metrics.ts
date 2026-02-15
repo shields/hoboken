@@ -402,7 +402,8 @@ function renderHomeKitSection(
   const rowsHtml = rows
     .map((r) => {
       const vtName = `${vtPrefix}-hk-${r.name}`;
-      return `<tr><td class="cap">${escapeHtml(r.capability)}</td><td>${escapeHtml(r.name)}</td><td data-vt="${vtName}">${escapeHtml(r.value)}</td></tr>`;
+      const valClass = r.value === "\u2014" ? ' class="na"' : "";
+      return `<tr><td class="cap">${escapeHtml(r.capability)}</td><td>${escapeHtml(r.name)}</td><td${valClass} data-vt="${vtName}">${escapeHtml(r.value)}</td></tr>`;
     })
     .join("");
   return `<div class="label">HomeKit</div>\n<table><tbody>${rowsHtml}</tbody></table>`;
