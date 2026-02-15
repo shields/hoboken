@@ -1,24 +1,20 @@
 # Hoboken
 
-Minimal HomeKit bridge for Zigbee2MQTT. Exposes Z2M lights and scenes to Apple
-Home for HomePod voice commands.
+A minimal HomeKit bridge for Zigbee2MQTT. Exposes Z2M lights, smart plugs, and scenes to Apple
+Home for HomePod and Siri voice commands.
 
-Built with [`@homebridge/hap-nodejs`](https://github.com/homebridge/HAP-NodeJS)
-directly — no Homebridge or Matterbridge framework.
-
-It's called "Hoboken" because that has some of the same letters as
-"HomeKit Bridge".
+It also provides an HTTP endpoint with a live-updating dashboard presenting all
+data in both MQTT and HAP forms, as well as Prometheus metrics and health check endpoints.
 
 ## Why
 
-Matterbridge and Homebridge are too complex to troubleshoot. Hoboken does one
-thing: bridge Z2M lights to HomeKit.
+Matterbridge and Homebridge are too complex and hard to troubleshoot. Hoboken does one
+thing: bridge Z2M to HomeKit. It's built directly on
+[`hap-nodejs`](https://github.com/homebridge/HAP-NodeJS). It does not have any
+discovery, self-update, or plugins. You get exactly what you get.
 
-## Architecture
-
-```
-Apple Home ↔ HomeKit (HAP) ↔ Hoboken ↔ MQTT ↔ Zigbee2MQTT ↔ Zigbee devices
-```
+It's called "Hoboken" because that has some of the same letters as
+"HomeKit Bridge".
 
 ### Modules
 
