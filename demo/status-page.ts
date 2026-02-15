@@ -56,21 +56,30 @@ ms.server.on("listening", () => {
   console.log(`Status page: http://127.0.0.1:${String(port)}/`);
 });
 
-const lrState = data.devices[0]?.state;
 const brState = data.devices[1]?.state;
-if (!lrState || !brState) throw new Error("demo data missing");
+if (!brState) throw new Error("demo data missing");
+const brColor = brState.color as Record<string, unknown>;
+
+const mutations: (() => void)[] = [
+  () => {
+    brState.state = brState.state === "ON" ? "OFF" : "ON";
+  },
+  () => {
+    brState.brightness = Math.floor(Math.random() * 254);
+  },
+  () => {
+    brColor.hue = Math.floor(Math.random() * 360);
+  },
+  () => {
+    brColor.saturation = Math.floor(Math.random() * 100);
+  },
+];
+let idx = 0;
 
 setInterval(() => {
-  lrState.brightness = Math.floor(Math.random() * 254);
-  lrState.color_temp = 150 + Math.floor(Math.random() * 350);
-  lrState.state = lrState.state === "ON" ? "OFF" : "ON";
-  lrState.last_seen = new Date().toISOString();
-
-  const color = brState.color as Record<string, unknown>;
-  color.hue = Math.floor(Math.random() * 360);
-  color.saturation = Math.floor(Math.random() * 100);
-  brState.brightness = Math.floor(Math.random() * 254);
+  const mutate = mutations[idx % mutations.length];
+  if (mutate) mutate();
+  idx++;
   brState.last_seen = new Date().toISOString();
-
   ms.notifyStateChange();
 }, 3000);
