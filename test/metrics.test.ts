@@ -554,6 +554,33 @@ describe("status page (GET /)", () => {
     expect(hkIndex).toBeLessThan(mqttIndex);
   });
 
+  test("HomeKit Hue and Saturation from color_hs capability", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "color_hs"],
+            state: { state: "ON", color: { hue: 240, saturation: 80 } },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("Hue");
+    expect(body).toContain("240\u00B0");
+    expect(body).toContain("Saturation");
+    expect(body).toContain("80%");
+  });
+
   test("HomeKit ColorTemperature shows mireds", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
