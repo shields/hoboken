@@ -457,6 +457,20 @@ describe("status page (GET /)", () => {
     expect(body).toContain("desk_lamp");
   });
 
+  test("shows 'MQTT state' label", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("MQTT state");
+  });
+
   test("returns 404 when no getStatus provided", async () => {
     const register = new Registry();
     ms = startMetricsServer(0, register);

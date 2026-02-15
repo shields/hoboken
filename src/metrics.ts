@@ -356,7 +356,7 @@ function renderStatusContent(data: StatusData): string {
         <h2>${escapeHtml(device.name)} <span class="topic">${escapeHtml(device.topic)}</span></h2>
         <div class="subtitle">${caps}</div>
         ${scenesHtml}
-        <div class="label">State</div>
+        <div class="label">MQTT state</div>
         ${stateHtml}
       </div>`;
   }
