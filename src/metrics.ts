@@ -409,6 +409,15 @@ function renderStatusPage(data: StatusData): string {
   .conn-list { list-style: none; margin: 0; padding: 0; font-family: monospace; font-size: 0.9rem; }
   .check { color: #2a2; font-weight: bold; font-size: 0.9rem; }
   ul { margin: 0.25rem 0; padding-left: 1.5rem; }
+  /* root has higher specificity (0,0,1) than * (0,0,0) per View Transitions spec */
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+  @keyframes flip-out { to { transform: perspective(300px) rotateX(90deg); } }
+  @keyframes flip-in { from { transform: perspective(300px) rotateX(-90deg); } }
+  ::view-transition-old(*) { animation: flip-out 0.2s ease-in forwards; }
+  ::view-transition-new(*) { animation: flip-in 0.2s ease-out forwards; }
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s; }
+  }
 </style>
 </head>
 <body>
@@ -430,9 +439,9 @@ function msUntilChange(ms) {
   if (Math.floor(s / 3600) < 24) return 60000 - (ms % 60000);
   return 3600000 - (ms % 3600000);
 }
-var timers = [];
+var timers = []; // declared here, cleared in scheduleUpdates below
 function scheduleUpdates() {
-  for (var i = 0; i < timers.length; i++) clearTimeout(timers[i]);
+  for (var i = 0; i < timers.length; i++) clearTimeout(timers[i]); // clear all pending
   timers = [];
   var els = document.querySelectorAll("[data-ts]");
   for (var j = 0; j < els.length; j++) {
@@ -453,8 +462,15 @@ function scheduleUpdates() {
 scheduleUpdates();
 var src = new EventSource("/events");
 src.onmessage = function(e) {
-  document.getElementById("content").innerHTML = e.data;
-  scheduleUpdates();
+  function update() {
+    document.getElementById("content").innerHTML = e.data;
+    scheduleUpdates();
+  }
+  if (document.startViewTransition) {
+    document.startViewTransition(update);
+  } else {
+    update();
+  }
 };
 </script>
 </body>

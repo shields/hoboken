@@ -938,6 +938,52 @@ describe("status page (GET /)", () => {
     expect(body).not.toContain("<th>");
   });
 
+  test("includes flip animation CSS keyframes", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("@keyframes flip-out");
+    expect(body).toContain("@keyframes flip-in");
+    expect(body).toContain("rotateX(90deg)");
+    expect(body).toContain("rotateX(-90deg)");
+  });
+
+  test("includes prefers-reduced-motion media query", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("prefers-reduced-motion: reduce");
+    expect(body).toContain("animation-duration: 0s");
+  });
+
+  test("wraps SSE update in startViewTransition with fallback", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("startViewTransition");
+  });
+
   test("last_seen hint includes data-ts attribute", async () => {
     const register = new Registry();
     const ts = new Date(Date.now() - 120000).toISOString();
