@@ -495,8 +495,8 @@ function renderStatusPage(data: StatusData): string {
   .device { background: #fff; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
   .device h2 { margin-top: 0; margin-bottom: 0.15rem; }
   .topic { font-weight: normal; font-family: monospace; color: #888; font-size: 0.75em; margin-left: 0.4em; }
-  .subtitle { font-family: monospace; font-size: 0.9rem; color: #666; margin-bottom: 0.5rem; }
   .label { font-weight: bold; margin-top: 0.5rem; }
+  .cap { color: #999; }
   .value { font-family: monospace; }
   .na { color: #888; font-style: italic; }
   table { border-collapse: collapse; width: auto; margin-top: 0.25rem; font-family: monospace; font-size: 0.9rem; }
