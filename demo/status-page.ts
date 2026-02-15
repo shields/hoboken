@@ -56,19 +56,21 @@ ms.server.on("listening", () => {
   console.log(`Status page: http://127.0.0.1:${String(port)}/`);
 });
 
-setInterval(() => {
-  const lr = data.devices[0]!.state!;
-  lr.brightness = Math.floor(Math.random() * 254);
-  lr.color_temp = 150 + Math.floor(Math.random() * 350);
-  lr.state = lr.state === "ON" ? "OFF" : "ON";
-  lr.last_seen = new Date().toISOString();
+const lrState = data.devices[0]?.state;
+const brState = data.devices[1]?.state;
+if (!lrState || !brState) throw new Error("demo data missing");
 
-  const br = data.devices[1]!.state!;
-  const color = br.color as Record<string, unknown>;
+setInterval(() => {
+  lrState.brightness = Math.floor(Math.random() * 254);
+  lrState.color_temp = 150 + Math.floor(Math.random() * 350);
+  lrState.state = lrState.state === "ON" ? "OFF" : "ON";
+  lrState.last_seen = new Date().toISOString();
+
+  const color = brState.color as Record<string, unknown>;
   color.hue = Math.floor(Math.random() * 360);
   color.saturation = Math.floor(Math.random() * 100);
-  br.brightness = Math.floor(Math.random() * 254);
-  br.last_seen = new Date().toISOString();
+  brState.brightness = Math.floor(Math.random() * 254);
+  brState.last_seen = new Date().toISOString();
 
   ms.notifyStateChange();
 }, 3000);
