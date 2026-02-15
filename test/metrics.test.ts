@@ -847,6 +847,69 @@ describe("status page (GET /)", () => {
     expect(body).toContain("No state received");
   });
 
+  test("contains hidden disconnected banner", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain('<div id="disconnected"');
+    expect(body).toContain("hidden");
+    expect(body).toContain("Connection lost");
+  });
+
+  test("contains onerror handler that shows disconnected banner", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("src.onerror");
+    expect(body).toContain("disconnected");
+    expect(body).toContain("removeAttribute");
+  });
+
+  test("contains onopen handler with reconnection logic", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("src.onopen");
+    expect(body).toContain("wasDisconnected");
+    expect(body).toContain("Reconnected");
+  });
+
+  test("CSS contains #disconnected rule", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("#disconnected");
+    expect(body).toContain("#c22");
+  });
+
   test("includes EventSource script and content wrapper", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () => makeStatus();

@@ -525,6 +525,8 @@ function renderStatusPage(data: StatusData): string {
   .swatch { display: inline-block; width: 1em; height: 1em; border-radius: 2px; vertical-align: middle; border: 1px solid #ccc; margin-left: 0.5em; }
   .conn-list { list-style: none; margin: 0; padding: 0; font-family: monospace; font-size: 0.9rem; }
   .check { color: #2a2; font-weight: bold; font-size: 0.9rem; }
+  #disconnected { background: #c22; color: #fff; text-align: center; padding: 0.5rem; border-radius: 8px; margin-bottom: 1rem; font-weight: bold; }
+  #disconnected.reconnected { background: #2a2; }
   ul { margin: 0.25rem 0; padding-left: 1.5rem; }
   /* root has higher specificity (0,0,1) than * (0,0,0) per View Transitions spec */
   ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
@@ -537,6 +539,7 @@ function renderStatusPage(data: StatusData): string {
 </style>
 </head>
 <body>
+<div id="disconnected" hidden>Connection lost. Reconnecting&hellip;</div>
 <div id="content">${content}</div>
 <script>
 function formatDuration(ms) {
@@ -577,6 +580,25 @@ function scheduleUpdates() {
 }
 scheduleUpdates();
 var src = new EventSource("/events");
+var wasDisconnected = false;
+var hideTimer;
+src.onerror = function() {
+  if (hideTimer) clearTimeout(hideTimer);
+  wasDisconnected = true;
+  var el = document.getElementById("disconnected");
+  el.textContent = "Connection lost. Reconnecting\u2026";
+  el.className = "";
+  el.removeAttribute("hidden");
+};
+src.onopen = function() {
+  if (!wasDisconnected) return;
+  if (hideTimer) clearTimeout(hideTimer);
+  var el = document.getElementById("disconnected");
+  el.textContent = "Reconnected";
+  el.className = "reconnected";
+  el.removeAttribute("hidden");
+  hideTimer = setTimeout(function() { el.setAttribute("hidden", ""); }, 3000);
+};
 src.onmessage = function(e) {
   var content = document.getElementById("content");
   if (!document.startViewTransition) {
