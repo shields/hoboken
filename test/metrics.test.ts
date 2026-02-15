@@ -406,6 +406,33 @@ describe("SSE (GET /events)", () => {
     ms.notifyStateChange();
   });
 
+  test("sends heartbeat comments to SSE clients", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus, {
+      heartbeatMs: 100,
+    });
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const controller = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${String(port)}/events`, {
+      signal: controller.signal,
+    });
+    const reader = res.body!.getReader();
+    // Consume initial SSE event
+    await reader.read();
+
+    // Wait long enough for at least one heartbeat
+    await new Promise((r) => setTimeout(r, 250));
+
+    const { value } = await reader.read();
+    const text = new TextDecoder().decode(value);
+    expect(text).toContain(":heartbeat");
+    controller.abort();
+  });
+
   test("POST /events returns 404", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () => makeStatus();

@@ -105,14 +105,20 @@ export interface MetricsServer {
   notifyStateChange: () => void;
 }
 
+export interface MetricsServerOptions {
+  heartbeatMs?: number;
+}
+
 export function startMetricsServer(
   port: number,
   register: Registry,
   bind?: string,
   getStatus?: GetStatusFn,
+  options?: MetricsServerOptions,
 ): MetricsServer {
   let ready = false;
   const sseClients = new Set<ServerResponse>();
+  const heartbeatMs = options?.heartbeatMs ?? 30000;
 
   const server = createServer((req, res) => {
     if (req.url === "/events" && req.method === "GET" && getStatus) {
@@ -156,6 +162,16 @@ export function startMetricsServer(
       res.writeHead(404);
       res.end("Not Found");
     }
+  });
+
+  const heartbeatInterval = setInterval(() => {
+    for (const client of sseClients) {
+      if (!client.destroyed) client.write(":heartbeat\n\n");
+    }
+  }, heartbeatMs);
+
+  server.on("close", () => {
+    clearInterval(heartbeatInterval);
   });
 
   // Fail fast: if the configured metrics port is unavailable, the process
