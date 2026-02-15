@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
@@ -15,6 +15,24 @@ import type { Config } from "../src/config.ts";
 HAPStorage.setCustomStoragePath(
   mkdtempSync(path.join(tmpdir(), "hoboken-test-")),
 );
+
+// Suppress a known race in @homebridge/ciao: the mDNS Prober schedules probe
+// packets via setTimeout. When bridge.unpublish() is called quickly (as tests
+// do), the timer callback may already be queued in the event loop. It calls
+// sendQueryBroadcast on the now-closed mDNS server, throwing ERR_SERVER_CLOSED
+// synchronously inside setTimeout — an uncaught exception the library can't
+// catch. See https://github.com/homebridge/ciao/pull/60
+function suppressCiaoShutdownError(err: Error): void {
+  // ciao's ServerClosedError sets .name (not .code) to "ERR_SERVER_CLOSED"
+  if (err.name === "ERR_SERVER_CLOSED") return;
+  throw err;
+}
+beforeAll(() => {
+  process.on("uncaughtException", suppressCiaoShutdownError);
+});
+afterAll(() => {
+  process.removeListener("uncaughtException", suppressCiaoShutdownError);
+});
 
 const expectedVersion = execFileSync(
   "git",
