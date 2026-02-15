@@ -554,6 +554,32 @@ describe("status page (GET /)", () => {
     expect(hkIndex).toBeLessThan(mqttIndex);
   });
 
+  test("HomeKit Brightness shows percentage", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "brightness"],
+            state: { state: "ON", brightness: 200 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    // HomeKit table should show brightness row
+    expect(body).toContain("Brightness");
+    expect(body).toContain("79%");
+  });
+
   test("HomeKit shows 'No state received' when state is null", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
