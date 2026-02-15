@@ -22,6 +22,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@homebridge/ciao@1.3.5": "patches/@homebridge%2Fciao@1.3.5.patch",
+  },
   "packages": {
     "@babel/helper-validator-identifier": ["@babel/helper-validator-identifier@7.28.5", "", {}, "sha512-qSs4ifwzKJSV39ucNjsvc6WVHs6b7S03sOh2OcHF9UHfVPqWWALUsNUVzhSBiItjRZoLHx7nIarVjqKVusUZ1Q=="],
 

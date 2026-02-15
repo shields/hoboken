@@ -1,0 +1,90 @@
+diff --git a/lib/MDNSServer.js b/lib/MDNSServer.js
+index 62bb81f8dd4fe943216dbb2d8ec415d3fc75f0f2..5ee77dbf83388db29ee433b990f28afadf90ca67 100644
+--- a/lib/MDNSServer.js
++++ b/lib/MDNSServer.js
+@@ -174,6 +174,12 @@ class MDNSServer {
+         return this.sendOnAllNetworksForService(packet, service);
+     }
+     sendResponse(response, endpointOrInterface, callback) {
++        if (this.closed) {
++            if (callback) {
++                callback();
++            }
++            return;
++        }
+         this.send(response, endpointOrInterface).then(result => {
+             if (result.status === "rejected") {
+                 if (callback) {
+@@ -189,6 +195,9 @@ class MDNSServer {
+         });
+     }
+     sendOnAllNetworksForService(packet, service) {
++        if (this.closed) {
++            return Promise.resolve([]);
++        }
+         this.checkUnicastResponseFlag(packet);
+         const message = packet.encode();
+         this.assertBeforeSend(message, "IPv4" /* IPFamily.IPv4 */);
+@@ -232,6 +241,10 @@ class MDNSServer {
+         return Promise.all(promises);
+     }
+     send(packet, endpointOrInterface) {
++        if (this.closed) {
++            const name = typeof endpointOrInterface === "string" ? endpointOrInterface : endpointOrInterface.interface;
++            return Promise.resolve({ status: "rejected", interface: name, reason: new Error("Server is closed") });
++        }
+         this.checkUnicastResponseFlag(packet);
+         const message = packet.encode();
+         let address;
+@@ -283,9 +296,6 @@ class MDNSServer {
+         }
+     }
+     assertBeforeSend(message, family) {
+-        if (this.closed) {
+-            throw new errors_1.ServerClosedError("Cannot send packets on a closed mdns server!");
+-        }
+         (0, assert_1.default)(this.bound, "Cannot send packets before server is not bound!");
+         const ipHeaderSize = family === "IPv4" /* IPFamily.IPv4 */ ? MDNSServer.DEFAULT_IP4_HEADER : MDNSServer.DEFAULT_IP6_HEADER;
+         // RFC 6762 17.
+diff --git a/lib/Responder.js b/lib/Responder.js
+index 7df617c848b386a19ef3155355187a8879d24b72..e5a4234673b4b6df260e60bb76d73ba53b88bba0 100644
+--- a/lib/Responder.js
++++ b/lib/Responder.js
+@@ -156,6 +156,10 @@ class Responder {
+         if (this.broadcastInterval) {
+             clearTimeout(this.broadcastInterval);
+         }
++        for (const response of this.delayedMulticastResponses) {
++            response.cancel();
++        }
++        this.delayedMulticastResponses.splice(0);
+         Responder.INSTANCES.delete(this.optionsString);
+         debug("Shutting down Responder...");
+         const promises = [];
+@@ -804,9 +808,6 @@ class Responder {
+                     if (error.name === errors_1.ERR_INTERFACE_NOT_FOUND) {
+                         debug("Multicast response (delayed %dms) was cancelled as the network interface %s is no longer available!", Math.round(response.getTimeSinceCreation()), interfaceName);
+                     }
+-                    else if (error.name === errors_1.ERR_SERVER_CLOSED) {
+-                        debug("Multicast response (delayed %dms) was cancelled as the server is about to be shutdown!", Math.round(response.getTimeSinceCreation()));
+-                    }
+                     else {
+                         throw error;
+                     }
+diff --git a/lib/responder/QueuedResponse.js b/lib/responder/QueuedResponse.js
+index fa8a6a505648fb649fc3db170453f05db9e60595..b002ddf412f3739433abefdf8ceaff7d2cf4bf01 100644
+--- a/lib/responder/QueuedResponse.js
++++ b/lib/responder/QueuedResponse.js
+@@ -74,6 +74,12 @@ class QueuedResponse {
+         this.delayed = true;
+         return true;
+     }
++    cancel() {
++        if (this.timer) {
++            clearTimeout(this.timer);
++            this.timer = undefined;
++        }
++    }
+     combineWithUniqueResponseIfPossible(response, interfaceName) {
+         if (this.interfaceName !== interfaceName) {
+             // can't combine packets which get sent via different interfaces
