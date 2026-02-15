@@ -335,13 +335,15 @@ function renderStatusContent(data: StatusData): string {
     if (device.state === null) {
       stateHtml = '<span class="na">No state received</span>';
     } else {
+      const vtPrefix = `v-${device.topic.replace(/[^a-zA-Z0-9]/g, "-")}`;
       const rows = Object.entries(device.state)
         .map(([k, v]) => {
           const display = formatValue(v);
           const hint = formatHint(k, v, device.capabilities);
           const keyHint = hint?.placement === "key" ? hint.html : "";
           const valueHint = hint?.placement === "value" ? hint.html : "";
-          return `<tr><td>${escapeHtml(k)}${keyHint}</td><td>${escapeHtml(display)}${valueHint}</td></tr>`;
+          const vtName = `${vtPrefix}-${k.replace(/[^a-zA-Z0-9]/g, "-")}`;
+          return `<tr><td>${escapeHtml(k)}${keyHint}</td><td style="view-transition-name:${vtName}">${escapeHtml(display)}${valueHint}</td></tr>`;
         })
         .join("");
       stateHtml = rows

@@ -898,6 +898,31 @@ describe("status page (GET /)", () => {
     expect(body).not.toContain('class="swatch"');
   });
 
+  test("value cells have view-transition-name styles", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "desk/lamp",
+            capabilities: ["on_off", "brightness"],
+            state: { state: "ON", brightness: 200 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("view-transition-name:v-desk-lamp-state");
+    expect(body).toContain("view-transition-name:v-desk-lamp-brightness");
+  });
+
   test("does not render Key/Value table header", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () => makeStatus();
