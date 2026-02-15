@@ -55,3 +55,20 @@ ms.server.on("listening", () => {
   const port = typeof addr === "object" && addr ? addr.port : 0;
   console.log(`Status page: http://127.0.0.1:${String(port)}/`);
 });
+
+setInterval(() => {
+  const lr = data.devices[0].state as Record<string, unknown>;
+  lr.brightness = Math.floor(Math.random() * 254);
+  lr.color_temp = 150 + Math.floor(Math.random() * 350);
+  lr.state = lr.state === "ON" ? "OFF" : "ON";
+  lr.last_seen = new Date().toISOString();
+
+  const br = data.devices[1].state as Record<string, unknown>;
+  const color = br.color as Record<string, unknown>;
+  color.hue = Math.floor(Math.random() * 360);
+  color.saturation = Math.floor(Math.random() * 100);
+  br.brightness = Math.floor(Math.random() * 254);
+  br.last_seen = new Date().toISOString();
+
+  ms.notifyStateChange();
+}, 3000);
