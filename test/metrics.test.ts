@@ -471,6 +471,115 @@ describe("status page (GET /)", () => {
     expect(body).toContain("MQTT state");
   });
 
+  test("does not render capabilities subtitle", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).not.toContain('class="subtitle"');
+  });
+
+  test("HomeKit section shows on_off capability with On characteristic", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            state: { state: "ON" },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("HomeKit");
+    expect(body).toContain("on_off");
+    expect(body).toContain("On");
+    expect(body).toContain("true");
+  });
+
+  test("HomeKit On shows false when state is OFF", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off"],
+            state: { state: "OFF" },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("false");
+  });
+
+  test("HomeKit section appears before MQTT state", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    const hkIndex = body.indexOf("HomeKit");
+    const mqttIndex = body.indexOf("MQTT state");
+    expect(hkIndex).toBeGreaterThan(-1);
+    expect(mqttIndex).toBeGreaterThan(-1);
+    expect(hkIndex).toBeLessThan(mqttIndex);
+  });
+
+  test("HomeKit shows 'No state received' when state is null", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "New Bulb",
+            topic: "new_bulb",
+            capabilities: ["on_off"],
+            state: null,
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    // Both HomeKit and MQTT state sections show "No state received"
+    const matches = body.match(/No state received/g);
+    expect(matches?.length).toBe(2);
+  });
+
   test("returns 404 when no getStatus provided", async () => {
     const register = new Registry();
     ms = startMetricsServer(0, register);

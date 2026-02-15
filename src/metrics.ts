@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import type { Server, ServerResponse } from "node:http";
 import { Counter, Gauge, Registry, collectDefaultMetrics } from "prom-client";
+import { z2mBrightnessToHomeKit, clampColorTemp } from "./convert.ts";
 import * as log from "./log.ts";
 
 export interface Metrics {
@@ -315,13 +316,105 @@ function renderConnectionsList(connections: HapConnection[]): string {
   return `<ul class="conn-list">${items}</ul>`;
 }
 
+interface HomeKitRow {
+  capability: string;
+  name: string;
+  value: string;
+}
+
+function computeHomeKitValues(
+  state: Record<string, unknown>,
+  capabilities: string[],
+): HomeKitRow[] {
+  const rows: HomeKitRow[] = [];
+  for (const cap of capabilities) {
+    switch (cap) {
+      case "on_off":
+        rows.push({
+          capability: "on_off",
+          name: "On",
+          value: state.state === "ON" ? "true" : "false",
+        });
+        break;
+      case "brightness": {
+        const b = state.brightness;
+        rows.push({
+          capability: "brightness",
+          name: "Brightness",
+          value:
+            typeof b === "number"
+              ? `${String(z2mBrightnessToHomeKit(b))}%`
+              : "\u2013",
+        });
+        break;
+      }
+      case "color_temp": {
+        const ct = state.color_temp;
+        rows.push({
+          capability: "color_temp",
+          name: "ColorTemperature",
+          value:
+            typeof ct === "number"
+              ? `${String(clampColorTemp(ct))} mireds`
+              : "\u2013",
+        });
+        break;
+      }
+      case "color_hs": {
+        const color = state.color as Record<string, unknown> | undefined;
+        const h =
+          color && typeof color.hue === "number" ? color.hue : undefined;
+        const s =
+          color && typeof color.saturation === "number"
+            ? color.saturation
+            : undefined;
+        rows.push(
+          {
+            capability: "color_hs",
+            name: "Hue",
+            value: h === undefined ? "\u2013" : `${String(h)}\u00B0`,
+          },
+          {
+            capability: "color_hs",
+            name: "Saturation",
+            value: s === undefined ? "\u2013" : `${String(s)}%`,
+          },
+        );
+        break;
+      }
+    }
+  }
+  return rows;
+}
+
+function renderHomeKitSection(
+  state: Record<string, unknown> | null,
+  capabilities: string[],
+  vtPrefix: string,
+): string {
+  if (state === null) {
+    return `<div class="label">HomeKit</div>\n<span class="na">No state received</span>`;
+  }
+  const rows = computeHomeKitValues(state, capabilities);
+  if (rows.length === 0) {
+    return `<div class="label">HomeKit</div>`;
+  }
+  const rowsHtml = rows
+    .map((r) => {
+      const vtName = `${vtPrefix}-hk-${r.name}`;
+      return `<tr><td class="cap">${escapeHtml(r.capability)}</td><td>${escapeHtml(r.name)}</td><td data-vt="${vtName}">${escapeHtml(r.value)}</td></tr>`;
+    })
+    .join("");
+  return `<div class="label">HomeKit</div>\n<table><tbody>${rowsHtml}</tbody></table>`;
+}
+
 function renderStatusContent(data: StatusData): string {
   let devicesHtml = "";
   const sortedDevices = data.devices.toSorted((a, b) =>
     a.name.localeCompare(b.name),
   );
   for (const device of sortedDevices) {
-    const caps = device.capabilities.map((c) => escapeHtml(c)).join(", ");
+    const vtPrefix = `v-${device.topic.replaceAll(/[^a-zA-Z0-9]/g, "-")}`;
 
     let scenesHtml = "";
     if (device.scenes?.length) {
@@ -331,11 +424,16 @@ function renderStatusContent(data: StatusData): string {
       scenesHtml = `<div class="label">Scenes</div><ul>${items}</ul>`;
     }
 
-    let stateHtml: string;
+    const homeKitHtml = renderHomeKitSection(
+      device.state,
+      device.capabilities,
+      vtPrefix,
+    );
+
+    let mqttStateHtml: string;
     if (device.state === null) {
-      stateHtml = '<span class="na">No state received</span>';
+      mqttStateHtml = '<span class="na">No state received</span>';
     } else {
-      const vtPrefix = `v-${device.topic.replaceAll(/[^a-zA-Z0-9]/g, "-")}`;
       const rows = Object.entries(device.state)
         .map(([k, v]) => {
           const display = formatValue(v);
@@ -346,7 +444,7 @@ function renderStatusContent(data: StatusData): string {
           return `<tr><td>${escapeHtml(k)}${keyHint}</td><td data-vt="${vtName}">${escapeHtml(display)}${valueHint}</td></tr>`;
         })
         .join("");
-      stateHtml = rows
+      mqttStateHtml = rows
         ? `<table><tbody>${rows}</tbody></table>`
         : '<span class="na">Empty state</span>';
     }
@@ -354,10 +452,10 @@ function renderStatusContent(data: StatusData): string {
     devicesHtml += `
       <div class="device">
         <h2>${escapeHtml(device.name)} <span class="topic">${escapeHtml(device.topic)}</span></h2>
-        <div class="subtitle">${caps}</div>
         ${scenesHtml}
+        ${homeKitHtml}
         <div class="label">MQTT state</div>
-        ${stateHtml}
+        ${mqttStateHtml}
       </div>`;
   }
 
