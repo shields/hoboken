@@ -601,7 +601,7 @@ describe("status page (GET /)", () => {
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
     // brightness, color_temp, hue, saturation should all show en-dash
-    const enDashCount = (body.match(/\u2013/g) ?? []).length;
+    const enDashCount = (body.match(/\u2014/g) ?? []).length;
     expect(enDashCount).toBeGreaterThanOrEqual(4);
   });
 

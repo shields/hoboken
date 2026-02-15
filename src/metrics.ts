@@ -344,7 +344,7 @@ function computeHomeKitValues(
           value:
             typeof b === "number"
               ? `${String(z2mBrightnessToHomeKit(b))}%`
-              : "\u2013",
+              : "\u2014",
         });
         break;
       }
@@ -356,7 +356,7 @@ function computeHomeKitValues(
           value:
             typeof ct === "number"
               ? `${String(clampColorTemp(ct))} mireds`
-              : "\u2013",
+              : "\u2014",
         });
         break;
       }
@@ -372,12 +372,12 @@ function computeHomeKitValues(
           {
             capability: "color_hs",
             name: "Hue",
-            value: h === undefined ? "\u2013" : `${String(h)}\u00B0`,
+            value: h === undefined ? "\u2014" : `${String(h)}\u00B0`,
           },
           {
             capability: "color_hs",
             name: "Saturation",
-            value: s === undefined ? "\u2013" : `${String(s)}%`,
+            value: s === undefined ? "\u2014" : `${String(s)}%`,
           },
         );
         break;
