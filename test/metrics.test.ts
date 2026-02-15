@@ -554,6 +554,32 @@ describe("status page (GET /)", () => {
     expect(hkIndex).toBeLessThan(mqttIndex);
   });
 
+  test("HomeKit shows en-dash for missing state fields", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+            state: { state: "ON" },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    // brightness, color_temp, hue, saturation should all show en-dash
+    const enDashCount = (body.match(/\u2013/g) ?? []).length;
+    expect(enDashCount).toBeGreaterThanOrEqual(4);
+  });
+
   test("HomeKit Hue and Saturation from color_hs capability", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
