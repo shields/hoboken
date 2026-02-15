@@ -452,10 +452,10 @@ function renderStatusContent(data: StatusData): string {
 
     devicesHtml += `
       <div class="device">
-        <h2>${escapeHtml(device.name)} <span class="topic">${escapeHtml(device.topic)}</span></h2>
+        <h2>${escapeHtml(device.name)}</h2>
         ${scenesHtml}
         ${homeKitHtml}
-        <div class="label">MQTT state</div>
+        <div class="label">MQTT state <span class="topic">${escapeHtml(device.topic)}</span></div>
         ${mqttStateHtml}
       </div>`;
   }
@@ -495,7 +495,7 @@ function renderStatusPage(data: StatusData): string {
   .status .err { color: #c22; font-weight: bold; }
   .device { background: #fff; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
   .device h2 { margin-top: 0; margin-bottom: 0.15rem; }
-  .topic { font-weight: normal; font-family: monospace; color: #888; font-size: 0.75em; margin-left: 0.4em; }
+  .topic { font-weight: normal; font-family: monospace; color: #888; font-size: 0.85em; margin-left: 0.4em; }
   .label { font-weight: bold; margin-top: 0.5rem; }
   .cap { color: #999; }
   .value { font-family: monospace; }
