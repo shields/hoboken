@@ -1250,10 +1250,8 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("@keyframes flip-out");
-    expect(body).toContain("@keyframes flip-in");
-    expect(body).toContain("rotateX(90deg)");
-    expect(body).toContain("rotateX(-90deg)");
+    expect(body).toContain("@keyframes flash-out");
+    expect(body).toContain("background: #f0f0f0");
   });
 
   test("includes prefers-reduced-motion media query", async () => {

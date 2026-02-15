@@ -510,10 +510,9 @@ function renderStatusPage(data: StatusData): string {
   ul { margin: 0.25rem 0; padding-left: 1.5rem; }
   /* root has higher specificity (0,0,1) than * (0,0,0) per View Transitions spec */
   ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
-  @keyframes flip-out { to { transform: perspective(300px) rotateX(90deg); } }
-  @keyframes flip-in { from { transform: perspective(300px) rotateX(-90deg); } }
-  ::view-transition-old(*) { animation: flip-out 0.4s ease-in forwards; }
-  ::view-transition-new(*) { animation: flip-in 0.4s ease-out forwards; }
+  @keyframes flash-out { from { background: #f0f0f0; } }
+  ::view-transition-old(*) { display: none; }
+  ::view-transition-new(*) { animation: flash-out 1s ease-out; }
   @media (prefers-reduced-motion: reduce) {
     ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s; }
   }
