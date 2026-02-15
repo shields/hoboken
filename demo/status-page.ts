@@ -39,6 +39,14 @@ const data: StatusData = {
       },
     },
     {
+      // Partial state: color_temp capability without a value in state
+      // demonstrates em-dash (—) display for missing HomeKit fields
+      name: "Desk Lamp",
+      topic: "desk_lamp",
+      capabilities: ["on_off", "brightness", "color_temp"],
+      state: { state: "ON", brightness: 127 },
+    },
+    {
       name: "Kitchen Pendant",
       topic: "kitchen_pendant",
       capabilities: ["on_off"],
