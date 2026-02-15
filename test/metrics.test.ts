@@ -898,7 +898,7 @@ describe("status page (GET /)", () => {
     expect(body).not.toContain('class="swatch"');
   });
 
-  test("value cells have view-transition-name styles", async () => {
+  test("value cells have data-vt attributes for view transitions", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
       makeStatus({
@@ -919,8 +919,8 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("view-transition-name:v-desk-lamp-state");
-    expect(body).toContain("view-transition-name:v-desk-lamp-brightness");
+    expect(body).toContain('data-vt="v-desk-lamp-state"');
+    expect(body).toContain('data-vt="v-desk-lamp-brightness"');
   });
 
   test("does not render Key/Value table header", async () => {
@@ -982,6 +982,85 @@ describe("status page (GET /)", () => {
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
     expect(body).toContain("startViewTransition");
+  });
+
+  test("SSE content diff detects only changed values across updates", async () => {
+    const register = new Registry();
+    let state: Record<string, unknown> = { state: "ON", brightness: 200 };
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "brightness"],
+            state,
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const controller = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${String(port)}/events`, {
+      signal: controller.signal,
+    });
+    const reader = res.body!.getReader();
+    const event1 = new TextDecoder().decode((await reader.read()).value);
+
+    // Update 1: only brightness changes
+    state = { state: "ON", brightness: 100 };
+    ms.notifyStateChange();
+    const event2 = new TextDecoder().decode((await reader.read()).value);
+
+    // Update 2: only state changes
+    state = { state: "OFF", brightness: 100 };
+    ms.notifyStateChange();
+    const event3 = new TextDecoder().decode((await reader.read()).value);
+
+    controller.abort();
+
+    // Parse data-vt → cell text from SSE payloads
+    const parse = (raw: string): Map<string, string> => {
+      const html = raw.replaceAll(/^data: /gm, "");
+      const map = new Map<string, string>();
+      for (const m of html.matchAll(/data-vt="([^"]+)"[^>]*>([^<]*)/g)) {
+        if (m[1] && m[2] !== undefined) map.set(m[1], m[2]);
+      }
+      return map;
+    };
+    const vals1 = parse(event1);
+    const vals2 = parse(event2);
+    const vals3 = parse(event3);
+
+    // Between event1 and event2: brightness changed, state did not
+    expect(vals1.get("v-lamp-state")).toBe(vals2.get("v-lamp-state"));
+    expect(vals1.get("v-lamp-brightness")).not.toBe(
+      vals2.get("v-lamp-brightness"),
+    );
+
+    // Between event2 and event3: state changed, brightness did not
+    expect(vals2.get("v-lamp-state")).not.toBe(vals3.get("v-lamp-state"));
+    expect(vals2.get("v-lamp-brightness")).toBe(vals3.get("v-lamp-brightness"));
+  });
+
+  test("client JS clears stale viewTransitionName on unchanged cells", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () => makeStatus();
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    // Regression: the buggy version only set viewTransitionName on changed cells
+    // (if (changed[name]) set), leaving stale names from previous transitions.
+    // The fix assigns to ALL cells, clearing unchanged ones.
+    expect(body).toContain('changed[name] ? name : ""');
   });
 
   test("last_seen hint includes data-ts attribute", async () => {

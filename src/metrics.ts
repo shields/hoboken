@@ -343,7 +343,7 @@ function renderStatusContent(data: StatusData): string {
           const keyHint = hint?.placement === "key" ? hint.html : "";
           const valueHint = hint?.placement === "value" ? hint.html : "";
           const vtName = `${vtPrefix}-${k.replaceAll(/[^a-zA-Z0-9]/g, "-")}`;
-          return `<tr><td>${escapeHtml(k)}${keyHint}</td><td style="view-transition-name:${vtName}">${escapeHtml(display)}${valueHint}</td></tr>`;
+          return `<tr><td>${escapeHtml(k)}${keyHint}</td><td data-vt="${vtName}">${escapeHtml(display)}${valueHint}</td></tr>`;
         })
         .join("");
       stateHtml = rows
@@ -462,15 +462,35 @@ function scheduleUpdates() {
 scheduleUpdates();
 var src = new EventSource("/events");
 src.onmessage = function(e) {
-  function update() {
-    document.getElementById("content").innerHTML = e.data;
+  var content = document.getElementById("content");
+  if (!document.startViewTransition) {
+    content.innerHTML = e.data;
     scheduleUpdates();
+    return;
   }
-  if (document.startViewTransition) {
-    document.startViewTransition(update);
-  } else {
-    update();
-  }
+  var oldVals = {};
+  content.querySelectorAll("[data-vt]").forEach(function(el) {
+    oldVals[el.getAttribute("data-vt")] = el.textContent;
+  });
+  var temp = document.createElement("div");
+  temp.innerHTML = e.data;
+  var changed = {};
+  temp.querySelectorAll("[data-vt]").forEach(function(el) {
+    var name = el.getAttribute("data-vt");
+    if (oldVals[name] !== el.textContent) changed[name] = true;
+  });
+  content.querySelectorAll("[data-vt]").forEach(function(el) {
+    var name = el.getAttribute("data-vt");
+    el.style.viewTransitionName = changed[name] ? name : "";
+  });
+  document.startViewTransition(function() {
+    content.innerHTML = e.data;
+    content.querySelectorAll("[data-vt]").forEach(function(el) {
+      var name = el.getAttribute("data-vt");
+      el.style.viewTransitionName = changed[name] ? name : "";
+    });
+    scheduleUpdates();
+  });
 };
 </script>
 </body>
