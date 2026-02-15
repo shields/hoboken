@@ -1,17 +1,33 @@
 # Hoboken
 
-A minimal HomeKit bridge for Zigbee2MQTT. Exposes Z2M lights, smart plugs, and scenes to Apple
-Home for HomePod and Siri voice commands.
+A minimal HomeKit bridge for Zigbee2MQTT. Exposes Z2M lights, smart plugs,
+and scenes to Apple Home for HomePod and Siri voice commands.
 
 It also provides an HTTP endpoint with a live-updating dashboard presenting all
-data in both MQTT and HAP forms, as well as Prometheus metrics and health check endpoints.
+data in both MQTT and HAP forms, as well as Prometheus metrics and health check
+endpoints.
+
+![Status page](demo/status-page.png)
+
+Note that Hoboken is a HAP bridge, not a client. It provides bidirectional
+control of MQTT devices and scenes to HomeKit. It does not provide control of
+HomeKit-only devices (e.g., Ecobee thermostats) from MQTT. That would be a
+different project.
 
 ## Why
 
 Matterbridge and Homebridge are too complex and hard to troubleshoot. Hoboken does one
 thing: bridge Z2M to HomeKit. It's built directly on
-[`hap-nodejs`](https://github.com/homebridge/HAP-NodeJS). It does not have any
-discovery, self-update, or plugins. You get exactly what you get.
+[`hap-nodejs`](https://github.com/homebridge/HAP-NodeJS).
+
+It does not have any device discovery, self-update, or plugins. You get exactly what
+you configure, and you will always get that.
+
+All dependencies are pure JS/TS code. Test coverage is enforced at 100% branch
+coverage.
+
+The deployment is a reproducible, distroless container image. You can
+run it on K3s or whatever.
 
 It's called "Hoboken" because that has some of the same letters as
 "HomeKit Bridge".
@@ -79,8 +95,10 @@ When metrics are enabled, `GET /` serves an HTML status page showing:
 - MQTT connection status and active HAP connection count
 - Each device with its topic, capabilities, scenes, and current state
 
-This is useful for quick diagnostics without checking logs or Prometheus. To
-preview the status page with sample data:
+This is useful for quick diagnostics without checking logs or Prometheus.
+The page loads new data in real time using SSE.
+
+To preview the status page with sample data:
 
 ```sh
 bun run demo:status

@@ -1,3 +1,5 @@
 node_modules/
 coverage/
 VERSION
+demo/status-page-actual.png
+demo/status-page-diff.png

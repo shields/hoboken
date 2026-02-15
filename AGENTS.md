@@ -17,12 +17,13 @@ Minimal HomeKit bridge for Zigbee2MQTT. Uses `@homebridge/hap-nodejs` directly
 ## Commands
 
 ```sh
-bun install          # Install dependencies
-bun run check        # TypeScript type checking (tsc --noEmit)
-bun run lint         # ESLint
-bun test             # Run tests
-bun test --coverage  # Tests with coverage
-bun run start        # Run with Node.js
+bun install                       # Install dependencies
+bunx playwright install chromium  # Install Playwright browser (first time)
+bun run check                     # TypeScript type checking (tsc --noEmit)
+bun run lint                      # ESLint
+bun run test                      # Run all tests with coverage
+bun run start                     # Run with Node.js
+bun run demo:screenshot           # Regenerate status page golden file
 ```
 
 ## Module Architecture
@@ -77,7 +78,17 @@ Each module is independently testable with dependency injection:
 - All HAP objects instantiated directly (no mocking hap-nodejs)
 - MQTT client is the only mock: use `bun:test` module mocking for `mqtt`
 - Use Bun's fake timers for scene auto-reset tests
-- Tests must pass: `bun run lint && bun run check && bun test --coverage`
+- Tests must pass: `bun run lint && bun run check && bun run test`
+- **Screenshot golden file**: `demo/status-page.png` is a committed screenshot
+  of the status page rendered from `demo/fixture.ts`. The test in
+  `test/screenshot.test.ts` compares a fresh Playwright screenshot against this
+  file byte-for-byte. If the status page HTML/CSS changes, regenerate with
+  `bun run demo:screenshot`.
+- **ciao mDNS patch**: `@homebridge/ciao` has a shutdown race condition where
+  mDNS probe/announce timers fire after the server socket is closed, throwing
+  `ERR_SERVER_CLOSED` as an uncaught exception. A `bun patch` in
+  `patches/@homebridge%2Fciao@1.3.5.patch` fixes this by adding early-return
+  guards to send methods. See https://github.com/homebridge/ciao/pull/60
 
 ## Development Workflow
 
@@ -91,7 +102,7 @@ All verification is automated — no manual browser testing. Run before each
 commit:
 
 ```sh
-bun run lint && bun run check && bun test --coverage
+bun run lint && bun run check && bun run test
 ```
 
 ## Config Validation Rules
