@@ -554,6 +554,31 @@ describe("status page (GET /)", () => {
     expect(hkIndex).toBeLessThan(mqttIndex);
   });
 
+  test("HomeKit value cells have data-vt attributes with hk- infix", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "desk/lamp",
+            capabilities: ["on_off", "brightness"],
+            state: { state: "ON", brightness: 200 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain('data-vt="v-desk-lamp-hk-On"');
+    expect(body).toContain('data-vt="v-desk-lamp-hk-Brightness"');
+  });
+
   test("HomeKit shows en-dash for missing state fields", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
