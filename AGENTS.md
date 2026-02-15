@@ -79,6 +79,21 @@ Each module is independently testable with dependency injection:
 - Use Bun's fake timers for scene auto-reset tests
 - Tests must pass: `bun run lint && bun run check && bun test --coverage`
 
+## Development Workflow
+
+Follow red-green-refactor TDD:
+
+1. **Red**: Write a failing test first
+2. **Green**: Write the minimum code to make the test pass
+3. **Refactor**: Clean up while keeping tests green
+
+All verification is automated — no manual browser testing. Run before each
+commit:
+
+```sh
+bun run lint && bun run check && bun test --coverage
+```
+
 ## Config Validation Rules
 
 - `bridge.mac`: MAC format `XX:XX:XX:XX:XX:XX` (hex digits)
