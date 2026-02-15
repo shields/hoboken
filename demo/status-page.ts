@@ -57,13 +57,13 @@ ms.server.on("listening", () => {
 });
 
 setInterval(() => {
-  const lr = data.devices[0].state as Record<string, unknown>;
+  const lr = data.devices[0]!.state!;
   lr.brightness = Math.floor(Math.random() * 254);
   lr.color_temp = 150 + Math.floor(Math.random() * 350);
   lr.state = lr.state === "ON" ? "OFF" : "ON";
   lr.last_seen = new Date().toISOString();
 
-  const br = data.devices[1].state as Record<string, unknown>;
+  const br = data.devices[1]!.state!;
   const color = br.color as Record<string, unknown>;
   color.hue = Math.floor(Math.random() * 360);
   color.saturation = Math.floor(Math.random() * 100);
