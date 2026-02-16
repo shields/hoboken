@@ -18,12 +18,11 @@ Minimal HomeKit bridge for Zigbee2MQTT. Uses `@homebridge/hap-nodejs` directly
 
 ```sh
 bun install                       # Install dependencies
-bunx playwright install chromium  # Install Playwright browser (first time)
 bun run check                     # TypeScript type checking (tsc --noEmit)
 bun run lint                      # ESLint
 bun run test                      # Run all tests with coverage
 bun run start                     # Run with Node.js
-bun run demo:screenshot           # Regenerate status page golden file
+bun run demo:golden-screenshot    # Regenerate status page golden file (Docker)
 ```
 
 ## Module Architecture
@@ -80,15 +79,24 @@ Each module is independently testable with dependency injection:
 - Use Bun's fake timers for scene auto-reset tests
 - Tests must pass: `bun run lint && bun run check && bun run test`
 - **Screenshot golden file**: `demo/status-page.png` is a committed screenshot
-  of the status page rendered from `demo/fixture.ts`. The test in
+  of the status page rendered from `demo/fixture.ts` inside a Docker container
+  (`Dockerfile.playwright`) for cross-platform determinism. The test in
   `test/screenshot.test.ts` compares a fresh Playwright screenshot against this
-  file byte-for-byte. If the status page HTML/CSS changes, regenerate with
-  `bun run demo:screenshot`.
+  file with zero pixel tolerance. Both golden generation (`bun run demo:golden-screenshot`)
+  and CI testing run inside the same Docker image so fonts and rendering match
+  exactly. The `PLAYWRIGHT_IN_DOCKER` env var triggers `--no-sandbox` for
+  Chromium inside the container.
 - **ciao mDNS patch**: `@homebridge/ciao` has a shutdown race condition where
   mDNS probe/announce timers fire after the server socket is closed, throwing
   `ERR_SERVER_CLOSED` as an uncaught exception. A `bun patch` in
   `patches/@homebridge%2Fciao@1.3.5.patch` fixes this by adding early-return
   guards to send methods. See https://github.com/homebridge/ciao/pull/60
+
+## Copyright Notice
+
+All new files must include the Apache 2.0 copyright header. Use `//` comments
+for TypeScript and `#` comments for shell scripts, placed immediately after the
+shebang line if present. See existing files for the exact format.
 
 ## Development Workflow
 

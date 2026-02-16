@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "demo:status": "node --disable-warning=ExperimentalWarning demo/status-page.ts",
-    "demo:screenshot": "node --disable-warning=ExperimentalWarning demo/screenshot.ts",
+    "demo:golden-screenshot": "demo/docker-screenshot.sh",
     "check": "tsc",
     "lint": "eslint .",
     "test": "bun test --coverage"

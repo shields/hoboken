@@ -28,7 +28,9 @@ export async function captureStatusPage(): Promise<Buffer> {
   const addr = ms.server.address();
   const port = typeof addr === "object" && addr ? addr.port : 0;
 
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({
+    args: process.env.PLAYWRIGHT_IN_DOCKER ? ["--no-sandbox"] : [],
+  });
   try {
     const page = await browser.newPage({
       viewport: { width: 800, height: 600 },
