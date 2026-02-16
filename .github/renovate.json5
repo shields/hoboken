@@ -15,5 +15,10 @@
       matchDepTypes: ["devDependencies"],
       automerge: true,
     },
+    {
+      description: "Hold eslint at v9 until typescript-eslint supports v10",
+      matchPackageNames: ["eslint", "@eslint/js"],
+      allowedVersions: "<10",
+    },
   ],
 }
