@@ -18,6 +18,7 @@ FROM oven/bun:1.3.9@sha256:856da45d07aeb62eb38ea3e7f9e1794c0143a4ff63efb00e6c449
 ARG GIT_VERSION=unknown
 WORKDIR /app
 COPY package.json bun.lock ./
+COPY patches/ patches/
 RUN bun install --frozen-lockfile --production
 RUN printf '%s' "${GIT_VERSION}" > VERSION
 
