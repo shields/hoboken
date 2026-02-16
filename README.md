@@ -23,8 +23,8 @@ thing: bridge Z2M to HomeKit. It's built directly on
 It does not have any device discovery, self-update, or plugins. You get exactly what
 you configure, and you will always get that.
 
-All dependencies are pure JS/TS code. Test coverage is enforced at 100% branch
-coverage.
+All dependencies are pure JS/TS code. Test coverage is enforced at 100%
+line, function, and statement coverage.
 
 The deployment is a reproducible, distroless container image. You can
 run it on K3s or whatever.
