@@ -92,6 +92,14 @@ Each module is independently testable with dependency injection:
   `patches/@homebridge%2Fciao@1.3.5.patch` fixes this by adding early-return
   guards to send methods. See https://github.com/homebridge/ciao/pull/60
 
+## Docker Images
+
+Pin all Docker base images to `sha256` digests for reproducibility. Keep
+the version tag alongside the digest for documentation, e.g.
+`FROM image:v1.2.3@sha256:abcd...`. When updating an image, pull it,
+grab the digest with `docker inspect`, and replace the hash in the
+`FROM` line.
+
 ## Copyright Notice
 
 All new files must include the Apache 2.0 copyright header. Use `//` comments
