@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   Characteristic,
+  ColorUtils,
   HAPStatus,
   HAPStorage,
   Service,
@@ -240,6 +241,159 @@ describe("startBridge", () => {
     await shutdown();
   });
 
+  test("MQTT message with color_mode extracts and applies color mode", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Color Light",
+          topic: "color_light",
+          capabilities: ["on_off", "color_temp", "color_hs"],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    // Send CT mode state — color values should be suppressed in favor of
+    // CT→H/S conversion via ColorUtils.
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/color_light",
+      Buffer.from(
+        JSON.stringify({
+          color_mode: "color_temp",
+          color_temp: 250,
+          color: { hue: 99, saturation: 99 },
+        }),
+      ),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Color Light",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    expect(
+      service.getCharacteristic(Characteristic.ColorTemperature).value,
+    ).toBe(250);
+
+    const expected = ColorUtils.colorTemperatureToHueAndSaturation(250);
+    expect(service.getCharacteristic(Characteristic.Hue).value).toBe(
+      expected.hue,
+    );
+    expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
+      expected.saturation,
+    );
+
+    await shutdown();
+  });
+
+  test("color_mode change without values injects from merged state", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Color Light",
+          topic: "color_light",
+          capabilities: ["on_off", "color_temp", "color_hs"],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    // Initial state with CT mode
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/color_light",
+      Buffer.from(
+        JSON.stringify({
+          color_mode: "color_temp",
+          color_temp: 300,
+          color: { hue: 50, saturation: 50 },
+        }),
+      ),
+    );
+
+    // Mode changes to HS without sending color values — bridge should
+    // inject the cached color from merged state.
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/color_light",
+      Buffer.from(JSON.stringify({ color_mode: "hs" })),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Color Light",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    // H/S should reflect the cached color values, not stale CT conversion
+    expect(service.getCharacteristic(Characteristic.Hue).value).toBe(50);
+    expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(50);
+
+    await shutdown();
+  });
+
+  test("color_mode change to CT without color_temp injects from cache", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Color Light",
+          topic: "color_light",
+          capabilities: ["on_off", "color_temp", "color_hs"],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    // Initial state with HS mode and known color_temp
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/color_light",
+      Buffer.from(
+        JSON.stringify({
+          color_mode: "hs",
+          color_temp: 300,
+          color: { hue: 120, saturation: 100 },
+        }),
+      ),
+    );
+
+    // Mode switches to CT without sending color_temp — bridge should
+    // inject the cached color_temp from merged state.
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/color_light",
+      Buffer.from(JSON.stringify({ color_mode: "color_temp" })),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Color Light",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    expect(
+      service.getCharacteristic(Characteristic.ColorTemperature).value,
+    ).toBe(300);
+
+    const expected = ColorUtils.colorTemperatureToHueAndSaturation(300);
+    expect(service.getCharacteristic(Characteristic.Hue).value).toBe(
+      expected.hue,
+    );
+    expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
+      expected.saturation,
+    );
+
+    await shutdown();
+  });
+
   test("ignores messages for unknown topics", async () => {
     const { shutdown } = await startBridge(testConfig());
     mockClient.connected = true;
@@ -307,6 +461,10 @@ describe("startBridge", () => {
       .getCharacteristic(Characteristic.On);
 
     on.setValue(true);
+    // Coalescing publisher defers to nextTick
+    await new Promise<void>((resolve) => {
+      process.nextTick(resolve);
+    });
     expect(
       mockClient.published.some(
         (p) =>

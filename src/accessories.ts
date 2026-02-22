@@ -16,6 +16,7 @@ import {
   Accessory,
   Categories,
   Characteristic,
+  ColorUtils,
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
@@ -33,10 +34,62 @@ export type PublishFn = (
 ) => void;
 export type GetStateFn = (topic: string) => Z2MState | undefined;
 
+type SetPayloadFn = (payload: Record<string, unknown>) => void;
+
+function createCoalescingPublish(
+  topic: string,
+  publish: PublishFn,
+  prePublishCheck?: () => void,
+): SetPayloadFn {
+  let pending: Record<string, unknown> | undefined;
+  let scheduled = false;
+
+  const flush = () => {
+    if (!pending) return;
+    const payload = pending;
+    pending = undefined;
+    scheduled = false;
+    try {
+      publish(`${topic}/set`, payload);
+    } catch {
+      // Connection may have dropped between the synchronous prePublishCheck
+      // and this nextTick flush. The error was already thrown to HAP-NodeJS
+      // synchronously; swallow the async duplicate to avoid crashing.
+    }
+  };
+
+  return (payload) => {
+    // Run synchronously so HAP-NodeJS can catch errors (e.g. MQTT disconnect)
+    // and report them back to HomeKit.
+    prePublishCheck?.();
+
+    pending ??= {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (
+        key === "color" &&
+        typeof pending.color === "object" &&
+        pending.color !== null
+      ) {
+        pending.color = {
+          ...(pending.color as Record<string, unknown>),
+          ...(value as Record<string, unknown>),
+        };
+      } else {
+        pending[key] = value;
+      }
+    }
+    if (!scheduled) {
+      scheduled = true;
+      process.nextTick(flush);
+    }
+  };
+}
+
 export function createLightAccessory(
   device: DeviceConfig,
   publish: PublishFn,
   getState: GetStateFn,
+  prePublishCheck?: () => void,
 ): Accessory {
   const accessory = new Accessory(
     device.name,
@@ -45,20 +98,38 @@ export function createLightAccessory(
   accessory.category = Categories.LIGHTBULB;
 
   const service = accessory.addService(Service.Lightbulb, device.name);
+  const setPayload = createCoalescingPublish(
+    device.topic,
+    publish,
+    prePublishCheck,
+  );
 
-  addOnCharacteristic(service, device.topic, publish, getState);
+  addOnCharacteristic(service, setPayload, getState, device.topic);
 
   if (device.capabilities.includes("brightness")) {
-    addBrightnessCharacteristic(service, device.topic, publish, getState);
+    addBrightnessCharacteristic(service, setPayload, getState, device.topic);
   }
 
   if (device.capabilities.includes("color_temp")) {
-    addColorTempCharacteristic(service, device.topic, publish, getState);
+    addColorTempCharacteristic(service, setPayload, getState, device.topic);
   }
 
   if (device.capabilities.includes("color_hs")) {
-    addHueCharacteristic(service, device.topic, publish, getState);
-    addSaturationCharacteristic(service, device.topic, publish, getState);
+    const hasBothColorModes = device.capabilities.includes("color_temp");
+    addHueCharacteristic(
+      service,
+      setPayload,
+      getState,
+      device.topic,
+      hasBothColorModes,
+    );
+    addSaturationCharacteristic(
+      service,
+      setPayload,
+      getState,
+      device.topic,
+      hasBothColorModes,
+    );
   }
 
   return accessory;
@@ -96,6 +167,7 @@ export function updateAccessoryState(
   accessory: Accessory,
   state: Z2MState,
   capabilities: Capability[],
+  colorMode?: string,
 ): void {
   const service = accessory.getService(Service.Lightbulb);
   if (!service) return;
@@ -112,33 +184,68 @@ export function updateAccessoryState(
       .updateValue(z2mBrightnessToHomeKit(state.brightness as number));
   }
 
-  if (capabilities.includes("color_temp") && "color_temp" in state) {
-    // Z2M devices can report color_temp values outside the HAP-valid range
-    // (140–500 mireds). Without clamping, hap-nodejs logs characteristic
-    // warnings and HomeKit may reject the value.
-    service
-      .getCharacteristic(Characteristic.ColorTemperature)
-      .updateValue(clampColorTemp(state.color_temp as number));
-  }
+  const hasBoth =
+    capabilities.includes("color_temp") && capabilities.includes("color_hs");
 
-  if (capabilities.includes("color_hs") && "color" in state) {
-    const color = state.color as { hue?: number; saturation?: number } | null;
-    if (color?.hue !== undefined) {
-      service.getCharacteristic(Characteristic.Hue).updateValue(color.hue);
-    }
-    if (color?.saturation !== undefined) {
+  if (hasBoth && colorMode === "color_temp") {
+    // CT is authoritative — push CT and convert to H/S via ColorUtils.
+    // Suppress raw Z2M color values (stale in CT mode).
+    if ("color_temp" in state) {
+      const ct = clampColorTemp(state.color_temp as number);
+      service
+        .getCharacteristic(Characteristic.ColorTemperature)
+        .updateValue(ct);
+      const converted = ColorUtils.colorTemperatureToHueAndSaturation(ct);
+      service.getCharacteristic(Characteristic.Hue).updateValue(converted.hue);
       service
         .getCharacteristic(Characteristic.Saturation)
-        .updateValue(color.saturation);
+        .updateValue(converted.saturation);
+    }
+  } else if (hasBoth && colorMode === "hs") {
+    // H/S is authoritative — push H/S, suppress stale CT.
+    if ("color" in state) {
+      const color = state.color as
+        | { hue?: number; saturation?: number }
+        | null;
+      if (color?.hue !== undefined) {
+        service.getCharacteristic(Characteristic.Hue).updateValue(color.hue);
+      }
+      if (color?.saturation !== undefined) {
+        service
+          .getCharacteristic(Characteristic.Saturation)
+          .updateValue(color.saturation);
+      }
+    }
+  } else {
+    // Single-capability device, unknown color_mode, or no color_mode —
+    // fall through to push whatever is present.
+    if (capabilities.includes("color_temp") && "color_temp" in state) {
+      service
+        .getCharacteristic(Characteristic.ColorTemperature)
+        .updateValue(clampColorTemp(state.color_temp as number));
+    }
+
+    if (capabilities.includes("color_hs") && "color" in state) {
+      const color = state.color as
+        | { hue?: number; saturation?: number }
+        | null;
+      if (color?.hue !== undefined) {
+        service.getCharacteristic(Characteristic.Hue).updateValue(color.hue);
+      }
+      if (color?.saturation !== undefined) {
+        service
+          .getCharacteristic(Characteristic.Saturation)
+          .updateValue(color.saturation);
+      }
     }
   }
 }
 
 function addOnCharacteristic(
   service: Service,
-  topic: string,
-  publish: PublishFn,
+  setPayload: SetPayloadFn,
   getState: GetStateFn,
+  topic: string,
 ): void {
   const on = service.getCharacteristic(Characteristic.On);
 
@@ -148,15 +255,15 @@ function addOnCharacteristic(
   });
 
   on.onSet((value) => {
-    publish(`${topic}/set`, { state: value ? "ON" : "OFF" });
+    setPayload({ state: value ? "ON" : "OFF" });
   });
 }
 
 function addBrightnessCharacteristic(
   service: Service,
-  topic: string,
-  publish: PublishFn,
+  setPayload: SetPayloadFn,
   getState: GetStateFn,
+  topic: string,
 ): void {
   const brightness = service.getCharacteristic(Characteristic.Brightness);
 
@@ -167,17 +274,15 @@ function addBrightnessCharacteristic(
   });
 
   brightness.onSet((value) => {
-    publish(`${topic}/set`, {
-      brightness: homeKitBrightnessToZ2M(value as number),
-    });
+    setPayload({ brightness: homeKitBrightnessToZ2M(value as number) });
   });
 }
 
 function addColorTempCharacteristic(
   service: Service,
-  topic: string,
-  publish: PublishFn,
+  setPayload: SetPayloadFn,
   getState: GetStateFn,
+  topic: string,
 ): void {
   const ct = service.getCharacteristic(Characteristic.ColorTemperature);
 
@@ -189,44 +294,58 @@ function addColorTempCharacteristic(
   });
 
   ct.onSet((value) => {
-    publish(`${topic}/set`, { color_temp: value });
+    setPayload({ color_temp: value });
   });
 }
 
 function addHueCharacteristic(
   service: Service,
-  topic: string,
-  publish: PublishFn,
+  setPayload: SetPayloadFn,
   getState: GetStateFn,
+  topic: string,
+  hasBothColorModes: boolean,
 ): void {
   const hue = service.getCharacteristic(Characteristic.Hue);
 
   hue.onGet(() => {
     const state = getState(topic);
+    if (hasBothColorModes && state?.color_mode === "color_temp") {
+      const ct = clampColorTemp(
+        (state.color_temp as number | undefined) ?? 140,
+      );
+      return ColorUtils.colorTemperatureToHueAndSaturation(ct).hue;
+    }
     const color = state?.color as { hue?: number } | undefined;
     return color?.hue ?? 0;
   });
 
   hue.onSet((value) => {
-    publish(`${topic}/set`, { color: { hue: value } });
+    setPayload({ color: { hue: value } });
   });
 }
 
 function addSaturationCharacteristic(
   service: Service,
-  topic: string,
-  publish: PublishFn,
+  setPayload: SetPayloadFn,
   getState: GetStateFn,
+  topic: string,
+  hasBothColorModes: boolean,
 ): void {
   const sat = service.getCharacteristic(Characteristic.Saturation);
 
   sat.onGet(() => {
     const state = getState(topic);
+    if (hasBothColorModes && state?.color_mode === "color_temp") {
+      const ct = clampColorTemp(
+        (state.color_temp as number | undefined) ?? 140,
+      );
+      return ColorUtils.colorTemperatureToHueAndSaturation(ct).saturation;
+    }
     const color = state?.color as { saturation?: number } | undefined;
     return color?.saturation ?? 0;
   });
 
   sat.onSet((value) => {
-    publish(`${topic}/set`, { color: { saturation: value } });
+    setPayload({ color: { saturation: value } });
   });
 }
