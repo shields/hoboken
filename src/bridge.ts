@@ -119,10 +119,14 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     metricsServer?.notifyStateChange();
   });
 
-  const publish: PublishFn = (topic, payload) => {
+  const prePublishCheck = () => {
     if (!mqttClient.connected) {
       throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
+  };
+
+  const publish: PublishFn = (topic, payload) => {
+    prePublishCheck();
     mqttClient.publish(
       `${config.mqtt.topic_prefix}/${topic}`,
       JSON.stringify(payload),
@@ -194,7 +198,12 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     log.log(
       `  Adding device "${device.name}" (topic: ${device.topic}, capabilities: ${device.capabilities.join(", ")})`,
     );
-    const accessory = createLightAccessory(device, publish, getState);
+    const accessory = createLightAccessory(
+      device,
+      publish,
+      getState,
+      prePublishCheck,
+    );
     setAccessoryInfo(accessory, "Hoboken", device.topic, device.topic, version);
     bridge.addBridgedAccessory(accessory);
     accessoryMap.set(device.topic, { accessory, device });
@@ -258,12 +267,42 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     );
 
     const existing = stateCache.get(deviceTopic);
-    stateCache.set(deviceTopic, { ...existing, ...state });
+    const merged = { ...existing, ...state };
+    stateCache.set(deviceTopic, merged);
     metricsServer?.notifyStateChange();
 
-    // Pass the partial update, not the merged state — updateAccessoryState
-    // uses "key in state" checks to only push characteristics that changed.
-    updateAccessoryState(entry.accessory, state, entry.device.capabilities);
+    const colorMode =
+      typeof merged.color_mode === "string" ? merged.color_mode : undefined;
+
+    // When color_mode changes but the authoritative values aren't in the
+    // partial update, inject them from the merged cache so
+    // updateAccessoryState can push the mode switch to HomeKit.
+    const enriched = { ...state };
+    if ("color_mode" in state && colorMode !== undefined) {
+      if (
+        colorMode === "color_temp" &&
+        !("color_temp" in enriched) &&
+        "color_temp" in merged
+      ) {
+        enriched.color_temp = merged.color_temp;
+      }
+      if (
+        colorMode === "hs" &&
+        !("color" in enriched) &&
+        "color" in merged
+      ) {
+        enriched.color = merged.color;
+      }
+    }
+
+    // Pass the partial (enriched) update — updateAccessoryState uses
+    // "key in state" checks to only push characteristics that changed.
+    updateAccessoryState(
+      entry.accessory,
+      enriched,
+      entry.device.capabilities,
+      colorMode,
+    );
   });
 
   bridge.on("identify", (paired, callback) => {
