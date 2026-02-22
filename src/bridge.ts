@@ -42,6 +42,8 @@ import type {
   StatusData,
 } from "./metrics.ts";
 
+const WRITE_BACK_SUPPRESSION_MS = 500;
+
 export function buildStatusData(
   config: Config,
   stateCache: ReadonlyMap<string, Z2MState>,
@@ -71,6 +73,7 @@ interface BridgeHandle {
 
 export async function startBridge(config: Config): Promise<BridgeHandle> {
   const stateCache = new Map<string, Z2MState>();
+  const lastColorPublish = new Map<string, number>();
 
   let metrics: Metrics | undefined;
   let metricsServer: MetricsServer | undefined;
@@ -132,6 +135,9 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       JSON.stringify(payload),
     );
     metrics?.mqttMessagesPublished.inc();
+    if ("color" in payload || "color_temp" in payload) {
+      lastColorPublish.set(topic.replace(/\/set$/, ""), Date.now());
+    }
   };
 
   const getState = (topic: string) => stateCache.get(topic);
@@ -287,7 +293,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
         enriched.color_temp = merged.color_temp;
       }
       if (
-        colorMode === "hs" &&
+        (colorMode === "hs" || colorMode === "xy") &&
         !("color" in enriched) &&
         "color" in merged
       ) {
@@ -295,14 +301,36 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       }
     }
 
-    // Pass the partial (enriched) update — updateAccessoryState uses
-    // "key in state" checks to only push characteristics that changed.
-    updateAccessoryState(
-      entry.accessory,
-      enriched,
-      entry.device.capabilities,
-      colorMode,
-    );
+    // Suppress color write-back during the suppression window to avoid
+    // stale Z2M intermediate values from bouncing the HomeKit state.
+    const lastPublish = lastColorPublish.get(deviceTopic);
+    const suppressing =
+      lastPublish !== undefined &&
+      Date.now() - lastPublish < WRITE_BACK_SUPPRESSION_MS;
+
+    if (suppressing) {
+      const filtered: Z2MState = {};
+      for (const key of Object.keys(enriched)) {
+        if (key !== "color" && key !== "color_temp" && key !== "color_mode") {
+          filtered[key] = enriched[key];
+        }
+      }
+      if (Object.keys(filtered).length > 0) {
+        updateAccessoryState(
+          entry.accessory,
+          filtered,
+          entry.device.capabilities,
+          colorMode,
+        );
+      }
+    } else {
+      updateAccessoryState(
+        entry.accessory,
+        enriched,
+        entry.device.capabilities,
+        colorMode,
+      );
+    }
   });
 
   bridge.on("identify", (paired, callback) => {

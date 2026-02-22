@@ -126,6 +126,12 @@ function testConfig(): Config {
   };
 }
 
+function flush(): Promise<void> {
+  return new Promise((resolve) => {
+    process.nextTick(resolve);
+  });
+}
+
 describe("startBridge", () => {
   test("creates bridge and connects MQTT", async () => {
     const { shutdown } = await startBridge(testConfig());
@@ -394,6 +400,52 @@ describe("startBridge", () => {
     await shutdown();
   });
 
+  test("color_mode change to xy without color values injects from cache", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Color Light",
+          topic: "color_light",
+          capabilities: ["on_off", "color_temp", "color_hs"],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    // Initial state with CT mode
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/color_light",
+      Buffer.from(
+        JSON.stringify({
+          color_mode: "color_temp",
+          color_temp: 300,
+          color: { hue: 50, saturation: 50 },
+        }),
+      ),
+    );
+
+    // Mode changes to XY without color values — should inject cached color
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/color_light",
+      Buffer.from(JSON.stringify({ color_mode: "xy" })),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Color Light",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    expect(service.getCharacteristic(Characteristic.Hue).value).toBe(50);
+    expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(50);
+
+    await shutdown();
+  });
+
   test("ignores messages for unknown topics", async () => {
     const { shutdown } = await startBridge(testConfig());
     mockClient.connected = true;
@@ -621,6 +673,138 @@ describe("startBridge", () => {
     };
     server!.emit("connection-closed", fakeConnection as never);
     await shutdown();
+  });
+
+  describe("write-back suppression", () => {
+    function colorConfig(): Config {
+      return {
+        ...testConfig(),
+        devices: [
+          {
+            name: "Color Light",
+            topic: "color_light",
+            capabilities: ["on_off", "color_temp", "color_hs"],
+          },
+        ],
+      };
+    }
+
+    test("suppresses color bounce after HomeKit write", async () => {
+      const { bridge, shutdown } = await startBridge(colorConfig());
+      mockClient.connected = true;
+      mockClient.emit("connect");
+
+      const accessory = bridge.bridgedAccessories.find(
+        (a) => a.displayName === "Color Light",
+      )!;
+      const service = accessory.getService(Service.Lightbulb)!;
+
+      // HomeKit writes a color
+      service.getCharacteristic(Characteristic.Hue).setValue(120);
+      service.getCharacteristic(Characteristic.Saturation).setValue(100);
+      await flush();
+
+      // Z2M sends back intermediate state with different color values
+      mockClient.emit(
+        "message",
+        "zigbee2mqtt/color_light",
+        Buffer.from(
+          JSON.stringify({
+            state: "ON",
+            color_mode: "hs",
+            color: { hue: 80, saturation: 60 },
+          }),
+        ),
+      );
+
+      // Color should be suppressed
+      expect(service.getCharacteristic(Characteristic.Hue).value).toBe(120);
+      expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
+        100,
+      );
+
+      // Non-color keys should still be pushed
+      expect(service.getCharacteristic(Characteristic.On).value).toBe(true);
+
+      await shutdown();
+    });
+
+    test("accepts color updates after suppression window expires", async () => {
+      const originalNow = Date.now;
+      let now = 1000;
+      Date.now = () => now;
+
+      try {
+        const { bridge, shutdown } = await startBridge(colorConfig());
+        mockClient.connected = true;
+        mockClient.emit("connect");
+
+        const accessory = bridge.bridgedAccessories.find(
+          (a) => a.displayName === "Color Light",
+        )!;
+        const service = accessory.getService(Service.Lightbulb)!;
+
+        // HomeKit writes a color
+        service.getCharacteristic(Characteristic.Hue).setValue(120);
+        service.getCharacteristic(Characteristic.Saturation).setValue(100);
+        await flush();
+
+        // Advance past suppression window
+        now += 600;
+
+        // Z2M sends color update
+        mockClient.emit(
+          "message",
+          "zigbee2mqtt/color_light",
+          Buffer.from(
+            JSON.stringify({
+              color_mode: "hs",
+              color: { hue: 80, saturation: 60 },
+            }),
+          ),
+        );
+
+        // Color should go through
+        expect(service.getCharacteristic(Characteristic.Hue).value).toBe(80);
+        expect(
+          service.getCharacteristic(Characteristic.Saturation).value,
+        ).toBe(60);
+
+        await shutdown();
+      } finally {
+        Date.now = originalNow;
+      }
+    });
+
+    test("accepts color updates with no prior publish", async () => {
+      const { bridge, shutdown } = await startBridge(colorConfig());
+      mockClient.connected = true;
+      mockClient.emit("connect");
+
+      const accessory = bridge.bridgedAccessories.find(
+        (a) => a.displayName === "Color Light",
+      )!;
+      const service = accessory.getService(Service.Lightbulb)!;
+
+      // Z2M sends color update without any prior HomeKit write
+      mockClient.emit(
+        "message",
+        "zigbee2mqtt/color_light",
+        Buffer.from(
+          JSON.stringify({
+            color_mode: "hs",
+            color: { hue: 200, saturation: 90 },
+          }),
+        ),
+      );
+
+      expect(service.getCharacteristic(Characteristic.Hue).value).toBe(200);
+      expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
+        90,
+      );
+
+      await shutdown();
+    });
   });
 });
 

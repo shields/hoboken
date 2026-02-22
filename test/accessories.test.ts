@@ -705,6 +705,40 @@ describe("updateAccessoryState", () => {
       expect(sat.value).toBe(100);
     });
 
+    test("XY mode on dual-capability device pushes H/S and suppresses CT", () => {
+      const device = makeDevice({
+        capabilities: ["on_off", "color_temp", "color_hs"],
+      });
+      const accessory = createLightAccessory(device, publish, getState);
+      const service = accessory.getService(Service.Lightbulb)!;
+
+      // Set initial CT value so we can detect suppression
+      updateAccessoryState(
+        accessory,
+        { color_temp: 250 },
+        ["on_off", "color_temp", "color_hs"],
+      );
+      expect(
+        service.getCharacteristic(Characteristic.ColorTemperature).value,
+      ).toBe(250);
+
+      // XY mode — CT should stay at 250 (suppressed), H/S should be updated
+      updateAccessoryState(
+        accessory,
+        { color_temp: 350, color: { hue: 120, saturation: 100 } },
+        ["on_off", "color_temp", "color_hs"],
+        "xy",
+      );
+
+      expect(
+        service.getCharacteristic(Characteristic.ColorTemperature).value,
+      ).toBe(250);
+      expect(service.getCharacteristic(Characteristic.Hue).value).toBe(120);
+      expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
+        100,
+      );
+    });
+
     test("no colorMode falls through to current behavior", () => {
       const device = makeDevice({
         capabilities: ["on_off", "color_temp", "color_hs"],

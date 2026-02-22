@@ -122,6 +122,75 @@ the H/S values stay consistent with the displayed color temperature.
 `@homebridge/hap-nodejs`. It returns `{ saturation: number, hue: number }`
 representing the approximate HS equivalent of a color temperature.
 
+### Z2M `color_mode` values
+
+Z2M reports `color_mode` as one of `"color_temp"`, `"hs"`, or `"xy"`.
+Both `"hs"` and `"xy"` indicate a non-CT color mode; the device's native
+color space determines which one Z2M reports. We treat `"xy"` identically
+to `"hs"` — in both cases, CT values are stale and H/S values are
+authoritative.
+
+## Write-Back Suppression
+
+### The bounce problem
+
+After a HomeKit color change, Z2M sends back multiple MQTT state updates
+as the Zigbee radio processes the command:
+
+```
+t=0ms    HomeKit SET hue=255, sat=68
+t=0ms    Hoboken publishes { color: { hue: 255, saturation: 68 } }
+t=240ms  Z2M responds: { color: { hue: 30, saturation: 43 } }  ← STALE
+t=500ms  Z2M responds: { color: { hue: 255, saturation: 43 } }  ← partial
+t=750ms  Z2M responds: { color: { hue: 255, saturation: 68 } }  ← settled
+```
+
+Without suppression, the stale response at t=240ms pushes `hue: 30` back
+to HomeKit, causing a visible snap to the wrong color before settling.
+
+### Survey of write-back handling
+
+| Project | Suppresses? | Mechanism | Window | Scope |
+|---|---|---|---|---|
+| homebridge-hue | **Yes** | `recentlyUpdated` flag + `setTimeout` | 500ms | bri, ct, xy |
+| homebridge-deconz | **Yes** | `recentlyUpdated` flag + `await timeout` | 500ms | bri, ct, xy |
+| homebridge-mqttthing | Partial | Optional `debounceRecvms` (unconditional) | configurable | all properties |
+| homebridge-z2m | No | — | — | — |
+| Home Assistant | No | pyhap value-changed dedup only | — | — |
+
+Sources:
+- homebridge-hue: [`lib/HueLight.js`](https://github.com/ebaauw/homebridge-hue/blob/master/lib/HueLight.js) — `recentlyUpdated` flag in `_put()`, checked in `checkBri()`, `checkCt()`, `checkXy()`
+- homebridge-deconz: [`lib/DeconzService/LightsResource.js`](https://github.com/ebaauw/homebridge-deconz/blob/master/lib/DeconzService/LightsResource.js) — identical pattern
+- homebridge-mqttthing: [`lib/handlers.js`](https://github.com/arachnetech/homebridge-mqttthing/blob/master/lib/handlers.js) — `debounceRecvms` config
+
+### Hoboken's approach
+
+After publishing a color-related MQTT message (`color` or `color_temp` in
+the payload), record a per-device timestamp. When a state update arrives
+from Z2M within 500ms of that timestamp, strip color-related keys
+(`color`, `color_temp`, `color_mode`) before pushing to HomeKit. The
+state cache is always updated regardless of suppression, so the dashboard
+and metrics stay current.
+
+This follows the homebridge-hue/homebridge-deconz pattern (the only
+implementations that actually solve this problem), with two differences:
+
+1. **Timestamp instead of boolean flag**: A timestamp allows checking the
+   elapsed time precisely, rather than relying on a `setTimeout` callback
+   to clear a flag. The behavior is equivalent.
+
+2. **Per-topic granularity**: The suppression window is tracked per device
+   topic, so a write to one device doesn't suppress updates from another.
+
+Like homebridge-hue, `on`/`off` state and `brightness` updates are never
+suppressed — they are independent of the color bounce problem and
+critical for responsiveness.
+
+After the suppression window, the characteristic already holds the value
+from the HomeKit SET. Z2M's final settled state is in the cache. If the
+device settled at a slightly different value than requested, the next
+unsuppressed state update will sync the characteristic.
+
 ## Outgoing Color Mode
 
 No write-side changes are needed. Z2M infers color mode from the payload:

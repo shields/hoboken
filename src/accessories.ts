@@ -201,7 +201,7 @@ export function updateAccessoryState(
         .getCharacteristic(Characteristic.Saturation)
         .updateValue(converted.saturation);
     }
-  } else if (hasBoth && colorMode === "hs") {
+  } else if (hasBoth && (colorMode === "hs" || colorMode === "xy")) {
     // H/S is authoritative — push H/S, suppress stale CT.
     if ("color" in state) {
       const color = state.color as
