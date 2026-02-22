@@ -1123,6 +1123,30 @@ describe("status page (GET /)", () => {
     expect(body).toContain("\u2192 2703 K");
   });
 
+  test("color_temp annotation shows Kelvin even with color_hs capability", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            capabilities: ["on_off", "color_hs"],
+            state: { color_temp: 370 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("\u2192 2703 K");
+  });
+
   test("color_hs annotation shows swatch", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>

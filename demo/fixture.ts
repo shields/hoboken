@@ -46,6 +46,7 @@ export const fixtureData: StatusData = {
         state: "OFF",
         brightness: 0,
         color: { hue: 240, saturation: 80 },
+        color_temp: 370,
       },
     },
     {

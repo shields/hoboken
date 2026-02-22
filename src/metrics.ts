@@ -271,11 +271,7 @@ function formatHint(
       placement: "value",
     };
   }
-  if (
-    key === "color_temp" &&
-    typeof value === "number" &&
-    capabilities.includes("color_temp")
-  ) {
+  if (key === "color_temp" && typeof value === "number") {
     return {
       html: `<span class="hint">\u2192 ${String(Math.round(1_000_000 / value))} K</span>`,
       placement: "value",
