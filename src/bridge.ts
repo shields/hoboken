@@ -277,30 +277,6 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     stateCache.set(deviceTopic, merged);
     metricsServer?.notifyStateChange();
 
-    const colorMode =
-      typeof merged.color_mode === "string" ? merged.color_mode : undefined;
-
-    // When color_mode changes but the authoritative values aren't in the
-    // partial update, inject them from the merged cache so
-    // updateAccessoryState can push the mode switch to HomeKit.
-    const enriched = { ...state };
-    if ("color_mode" in state && colorMode !== undefined) {
-      if (
-        colorMode === "color_temp" &&
-        !("color_temp" in enriched) &&
-        "color_temp" in merged
-      ) {
-        enriched.color_temp = merged.color_temp;
-      }
-      if (
-        (colorMode === "hs" || colorMode === "xy") &&
-        !("color" in enriched) &&
-        "color" in merged
-      ) {
-        enriched.color = merged.color;
-      }
-    }
-
     // Suppress color write-back during the suppression window to avoid
     // stale Z2M intermediate values from bouncing the HomeKit state.
     const lastPublish = lastColorPublish.get(deviceTopic);
@@ -310,9 +286,9 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
     if (suppressing) {
       const filtered: Z2MState = {};
-      for (const key of Object.keys(enriched)) {
+      for (const key of Object.keys(state)) {
         if (key !== "color" && key !== "color_temp" && key !== "color_mode") {
-          filtered[key] = enriched[key];
+          filtered[key] = state[key];
         }
       }
       if (Object.keys(filtered).length > 0) {
@@ -320,15 +296,13 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
           entry.accessory,
           filtered,
           entry.device.capabilities,
-          colorMode,
         );
       }
     } else {
       updateAccessoryState(
         entry.accessory,
-        enriched,
+        state,
         entry.device.capabilities,
-        colorMode,
       );
     }
   });

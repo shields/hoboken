@@ -652,7 +652,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
-            capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+            capabilities: ["on_off", "brightness", "color_hs"],
             state: { state: "ON" },
           },
         ],
@@ -665,9 +665,9 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    // brightness, color_temp, hue, saturation should all show em-dash
+    // brightness, hue, saturation should all show em-dash
     const emDashCount = (body.match(/\u2014/g) ?? []).length;
-    expect(emDashCount).toBeGreaterThanOrEqual(4);
+    expect(emDashCount).toBeGreaterThanOrEqual(3);
   });
 
   test("HomeKit missing values are styled gray", async () => {

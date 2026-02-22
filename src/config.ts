@@ -211,6 +211,15 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
 
   const capabilities = d.capabilities as Capability[];
 
+  if (
+    capabilities.includes("color_temp") &&
+    capabilities.includes("color_hs")
+  ) {
+    throw new Error(
+      `devices[${String(index)}]: color_temp and color_hs cannot be combined (HAP spec R13 §10.11); use one or the other`,
+    );
+  }
+
   let scenes: SceneConfig[] | undefined;
   if (d.scenes !== undefined) {
     if (!Array.isArray(d.scenes)) {

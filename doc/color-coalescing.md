@@ -78,57 +78,57 @@ if (key === "color" && typeof pending.color === "object") {
 
 All other keys use shallow merge (last write wins).
 
-## Color Mode Semantics
+## HAP Spec Constraint: No Dual Color Mode
 
-Z2M always reports **both** `color_temp` and `color` values in state
-updates, regardless of which mode is active. The `color_mode` field
-indicates which values are current; the others are stale.
+HAP specification Release R13, §10.11 (Color Temperature) states:
 
-```json
-{
-  "color_mode": "color_temp",
-  "color_temp": 250,
-  "color": { "hue": 27, "saturation": 21 }
-}
-```
+> If this characteristic is included in the "9.5 Lightbulb", "10.13 Hue"
+> and "10.30 Saturation" must not be included as optional characteristics
+> in "9.5 Lightbulb". This characteristic must not be used for lamps which
+> support color.
 
-Here `color_temp: 250` is the real value; the `color` object contains
-Z2M's rough conversion of 250 mireds to HS, which doesn't round-trip
-cleanly and causes unnecessary HomeKit updates.
+This means `ColorTemperature` and `Hue`/`Saturation` cannot coexist on
+the same Lightbulb service. No major HomeKit bridge (homebridge-hue,
+homebridge-deconz, homebridge-z2m) converts HS→CT on the write path.
 
-### Strategy
+### HomeKit UI behavior
 
-When a device has **both** `color_temp` and `color_hs` capabilities:
+- **Dual-mode lights** (CT + HS on the same service): Home app shows five
+  white presets plus a color picker. The white presets send Hue +
+  Saturation values (not ColorTemperature), which puts Z2M into HS mode
+  instead of CT mode.
+- **CT-only lights**: Home app shows a color temperature slider that sends
+  `ColorTemperature` directly.
+- **Siri "set lights white"**: HomeKit sends Hue=0, Saturation=0.
 
-| `color_mode` | CT handling | H/S handling |
-|---|---|---|
-| `"color_temp"` | Push CT value. Convert to H/S via `ColorUtils.colorTemperatureToHueAndSaturation` and push. | Suppress raw Z2M color (stale). |
-| `"hs"` | Suppress (stale). | Push H/S values. |
-| `undefined` | Push as-is. | Push as-is. |
+### Z2M color_mode behavior
 
-For single-capability devices (only `color_temp` or only `color_hs`),
-`color_mode` is ignored — there's no conflict to resolve.
+- Z2M does not support bare `{ color_mode: "color_temp" }` set commands —
+  an actual `color_temp` value is required to switch modes.
+- Z2M preserves per-mode state: switching from HS (green) to CT (2700K)
+  and back restores the green. The `color_mode` field indicates which
+  values are authoritative.
+- Z2M reports `color_mode` as one of `"color_temp"`, `"hs"`, or `"xy"`.
+  Both `"hs"` and `"xy"` indicate a non-CT color mode; the device's
+  native color space determines which one Z2M reports.
 
-### Why convert CT→H/S instead of suppressing both
+### Hoboken's approach
 
-HAP has no concept of "color mode". If a device is in CT mode and we
-suppress the H/S characteristics, the Home app shows stale hue/saturation
-values. By converting via `ColorUtils.colorTemperatureToHueAndSaturation`,
-the H/S values stay consistent with the displayed color temperature.
+Hoboken forbids combining `color_temp` and `color_hs` capabilities on the
+same device (config validation rejects this). Devices are configured as
+either CT-only or HS-only.
 
-### `ColorUtils` reference
+For `color_hs` devices, when HomeKit sends Hue=0 and Saturation=0 (Siri's
+"set lights white" command), the coalescing publisher's `transformPayload`
+hook converts this to a `color_temp` write using the last known
+`color_temp` from the state cache. This causes Z2M to switch to CT mode
+so the bulb uses its WW/CW LEDs instead of mixing RGB to approximate
+white.
 
-`ColorUtils.colorTemperatureToHueAndSaturation(mireds)` is exported from
-`@homebridge/hap-nodejs`. It returns `{ saturation: number, hue: number }`
-representing the approximate HS equivalent of a color temperature.
-
-### Z2M `color_mode` values
-
-Z2M reports `color_mode` as one of `"color_temp"`, `"hs"`, or `"xy"`.
-Both `"hs"` and `"xy"` indicate a non-CT color mode; the device's native
-color space determines which one Z2M reports. We treat `"xy"` identically
-to `"hs"` — in both cases, CT values are stale and H/S values are
-authoritative.
+The transform only fires when the state cache contains a `color_temp`
+value, confirming that the device has CCT hardware. RGB-only devices
+never report `color_temp` in their state, so H=0/S=0 passes through as a
+normal HS write for those devices.
 
 ## Write-Back Suppression
 
@@ -191,10 +191,31 @@ from the HomeKit SET. Z2M's final settled state is in the cache. If the
 device settled at a slightly different value than requested, the next
 unsuppressed state update will sync the characteristic.
 
-## Outgoing Color Mode
+## Future Work
 
-No write-side changes are needed. Z2M infers color mode from the payload:
-- `{ color_temp: 250 }` → CT mode
-- `{ color: { hue: 120, saturation: 100 } }` → HS mode
+### White → color_temp conversion
 
-The coalescing publisher naturally groups these correctly.
+Apple's Home app shows five white presets for HS-capable lights. These
+presets send Hue + Saturation values that approximate white tones, but
+put Z2M into HS mode instead of CT mode. On RGB+CCT bulbs, this means
+the RGB LEDs mix to approximate white instead of using the dedicated
+WW/CW LEDs, which produces inferior white quality.
+
+A future enhancement could map these specific preset values to
+`color_temp` writes. Observed preset values from the Home app:
+
+| Preset | Hue | Sat | Z2M color_temp |
+|--------|-----|-----|----------------|
+| Coolest | 222 | 20 | 138 |
+| Cool | 251 | 5 | 163 |
+| Neutral | 28 | 23 | 207 |
+| Warm | 30 | 48 | 265 |
+| Warmest | 30 | 67 | 325 |
+
+The Home app also provides a color temperature slider as a tab in the
+color selection popup. Converting all the values from this would
+require reverse-engineering what path in color space the slider is
+traversing.
+
+Currently only the exact H=0/S=0 case (Siri's "set lights white") is
+converted.

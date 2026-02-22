@@ -132,7 +132,7 @@ devices:
 
   - name: "Bedroom Light"
     topic: "bedroom_light"
-    capabilities: [on_off, brightness, color_temp, color_hs]
+    capabilities: [on_off, brightness, color_hs]
 ```
 
 Neither `username` nor `pincode` are secrets. The MAC is broadcast via mDNS.

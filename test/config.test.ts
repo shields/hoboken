@@ -56,7 +56,7 @@ describe("validateConfig", () => {
     expect(config.devices[0]!.scenes).toBeUndefined();
   });
 
-  test("accepts all capabilities", () => {
+  test("rejects color_temp + color_hs combo", () => {
     const data = validConfig();
     data.devices[0]!.capabilities = [
       "on_off",
@@ -64,8 +64,31 @@ describe("validateConfig", () => {
       "color_temp",
       "color_hs",
     ];
+    expect(() => validateConfig(data)).toThrow(
+      "color_temp and color_hs cannot be combined (HAP spec R13 §10.11)",
+    );
+  });
+
+  test("accepts color_hs without color_temp", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["on_off", "brightness", "color_hs"];
     const config = validateConfig(data);
-    expect(config.devices[0]!.capabilities).toHaveLength(4);
+    expect(config.devices[0]!.capabilities).toEqual([
+      "on_off",
+      "brightness",
+      "color_hs",
+    ]);
+  });
+
+  test("accepts color_temp without color_hs", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["on_off", "brightness", "color_temp"];
+    const config = validateConfig(data);
+    expect(config.devices[0]!.capabilities).toEqual([
+      "on_off",
+      "brightness",
+      "color_temp",
+    ]);
   });
 
   test("rejects non-object config", () => {

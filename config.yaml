@@ -22,4 +22,4 @@ devices:
 
   - name: "Bedroom Light"
     topic: "bedroom_light"
-    capabilities: [on_off, brightness, color_temp, color_hs]
+    capabilities: [on_off, brightness, color_hs]

@@ -13,11 +13,12 @@
 // limitations under the License.
 
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import { Characteristic, ColorUtils, Service } from "@homebridge/hap-nodejs";
+import { Characteristic, Service } from "@homebridge/hap-nodejs";
 import type { DeviceConfig } from "../src/config.ts";
 import {
   createLightAccessory,
   createSceneAccessory,
+  createWhiteTransform,
   updateAccessoryState,
 } from "../src/accessories.ts";
 import type { GetStateFn, PublishFn, Z2MState } from "../src/accessories.ts";
@@ -26,7 +27,7 @@ function makeDevice(overrides?: Partial<DeviceConfig>): DeviceConfig {
   return {
     name: "Test Light",
     topic: "test_light",
-    capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+    capabilities: ["on_off", "brightness", "color_hs"],
     ...overrides,
   };
 }
@@ -63,8 +64,24 @@ describe("createLightAccessory", () => {
     expect(service.testCharacteristic(Characteristic.Saturation)).toBe(false);
   });
 
-  test("creates accessory with all capabilities", () => {
+  test("creates accessory with color_hs capabilities", () => {
     const device = makeDevice();
+    const accessory = createLightAccessory(device, publish, getState);
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    expect(service.getCharacteristic(Characteristic.On)).toBeDefined();
+    expect(service.getCharacteristic(Characteristic.Brightness)).toBeDefined();
+    expect(service.testCharacteristic(Characteristic.ColorTemperature)).toBe(
+      false,
+    );
+    expect(service.getCharacteristic(Characteristic.Hue)).toBeDefined();
+    expect(service.getCharacteristic(Characteristic.Saturation)).toBeDefined();
+  });
+
+  test("creates accessory with color_temp capabilities", () => {
+    const device = makeDevice({
+      capabilities: ["on_off", "brightness", "color_temp"],
+    });
     const accessory = createLightAccessory(device, publish, getState);
     const service = accessory.getService(Service.Lightbulb)!;
 
@@ -73,8 +90,8 @@ describe("createLightAccessory", () => {
     expect(
       service.getCharacteristic(Characteristic.ColorTemperature),
     ).toBeDefined();
-    expect(service.getCharacteristic(Characteristic.Hue)).toBeDefined();
-    expect(service.getCharacteristic(Characteristic.Saturation)).toBeDefined();
+    expect(service.testCharacteristic(Characteristic.Hue)).toBe(false);
+    expect(service.testCharacteristic(Characteristic.Saturation)).toBe(false);
   });
 
   test("onGet On returns cached state", async () => {
@@ -209,61 +226,6 @@ describe("createLightAccessory", () => {
     stateMap.set("test_light", { color: { saturation: 75 } });
     const value = await sat.handleGetRequest();
     expect(value).toBe(75);
-  });
-
-  test("onGet hue returns converted value when color_mode is color_temp", async () => {
-    const device = makeDevice({
-      capabilities: ["on_off", "color_temp", "color_hs"],
-    });
-    const accessory = createLightAccessory(device, publish, getState);
-    const hue = accessory
-      .getService(Service.Lightbulb)!
-      .getCharacteristic(Characteristic.Hue);
-
-    stateMap.set("test_light", {
-      color_mode: "color_temp",
-      color_temp: 250,
-      color: { hue: 99 },
-    });
-    const expected = ColorUtils.colorTemperatureToHueAndSaturation(250);
-    const value = await hue.handleGetRequest();
-    expect(value).toBe(expected.hue);
-  });
-
-  test("onGet saturation returns converted value when color_mode is color_temp", async () => {
-    const device = makeDevice({
-      capabilities: ["on_off", "color_temp", "color_hs"],
-    });
-    const accessory = createLightAccessory(device, publish, getState);
-    const sat = accessory
-      .getService(Service.Lightbulb)!
-      .getCharacteristic(Characteristic.Saturation);
-
-    stateMap.set("test_light", {
-      color_mode: "color_temp",
-      color_temp: 350,
-      color: { saturation: 99 },
-    });
-    const expected = ColorUtils.colorTemperatureToHueAndSaturation(350);
-    const value = await sat.handleGetRequest();
-    expect(value).toBe(expected.saturation);
-  });
-
-  test("onGet hue returns raw value when color_mode is hs", async () => {
-    const device = makeDevice({
-      capabilities: ["on_off", "color_temp", "color_hs"],
-    });
-    const accessory = createLightAccessory(device, publish, getState);
-    const hue = accessory
-      .getService(Service.Lightbulb)!
-      .getCharacteristic(Characteristic.Hue);
-
-    stateMap.set("test_light", {
-      color_mode: "hs",
-      color: { hue: 200 },
-    });
-    const value = await hue.handleGetRequest();
-    expect(value).toBe(200);
   });
 
   test("onGet saturation returns 0 when no state cached", async () => {
@@ -470,6 +432,35 @@ describe("write coalescing", () => {
     await flush();
     // Should not throw — flush catches the error
   });
+
+  test("coalescing publisher with transform converts H=0/S=0 to color_temp", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
+    stateMap.set("test_light", { color_temp: 300 });
+    const accessory = createLightAccessory(device, publish, getState);
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    service.getCharacteristic(Characteristic.Hue).setValue(0);
+    service.getCharacteristic(Characteristic.Saturation).setValue(0);
+    await flush();
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith("test_light/set", { color_temp: 300 });
+  });
+
+  test("coalescing publisher with transform passes through genuine colors", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    service.getCharacteristic(Characteristic.Hue).setValue(120);
+    service.getCharacteristic(Characteristic.Saturation).setValue(100);
+    await flush();
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith("test_light/set", {
+      color: { hue: 120, saturation: 100 },
+    });
+  });
 });
 
 describe("createSceneAccessory", () => {
@@ -648,159 +639,64 @@ describe("updateAccessoryState", () => {
     // Should not throw — just returns early
     updateAccessoryState(accessory, { state: "ON" }, ["on_off"]);
   });
+});
 
-  describe("color mode filtering", () => {
-    test("CT mode on dual-capability device pushes CT and converted H/S", () => {
-      const device = makeDevice({
-        capabilities: ["on_off", "color_temp", "color_hs"],
-      });
-      const accessory = createLightAccessory(device, publish, getState);
-      const service = accessory.getService(Service.Lightbulb)!;
+describe("createWhiteTransform", () => {
+  let stateMap: Map<string, Z2MState>;
+  let getState: GetStateFn;
 
-      updateAccessoryState(
-        accessory,
-        { color_temp: 250, color: { hue: 99, saturation: 99 } },
-        ["on_off", "color_temp", "color_hs"],
-        "color_temp",
-      );
+  beforeEach(() => {
+    stateMap = new Map();
+    getState = (topic) => stateMap.get(topic);
+  });
 
-      const ct = service.getCharacteristic(Characteristic.ColorTemperature);
-      expect(ct.value).toBe(250);
+  test("H=0/S=0 with cached color_temp uses cached value", () => {
+    stateMap.set("test_light", { color_temp: 300 });
+    const transform = createWhiteTransform(getState, "test_light");
+    const result = transform({ color: { hue: 0, saturation: 0 } });
+    expect(result).toEqual({ color_temp: 300 });
+  });
 
-      const expected = ColorUtils.colorTemperatureToHueAndSaturation(250);
-      const hue = service.getCharacteristic(Characteristic.Hue);
-      const sat = service.getCharacteristic(Characteristic.Saturation);
-      expect(hue.value).toBe(expected.hue);
-      expect(sat.value).toBe(expected.saturation);
+  test("H=0/S=0 with no cached state passes through (RGB-only device)", () => {
+    const transform = createWhiteTransform(getState, "test_light");
+    const result = transform({ color: { hue: 0, saturation: 0 } });
+    expect(result).toEqual({ color: { hue: 0, saturation: 0 } });
+  });
+
+  test("genuine color passes through unchanged", () => {
+    const transform = createWhiteTransform(getState, "test_light");
+    const result = transform({ color: { hue: 120, saturation: 100 } });
+    expect(result).toEqual({ color: { hue: 120, saturation: 100 } });
+  });
+
+  test("payload with color_temp passes through unchanged", () => {
+    const transform = createWhiteTransform(getState, "test_light");
+    const payload = { color_temp: 250 };
+    const result = transform(payload);
+    expect(result).toEqual({ color_temp: 250 });
+  });
+
+  test("partial color object (only hue) passes through unchanged", () => {
+    const transform = createWhiteTransform(getState, "test_light");
+    const payload = { color: { hue: 0 } };
+    const result = transform(payload);
+    expect(result).toEqual({ color: { hue: 0 } });
+  });
+
+  test("non-object color passes through unchanged", () => {
+    const transform = createWhiteTransform(getState, "test_light");
+    const payload = { state: "ON" };
+    const result = transform(payload);
+    expect(result).toEqual({ state: "ON" });
+  });
+
+  test("preserves non-color keys when converting to color_temp", () => {
+    stateMap.set("test_light", { color_temp: 300 });
+    const transform = createWhiteTransform(getState, "test_light");
+    const result = transform({
+      state: "ON",
+      color: { hue: 0, saturation: 0 },
     });
-
-    test("HS mode on dual-capability device pushes H/S and suppresses CT", () => {
-      const device = makeDevice({
-        capabilities: ["on_off", "color_temp", "color_hs"],
-      });
-      const accessory = createLightAccessory(device, publish, getState);
-      const service = accessory.getService(Service.Lightbulb)!;
-
-      // Set initial CT value so we can detect suppression
-      updateAccessoryState(
-        accessory,
-        { color_temp: 250 },
-        ["on_off", "color_temp", "color_hs"],
-      );
-      const ct = service.getCharacteristic(Characteristic.ColorTemperature);
-      expect(ct.value).toBe(250);
-
-      // Now switch to HS mode — CT should stay at 250 (suppressed)
-      updateAccessoryState(
-        accessory,
-        { color_temp: 350, color: { hue: 120, saturation: 100 } },
-        ["on_off", "color_temp", "color_hs"],
-        "hs",
-      );
-
-      expect(ct.value).toBe(250);
-      const hue = service.getCharacteristic(Characteristic.Hue);
-      const sat = service.getCharacteristic(Characteristic.Saturation);
-      expect(hue.value).toBe(120);
-      expect(sat.value).toBe(100);
-    });
-
-    test("XY mode on dual-capability device pushes H/S and suppresses CT", () => {
-      const device = makeDevice({
-        capabilities: ["on_off", "color_temp", "color_hs"],
-      });
-      const accessory = createLightAccessory(device, publish, getState);
-      const service = accessory.getService(Service.Lightbulb)!;
-
-      // Set initial CT value so we can detect suppression
-      updateAccessoryState(
-        accessory,
-        { color_temp: 250 },
-        ["on_off", "color_temp", "color_hs"],
-      );
-      expect(
-        service.getCharacteristic(Characteristic.ColorTemperature).value,
-      ).toBe(250);
-
-      // XY mode — CT should stay at 250 (suppressed), H/S should be updated
-      updateAccessoryState(
-        accessory,
-        { color_temp: 350, color: { hue: 120, saturation: 100 } },
-        ["on_off", "color_temp", "color_hs"],
-        "xy",
-      );
-
-      expect(
-        service.getCharacteristic(Characteristic.ColorTemperature).value,
-      ).toBe(250);
-      expect(service.getCharacteristic(Characteristic.Hue).value).toBe(120);
-      expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
-        100,
-      );
-    });
-
-    test("no colorMode falls through to current behavior", () => {
-      const device = makeDevice({
-        capabilities: ["on_off", "color_temp", "color_hs"],
-      });
-      const accessory = createLightAccessory(device, publish, getState);
-      const service = accessory.getService(Service.Lightbulb)!;
-
-      updateAccessoryState(
-        accessory,
-        { color_temp: 300, color: { hue: 60, saturation: 50 } },
-        ["on_off", "color_temp", "color_hs"],
-      );
-
-      expect(
-        service.getCharacteristic(Characteristic.ColorTemperature).value,
-      ).toBe(300);
-      expect(service.getCharacteristic(Characteristic.Hue).value).toBe(60);
-      expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
-        50,
-      );
-    });
-
-    test("single-capability device ignores colorMode", () => {
-      const device = makeDevice({
-        capabilities: ["on_off", "color_temp"],
-      });
-      const accessory = createLightAccessory(device, publish, getState);
-      const service = accessory.getService(Service.Lightbulb)!;
-
-      updateAccessoryState(
-        accessory,
-        { color_temp: 400 },
-        ["on_off", "color_temp"],
-        "hs",
-      );
-
-      expect(
-        service.getCharacteristic(Characteristic.ColorTemperature).value,
-      ).toBe(400);
-    });
-
-    test("CT→H/S conversion spot-check against ColorUtils", () => {
-      const device = makeDevice({
-        capabilities: ["on_off", "color_temp", "color_hs"],
-      });
-      const accessory = createLightAccessory(device, publish, getState);
-      const service = accessory.getService(Service.Lightbulb)!;
-
-      updateAccessoryState(
-        accessory,
-        { color_temp: 350 },
-        ["on_off", "color_temp", "color_hs"],
-        "color_temp",
-      );
-
-      const expected = ColorUtils.colorTemperatureToHueAndSaturation(350);
-      expect(service.getCharacteristic(Characteristic.Hue).value).toBe(
-        expected.hue,
-      );
-      expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
-        expected.saturation,
-      );
-    });
+    expect(result).toEqual({ state: "ON", color_temp: 300 });
   });
 });
