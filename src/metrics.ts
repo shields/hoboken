@@ -449,7 +449,7 @@ function renderHomeKitSection(
       const vtName = `${vtPrefix}-hk-${r.name}`;
       const valClass = r.value === "\u2014" ? ' class="na"' : "";
       const hint = r.hint ?? "";
-      return `<tr><td class="cap">${escapeHtml(r.capability)}</td><td>${escapeHtml(r.name)}</td><td${valClass} data-vt="${vtName}">${escapeHtml(r.value)}${hint}</td></tr>`;
+      return `<tr><td class="key">${escapeHtml(r.capability)}</td><td>${escapeHtml(r.name)}</td><td${valClass} data-vt="${vtName}">${escapeHtml(r.value)}${hint}</td></tr>`;
     })
     .join("");
   return `<div class="label">HomeKit</div>\n<table><tbody>${rowsHtml}</tbody></table>`;
@@ -488,7 +488,7 @@ function renderStatusContent(data: StatusData): string {
           const keyHint = hint?.placement === "key" ? hint.html : "";
           const valueHint = hint?.placement === "value" ? hint.html : "";
           const vtName = `${vtPrefix}-${k.replaceAll(/[^a-zA-Z0-9]/g, "-")}`;
-          return `<tr><td>${escapeHtml(k)}${keyHint}</td><td data-vt="${vtName}">${escapeHtml(display)}${valueHint}</td></tr>`;
+          return `<tr><td class="key">${escapeHtml(k)}${keyHint}</td><td data-vt="${vtName}">${escapeHtml(display)}${valueHint}</td></tr>`;
         })
         .join("");
       mqttStateHtml = rows
@@ -543,7 +543,7 @@ function renderStatusPage(data: StatusData): string {
   .device h2 { margin-top: 0; margin-bottom: 0.15rem; }
   .topic { font-weight: normal; font-family: monospace; color: #888; font-size: 0.85em; margin-left: 0.4em; }
   .label { font-weight: bold; margin-top: 0.5rem; }
-  .cap { color: #999; }
+  .key { color: #999; }
   .value { font-family: monospace; }
   .na { color: #888; font-style: italic; }
   table { border-collapse: collapse; width: auto; margin-top: 0.25rem; font-family: monospace; font-size: 0.9rem; }
