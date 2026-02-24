@@ -50,7 +50,6 @@ export interface BridgeConfig {
 
 export interface MqttConfig {
   url: string;
-  topic_prefix: string;
 }
 
 export interface MetricsConfig {
@@ -110,9 +109,6 @@ export function validateConfig(data: unknown): Config {
   if (typeof mqtt.url !== "string" || mqtt.url.length === 0) {
     throw new Error("mqtt.url must be a non-empty string");
   }
-  if (typeof mqtt.topic_prefix !== "string" || mqtt.topic_prefix.length === 0) {
-    throw new Error("mqtt.topic_prefix must be a non-empty string");
-  }
 
   if (!Array.isArray(obj.devices) || obj.devices.length === 0) {
     throw new Error("devices must be a non-empty array");
@@ -167,7 +163,6 @@ export function validateConfig(data: unknown): Config {
     },
     mqtt: {
       url: mqtt.url,
-      topic_prefix: mqtt.topic_prefix,
     },
     devices,
     ...(metrics ? { metrics } : {}),

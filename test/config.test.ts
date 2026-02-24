@@ -28,12 +28,11 @@ function validConfig() {
     },
     mqtt: {
       url: "mqtt://localhost:1883",
-      topic_prefix: "zigbee2mqtt",
     },
     devices: [
       {
         name: "Living Room Light",
-        topic: "living_room_light",
+        topic: "zigbee2mqtt/living_room_light",
         capabilities: ["on_off", "brightness"],
         scenes: [{ name: "Movie Mode", id: 1 }],
       },
@@ -226,14 +225,6 @@ describe("validateConfig", () => {
     );
   });
 
-  test("rejects empty topic_prefix", () => {
-    const data = validConfig();
-    data.mqtt.topic_prefix = "";
-    expect(() => validateConfig(data)).toThrow(
-      "mqtt.topic_prefix must be a non-empty string",
-    );
-  });
-
   test("rejects empty devices array", () => {
     const data = validConfig();
     data.devices = [];
@@ -326,11 +317,11 @@ describe("validateConfig", () => {
     const data = validConfig();
     (data.devices as unknown[]).push({
       name: "Duplicate",
-      topic: "living_room_light",
+      topic: "zigbee2mqtt/living_room_light",
       capabilities: ["on_off"],
     });
     expect(() => validateConfig(data)).toThrow(
-      'duplicate device topic "living_room_light"',
+      'duplicate device topic "zigbee2mqtt/living_room_light"',
     );
   });
 
@@ -419,7 +410,6 @@ bridge:
   port: 51826
 mqtt:
   url: "mqtt://localhost:1883"
-  topic_prefix: "z2m"
 devices:
   - name: "Light"
     topic: "light"

@@ -164,10 +164,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
   const protocols = {
     z2m: {
-      publish: makePublish(
-        homeKitToZ2m,
-        (t) => `${config.mqtt.topic_prefix}/${t}/set`,
-      ),
+      publish: makePublish(homeKitToZ2m, (t) => `${t}/set`),
       toHomeKit: z2mToHomeKit,
     },
     wled: {
@@ -178,7 +175,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
   const scenePublish = makePublish(
     (p) => p,
-    (t) => `${config.mqtt.topic_prefix}/${t}/set`,
+    (t) => `${t}/set`,
   );
 
   let version = "unknown";
@@ -290,7 +287,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     const topics = config.devices.flatMap((d) => {
       switch (d.type) {
         case "z2m":
-          return [`${config.mqtt.topic_prefix}/${d.topic}`];
+          return [d.topic];
         case "wled":
           return [`${d.topic}/g`, `${d.topic}/c`];
       }
@@ -302,7 +299,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       switch (device.type) {
         case "z2m":
           mqttClient.publish(
-            `${config.mqtt.topic_prefix}/${device.topic}/get`,
+            `${device.topic}/get`,
             JSON.stringify({ state: "" }),
           );
           break;
@@ -358,19 +355,16 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     }
 
     // Z2M message handling
-    const prefix = `${config.mqtt.topic_prefix}/`;
-    if (!topic.startsWith(prefix)) return;
-    const deviceTopic = topic.slice(prefix.length);
-    const entry = accessoryMap.get(deviceTopic);
+    const entry = accessoryMap.get(topic);
     if (!entry) return;
-    metrics?.mqttMessagesReceived.labels(deviceTopic).inc();
+    metrics?.mqttMessagesReceived.labels(topic).inc();
     let state: RawState;
     try {
       state = JSON.parse(payload.toString()) as RawState;
     } catch {
       return;
     }
-    handleStateUpdate(deviceTopic, state, entry);
+    handleStateUpdate(topic, state, entry);
   });
 
   bridge.on("identify", (paired, callback) => {

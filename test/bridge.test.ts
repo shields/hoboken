@@ -107,20 +107,19 @@ function testConfig(): Config {
     },
     mqtt: {
       url: "mqtt://localhost:1883",
-      topic_prefix: "zigbee2mqtt",
     },
     devices: [
       {
         name: "Living Room",
         type: "z2m",
-        topic: "living_room",
+        topic: "zigbee2mqtt/living_room",
         capabilities: ["on_off", "brightness"],
         scenes: [{ name: "Movie Mode", id: 1 }],
       },
       {
         name: "Bedroom",
         type: "z2m",
-        topic: "bedroom",
+        topic: "zigbee2mqtt/bedroom",
         capabilities: ["on_off"],
       },
     ],
@@ -169,10 +168,10 @@ describe("startBridge", () => {
       "Hoboken",
     );
     expect(info?.getCharacteristic(Characteristic.Model).value).toBe(
-      "living_room",
+      "zigbee2mqtt/living_room",
     );
     expect(info?.getCharacteristic(Characteristic.SerialNumber).value).toBe(
-      "living_room",
+      "zigbee2mqtt/living_room",
     );
     expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
       expectedVersion,
@@ -191,7 +190,7 @@ describe("startBridge", () => {
     );
     expect(info?.getCharacteristic(Characteristic.Model).value).toBe("Scene");
     expect(info?.getCharacteristic(Characteristic.SerialNumber).value).toBe(
-      "living_room:scene:1",
+      "zigbee2mqtt/living_room:scene:1",
     );
     expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
       expectedVersion,
@@ -261,7 +260,7 @@ describe("startBridge", () => {
     await shutdown();
   });
 
-  test("ignores messages with wrong prefix", async () => {
+  test("ignores messages for unconfigured topics", async () => {
     const { shutdown } = await startBridge(testConfig());
     mockClient.connected = true;
     mockClient.emit("connect");
@@ -359,7 +358,7 @@ describe("startBridge", () => {
         {
           name: "CT Light",
           type: "z2m",
-          topic: "ct_light",
+          topic: "zigbee2mqtt/ct_light",
           capabilities: ["on_off", "color_temp"],
         },
       ],
@@ -394,7 +393,7 @@ describe("startBridge", () => {
         {
           name: "Scene Light",
           type: "z2m",
-          topic: "scene_light",
+          topic: "zigbee2mqtt/scene_light",
           capabilities: ["on_off"],
           scenes: [{ name: "Movie", id: 3 }],
         },
@@ -430,7 +429,7 @@ describe("startBridge", () => {
         {
           name: "Color Light",
           type: "z2m",
-          topic: "color_light",
+          topic: "zigbee2mqtt/color_light",
           capabilities: ["on_off", "color_hs"],
         },
       ],
@@ -474,7 +473,7 @@ describe("startBridge", () => {
         {
           name: "Color Light",
           type: "z2m",
-          topic: "color_light2",
+          topic: "zigbee2mqtt/color_light2",
           capabilities: ["on_off", "color_hs"],
         },
       ],
@@ -659,7 +658,7 @@ describe("startBridge", () => {
           {
             name: "Color Light",
             type: "z2m",
-            topic: "color_light",
+            topic: "zigbee2mqtt/color_light",
             capabilities: ["on_off", "color_hs"],
           },
         ],
@@ -795,7 +794,6 @@ function wledConfig(): Config {
     },
     mqtt: {
       url: "mqtt://localhost:1883",
-      topic_prefix: "zigbee2mqtt",
     },
     devices: [
       {
@@ -1126,13 +1124,12 @@ describe("WLED device support", () => {
       },
       mqtt: {
         url: "mqtt://localhost:1883",
-        topic_prefix: "zigbee2mqtt",
       },
       devices: [
         {
           name: "Z2M Light",
           type: "z2m",
-          topic: "living_room",
+          topic: "zigbee2mqtt/living_room",
           capabilities: ["on_off"],
         },
         {
@@ -1352,7 +1349,7 @@ describe("buildStatusData", () => {
   test("returns status snapshot with cached state", () => {
     const cfg = testConfig();
     const stateCache = new Map<string, Record<string, unknown>>([
-      ["living_room", { state: "ON", brightness: 200 }],
+      ["zigbee2mqtt/living_room", { state: "ON", brightness: 200 }],
     ]);
     const connections = [
       { remoteAddress: "192.168.1.10", authenticated: true },
@@ -1374,7 +1371,7 @@ describe("buildStatusData", () => {
     expect(result.bridge.version).toBe("abc123");
     expect(result.devices).toHaveLength(2);
     expect(result.devices[0]!.name).toBe("Living Room");
-    expect(result.devices[0]!.topic).toBe("living_room");
+    expect(result.devices[0]!.topic).toBe("zigbee2mqtt/living_room");
     expect(result.devices[0]!.type).toBe("z2m");
     expect(result.devices[0]!.capabilities).toEqual(["on_off", "brightness"]);
     expect(result.devices[0]!.scenes).toEqual([{ name: "Movie Mode", id: 1 }]);

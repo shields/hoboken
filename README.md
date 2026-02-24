@@ -55,7 +55,7 @@ protocol:
 
 | Type   | Protocol              | MQTT Format                    |
 | ------ | --------------------- | ------------------------------ |
-| `z2m`  | Zigbee2MQTT (default) | JSON on `<prefix>/<topic>`     |
+| `z2m`  | Zigbee2MQTT (default) | JSON on `<topic>`              |
 | `wled` | WLED MQTT API         | Sub-topics `/g`, `/c`, `/api`  |
 
 ### Capabilities
@@ -127,7 +127,6 @@ bridge:
 
 mqtt:
   url: "mqtt://mosquitto:1883"
-  topic_prefix: "zigbee2mqtt"
 
 # metrics:
 #   port: 9090
@@ -135,14 +134,14 @@ mqtt:
 
 devices:
   - name: "Living Room Light"
-    topic: "living_room_light"
+    topic: "zigbee2mqtt/living_room_light"
     capabilities: [on_off, brightness, color_temp]
     scenes:
       - name: "Movie Mode"
         id: 1
 
   - name: "Bedroom Light"
-    topic: "bedroom_light"
+    topic: "zigbee2mqtt/bedroom_light"
     capabilities: [on_off, brightness, color_hs]
 
   - name: "LED Strip"
