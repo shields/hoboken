@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import {
+  Accessory,
   Bridge,
   Categories,
   Characteristic,
@@ -33,7 +34,15 @@ import {
   createSceneAccessory,
   updateAccessoryState,
 } from "./accessories.ts";
-import type { PublishFn, Z2MState } from "./accessories.ts";
+import type { PublishFn } from "./accessories.ts";
+import {
+  type RawState,
+  homeKitToWled,
+  homeKitToZ2m,
+  parseWledMessage,
+  wledToHomeKit,
+  z2mToHomeKit,
+} from "./convert.ts";
 import { createMetrics, startMetricsServer } from "./metrics.ts";
 import type {
   HapConnection,
@@ -46,7 +55,7 @@ const WRITE_BACK_SUPPRESSION_MS = 500;
 
 export function buildStatusData(
   config: Config,
-  stateCache: ReadonlyMap<string, Z2MState>,
+  stateCache: ReadonlyMap<string, RawState>,
   mqtt: { url: string; connected: boolean },
   hapConnections: HapConnection[],
   version: string,
@@ -58,6 +67,7 @@ export function buildStatusData(
     devices: config.devices.map((d) => ({
       name: d.name,
       topic: d.topic,
+      type: d.type,
       capabilities: [...d.capabilities],
       ...(d.scenes ? { scenes: d.scenes } : {}),
       state: stateCache.get(d.topic) ?? null,
@@ -72,7 +82,7 @@ interface BridgeHandle {
 }
 
 export async function startBridge(config: Config): Promise<BridgeHandle> {
-  const stateCache = new Map<string, Z2MState>();
+  const stateCache = new Map<string, RawState>();
   const lastColorPublish = new Map<string, number>();
 
   let metrics: Metrics | undefined;
@@ -128,19 +138,48 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     }
   };
 
-  const publish: PublishFn = (topic, payload) => {
+  const rawPublish = (mqttTopic: string, message: string) => {
     prePublishCheck();
-    mqttClient.publish(
-      `${config.mqtt.topic_prefix}/${topic}`,
-      JSON.stringify(payload),
-    );
+    mqttClient.publish(mqttTopic, message);
     metrics?.mqttMessagesPublished.inc();
-    if ("color" in payload || "color_temp" in payload) {
-      lastColorPublish.set(topic.replace(/\/set$/, ""), Date.now());
-    }
   };
 
-  const getState = (topic: string) => stateCache.get(topic);
+  function makePublish(
+    convert: (
+      p: Record<string, unknown>,
+      raw?: RawState,
+    ) => Record<string, unknown>,
+    mqttTopic: (topic: string) => string,
+  ): PublishFn {
+    return (topic, payload) => {
+      rawPublish(
+        mqttTopic(topic),
+        JSON.stringify(convert(payload, stateCache.get(topic))),
+      );
+      if ("hue" in payload || "saturation" in payload || "color_temp" in payload) {
+        lastColorPublish.set(topic, Date.now());
+      }
+    };
+  }
+
+  const protocols = {
+    z2m: {
+      publish: makePublish(
+        homeKitToZ2m,
+        (t) => `${config.mqtt.topic_prefix}/${t}/set`,
+      ),
+      toHomeKit: z2mToHomeKit,
+    },
+    wled: {
+      publish: makePublish(homeKitToWled, (t) => `${t}/api`),
+      toHomeKit: wledToHomeKit,
+    },
+  };
+
+  const scenePublish = makePublish(
+    (p) => p,
+    (t) => `${config.mqtt.topic_prefix}/${t}/set`,
+  );
 
   let version = "unknown";
   try {
@@ -188,13 +227,12 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     version,
   );
 
-  const accessoryMap = new Map<
-    string,
-    {
-      accessory: ReturnType<typeof createLightAccessory>;
-      device: Config["devices"][number];
-    }
-  >();
+  interface AccessoryEntry {
+    accessory: Accessory;
+    device: Config["devices"][number];
+  }
+  const accessoryMap = new Map<string, AccessoryEntry>();
+  const wledTopicMap = new Map<string, { device: string; sub: string }>();
 
   log.log(
     `Configuring bridge "${config.bridge.name}" with ${String(config.devices.length)} device(s)`,
@@ -202,21 +240,36 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
   for (const device of config.devices) {
     log.log(
-      `  Adding device "${device.name}" (topic: ${device.topic}, capabilities: ${device.capabilities.join(", ")})`,
+      `  Adding device "${device.name}" (type: ${device.type}, topic: ${device.topic}, capabilities: ${device.capabilities.join(", ")})`,
     );
+    const proto = protocols[device.type];
+    const getState = (topic: string) => {
+      const raw = stateCache.get(topic);
+      if (!raw) return;
+      return proto.toHomeKit(raw);
+    };
+
     const accessory = createLightAccessory(
       device,
-      publish,
+      proto.publish,
       getState,
       prePublishCheck,
     );
     setAccessoryInfo(accessory, "Hoboken", device.topic, device.topic, version);
     bridge.addBridgedAccessory(accessory);
     accessoryMap.set(device.topic, { accessory, device });
+    switch (device.type) {
+      case "z2m":
+        break;
+      case "wled":
+        wledTopicMap.set(`${device.topic}/g`, { device: device.topic, sub: "g" });
+        wledTopicMap.set(`${device.topic}/c`, { device: device.topic, sub: "c" });
+        break;
+    }
 
     if (device.scenes) {
       for (const scene of device.scenes) {
-        const sceneAccessory = createSceneAccessory(device, scene, publish);
+        const sceneAccessory = createSceneAccessory(device, scene, scenePublish);
         setAccessoryInfo(
           sceneAccessory,
           "Hoboken",
@@ -234,77 +287,90 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   mqttClient.on("connect", () => {
     log.log("MQTT connected");
     metrics?.mqttConnected.set(1);
-    const topics = config.devices.map(
-      (d) => `${config.mqtt.topic_prefix}/${d.topic}`,
-    );
+    const topics = config.devices.flatMap((d) => {
+      switch (d.type) {
+        case "z2m":
+          return [`${config.mqtt.topic_prefix}/${d.topic}`];
+        case "wled":
+          return [`${d.topic}/g`, `${d.topic}/c`];
+      }
+    });
     mqttClient.subscribe(topics);
     metricsServer?.notifyStateChange();
 
     for (const device of config.devices) {
-      mqttClient.publish(
-        `${config.mqtt.topic_prefix}/${device.topic}/get`,
-        JSON.stringify({ state: "" }),
-      );
+      switch (device.type) {
+        case "z2m":
+          mqttClient.publish(
+            `${config.mqtt.topic_prefix}/${device.topic}/get`,
+            JSON.stringify({ state: "" }),
+          );
+          break;
+        case "wled":
+          break;
+      }
     }
   });
 
-  mqttClient.on("message", (topic, payload) => {
-    const prefix = `${config.mqtt.topic_prefix}/`;
-    if (!topic.startsWith(prefix)) return;
-
-    const deviceTopic = topic.slice(prefix.length);
-    const entry = accessoryMap.get(deviceTopic);
-    if (!entry) return;
-
-    metrics?.mqttMessagesReceived.labels(deviceTopic).inc();
-
-    let state: Z2MState;
-    try {
-      state = JSON.parse(payload.toString()) as Z2MState;
-    } catch {
-      return;
-    }
-
-    // Intentionally verbose — essential for diagnosing device/state issues
-    // during bring-up. Device count is small (single household), so volume
-    // is manageable. Remove once the deployment is stable.
+  function handleStateUpdate(
+    deviceTopic: string,
+    rawPartial: RawState,
+    entry: AccessoryEntry,
+  ): void {
     log.log(
-      `State update for "${entry.device.name}": ${JSON.stringify(state)}`,
+      `State update for "${entry.device.name}": ${JSON.stringify(rawPartial)}`,
     );
-
-    const existing = stateCache.get(deviceTopic);
-    const merged = { ...existing, ...state };
+    const merged = { ...stateCache.get(deviceTopic), ...rawPartial };
     stateCache.set(deviceTopic, merged);
     metricsServer?.notifyStateChange();
 
-    // Suppress color write-back during the suppression window to avoid
-    // stale Z2M intermediate values from bouncing the HomeKit state.
-    const lastPublish = lastColorPublish.get(deviceTopic);
+    const lastPub = lastColorPublish.get(deviceTopic);
     const suppressing =
-      lastPublish !== undefined &&
-      Date.now() - lastPublish < WRITE_BACK_SUPPRESSION_MS;
-
+      lastPub !== undefined &&
+      Date.now() - lastPub < WRITE_BACK_SUPPRESSION_MS;
+    let hkState = protocols[entry.device.type].toHomeKit(rawPartial);
     if (suppressing) {
-      const filtered: Z2MState = {};
-      for (const key of Object.keys(state)) {
-        if (key !== "color" && key !== "color_temp" && key !== "color_mode") {
-          filtered[key] = state[key];
-        }
-      }
-      if (Object.keys(filtered).length > 0) {
-        updateAccessoryState(
-          entry.accessory,
-          filtered,
-          entry.device.capabilities,
-        );
-      }
-    } else {
+      const { on, brightness } = hkState;
+      hkState = {};
+      if (on !== undefined) hkState.on = on;
+      if (brightness !== undefined) hkState.brightness = brightness;
+    }
+    if (Object.keys(hkState).length > 0) {
       updateAccessoryState(
         entry.accessory,
-        state,
+        hkState,
         entry.device.capabilities,
       );
     }
+  }
+
+  mqttClient.on("message", (topic, payload) => {
+    // Try WLED sub-topic lookup first.
+    const wled = wledTopicMap.get(topic);
+    if (wled !== undefined) {
+      const entry = accessoryMap.get(wled.device);
+      if (!entry) return;
+      metrics?.mqttMessagesReceived.labels(wled.device).inc();
+      const wledState = parseWledMessage(wled.sub, payload.toString());
+      if (!wledState) return;
+      handleStateUpdate(wled.device, wledState, entry);
+      return;
+    }
+
+    // Z2M message handling
+    const prefix = `${config.mqtt.topic_prefix}/`;
+    if (!topic.startsWith(prefix)) return;
+    const deviceTopic = topic.slice(prefix.length);
+    const entry = accessoryMap.get(deviceTopic);
+    if (!entry) return;
+    metrics?.mqttMessagesReceived.labels(deviceTopic).inc();
+    let state: RawState;
+    try {
+      state = JSON.parse(payload.toString()) as RawState;
+    } catch {
+      return;
+    }
+    handleStateUpdate(deviceTopic, state, entry);
   });
 
   bridge.on("identify", (paired, callback) => {

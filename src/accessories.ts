@@ -20,18 +20,12 @@ import {
   uuid,
 } from "@homebridge/hap-nodejs";
 import type { Capability, DeviceConfig, SceneConfig } from "./config.ts";
-import {
-  clampColorTemp,
-  homeKitBrightnessToZ2M,
-  z2mBrightnessToHomeKit,
-} from "./convert.ts";
-
-export type Z2MState = Record<string, unknown>;
+import { clampColorTemp, type HomeKitState } from "./convert.ts";
 export type PublishFn = (
   topic: string,
   payload: Record<string, unknown>,
 ) => void;
-export type GetStateFn = (topic: string) => Z2MState | undefined;
+export type GetStateFn = (topic: string) => HomeKitState | undefined;
 
 type SetPayloadFn = (payload: Record<string, unknown>) => void;
 
@@ -39,19 +33,17 @@ function createCoalescingPublish(
   topic: string,
   publish: PublishFn,
   prePublishCheck?: () => void,
-  transformPayload?: (p: Record<string, unknown>) => Record<string, unknown>,
 ): SetPayloadFn {
   let pending: Record<string, unknown> | undefined;
   let scheduled = false;
 
   const flush = () => {
     if (!pending) return;
-    let payload = pending;
+    const payload = pending;
     pending = undefined;
     scheduled = false;
-    if (transformPayload) payload = transformPayload(payload);
     try {
-      publish(`${topic}/set`, payload);
+      publish(topic, payload);
     } catch {
       // Connection may have dropped between the synchronous prePublishCheck
       // and this nextTick flush. The error was already thrown to HAP-NodeJS
@@ -64,21 +56,7 @@ function createCoalescingPublish(
     // and report them back to HomeKit.
     prePublishCheck?.();
 
-    pending ??= {};
-    for (const [key, value] of Object.entries(payload)) {
-      if (
-        key === "color" &&
-        typeof pending.color === "object" &&
-        pending.color !== null
-      ) {
-        pending.color = {
-          ...(pending.color as Record<string, unknown>),
-          ...(value as Record<string, unknown>),
-        };
-      } else {
-        pending[key] = value;
-      }
-    }
+    pending = { ...pending, ...payload };
     if (!scheduled) {
       scheduled = true;
       process.nextTick(flush);
@@ -99,14 +77,10 @@ export function createLightAccessory(
   accessory.category = Categories.LIGHTBULB;
 
   const service = accessory.addService(Service.Lightbulb, device.name);
-  const transformPayload = device.capabilities.includes("color_hs")
-    ? createWhiteTransform(getState, device.topic)
-    : undefined;
   const setPayload = createCoalescingPublish(
     device.topic,
     publish,
     prePublishCheck,
-    transformPayload,
   );
 
   addOnCharacteristic(service, setPayload, getState, device.topic);
@@ -145,7 +119,7 @@ export function createSceneAccessory(
 
   on.onSet((value) => {
     if (value) {
-      publish(`${device.topic}/set`, { scene_recall: scene.id });
+      publish(device.topic, { scene_recall: scene.id });
       setTimeout(() => {
         on.updateValue(false);
       }, 1000);
@@ -157,41 +131,36 @@ export function createSceneAccessory(
 
 export function updateAccessoryState(
   accessory: Accessory,
-  state: Z2MState,
+  state: HomeKitState,
   capabilities: Capability[],
 ): void {
   const service = accessory.getService(Service.Lightbulb);
   if (!service) return;
 
-  if ("state" in state) {
-    service
-      .getCharacteristic(Characteristic.On)
-      .updateValue(state.state === "ON");
+  if (state.on !== undefined) {
+    service.getCharacteristic(Characteristic.On).updateValue(state.on);
   }
 
-  if (capabilities.includes("brightness") && "brightness" in state) {
+  if (capabilities.includes("brightness") && state.brightness !== undefined) {
     service
       .getCharacteristic(Characteristic.Brightness)
-      .updateValue(z2mBrightnessToHomeKit(state.brightness as number));
+      .updateValue(state.brightness);
   }
 
-  if (capabilities.includes("color_temp") && "color_temp" in state) {
+  if (capabilities.includes("color_temp") && state.color_temp !== undefined) {
     service
       .getCharacteristic(Characteristic.ColorTemperature)
-      .updateValue(clampColorTemp(state.color_temp as number));
+      .updateValue(clampColorTemp(state.color_temp));
   }
 
-  if (capabilities.includes("color_hs") && "color" in state) {
-    const color = state.color as
-      | { hue?: number; saturation?: number }
-      | null;
-    if (color?.hue !== undefined) {
-      service.getCharacteristic(Characteristic.Hue).updateValue(color.hue);
+  if (capabilities.includes("color_hs")) {
+    if (state.hue !== undefined) {
+      service.getCharacteristic(Characteristic.Hue).updateValue(state.hue);
     }
-    if (color?.saturation !== undefined) {
+    if (state.saturation !== undefined) {
       service
         .getCharacteristic(Characteristic.Saturation)
-        .updateValue(color.saturation);
+        .updateValue(state.saturation);
     }
   }
 }
@@ -206,11 +175,11 @@ function addOnCharacteristic(
 
   on.onGet(() => {
     const state = getState(topic);
-    return state?.state === "ON";
+    return state?.on === true;
   });
 
   on.onSet((value) => {
-    setPayload({ state: value ? "ON" : "OFF" });
+    setPayload({ on: value as boolean });
   });
 }
 
@@ -224,12 +193,11 @@ function addBrightnessCharacteristic(
 
   brightness.onGet(() => {
     const state = getState(topic);
-    if (state?.brightness === undefined) return 0;
-    return z2mBrightnessToHomeKit(state.brightness as number);
+    return state?.brightness ?? 0;
   });
 
   brightness.onSet((value) => {
-    setPayload({ brightness: homeKitBrightnessToZ2M(value as number) });
+    setPayload({ brightness: value as number });
   });
 }
 
@@ -243,9 +211,7 @@ function addColorTempCharacteristic(
 
   ct.onGet(() => {
     const state = getState(topic);
-    // Clamp to HAP-valid range (140–500 mireds) — Z2M devices may report
-    // out-of-range values that cause characteristic warnings.
-    return clampColorTemp((state?.color_temp as number | undefined) ?? 140);
+    return clampColorTemp(state?.color_temp ?? 140);
   });
 
   ct.onSet((value) => {
@@ -263,12 +229,11 @@ function addHueCharacteristic(
 
   hue.onGet(() => {
     const state = getState(topic);
-    const color = state?.color as { hue?: number } | undefined;
-    return color?.hue ?? 0;
+    return state?.hue ?? 0;
   });
 
   hue.onSet((value) => {
-    setPayload({ color: { hue: value } });
+    setPayload({ hue: value as number });
   });
 }
 
@@ -282,37 +247,10 @@ function addSaturationCharacteristic(
 
   sat.onGet(() => {
     const state = getState(topic);
-    const color = state?.color as { saturation?: number } | undefined;
-    return color?.saturation ?? 0;
+    return state?.saturation ?? 0;
   });
 
   sat.onSet((value) => {
-    setPayload({ color: { saturation: value } });
+    setPayload({ saturation: value as number });
   });
-}
-
-export function createWhiteTransform(
-  getState: GetStateFn,
-  topic: string,
-): (payload: Record<string, unknown>) => Record<string, unknown> {
-  return (payload) => {
-    if ("color_temp" in payload) return payload;
-    const color = payload.color;
-    if (typeof color !== "object" || color === null) return payload;
-    const c = color as Record<string, unknown>;
-    if (c.hue !== 0 || c.saturation !== 0) return payload;
-
-    // Only convert to color_temp if the device has reported it in state,
-    // confirming it has CCT hardware. RGB-only devices never report
-    // color_temp, so H=0/S=0 passes through as a normal HS write.
-    const state = getState(topic);
-    const ct = state?.color_temp as number | undefined;
-    if (ct === undefined) return payload;
-
-    const rest: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(payload)) {
-      if (key !== "color") rest[key] = value;
-    }
-    return { ...rest, color_temp: ct };
-  };
 }

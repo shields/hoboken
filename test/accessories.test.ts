@@ -18,14 +18,15 @@ import type { DeviceConfig } from "../src/config.ts";
 import {
   createLightAccessory,
   createSceneAccessory,
-  createWhiteTransform,
   updateAccessoryState,
 } from "../src/accessories.ts";
-import type { GetStateFn, PublishFn, Z2MState } from "../src/accessories.ts";
+import type { GetStateFn, PublishFn } from "../src/accessories.ts";
+import type { HomeKitState } from "../src/convert.ts";
 
 function makeDevice(overrides?: Partial<DeviceConfig>): DeviceConfig {
   return {
     name: "Test Light",
+    type: "z2m",
     topic: "test_light",
     capabilities: ["on_off", "brightness", "color_hs"],
     ...overrides,
@@ -40,7 +41,7 @@ function flush(): Promise<void> {
 
 describe("createLightAccessory", () => {
   let publish: ReturnType<typeof mock<PublishFn>>;
-  let stateMap: Map<string, Z2MState>;
+  let stateMap: Map<string, HomeKitState>;
   let getState: GetStateFn;
 
   beforeEach(() => {
@@ -101,11 +102,11 @@ describe("createLightAccessory", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.On);
 
-    stateMap.set("test_light", { state: "ON" });
+    stateMap.set("test_light", { on: true });
     const value = await on.handleGetRequest();
     expect(value).toBe(true);
 
-    stateMap.set("test_light", { state: "OFF" });
+    stateMap.set("test_light", { on: false });
     const value2 = await on.handleGetRequest();
     expect(value2).toBe(false);
   });
@@ -117,7 +118,7 @@ describe("createLightAccessory", () => {
     expect(getState("test_light")).toBeUndefined();
   });
 
-  test("onSet On publishes ON/OFF", async () => {
+  test("onSet On publishes HK-native boolean", async () => {
     const device = makeDevice({ capabilities: ["on_off"] });
     const accessory = createLightAccessory(device, publish, getState);
     const on = accessory
@@ -126,11 +127,11 @@ describe("createLightAccessory", () => {
 
     on.setValue(true);
     await flush();
-    expect(publish).toHaveBeenCalledWith("test_light/set", { state: "ON" });
+    expect(publish).toHaveBeenCalledWith("test_light", { on: true });
 
     on.setValue(false);
     await flush();
-    expect(publish).toHaveBeenCalledWith("test_light/set", { state: "OFF" });
+    expect(publish).toHaveBeenCalledWith("test_light", { on: false });
   });
 
   test("onGet brightness returns cached value", async () => {
@@ -140,7 +141,7 @@ describe("createLightAccessory", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.Brightness);
 
-    stateMap.set("test_light", { brightness: 254 });
+    stateMap.set("test_light", { brightness: 100 });
     const value = await brightness.handleGetRequest();
     expect(value).toBe(100);
   });
@@ -200,7 +201,7 @@ describe("createLightAccessory", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.Hue);
 
-    stateMap.set("test_light", { color: { hue: 200 } });
+    stateMap.set("test_light", { hue: 200 });
     const value = await hue.handleGetRequest();
     expect(value).toBe(200);
   });
@@ -223,7 +224,7 @@ describe("createLightAccessory", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.Saturation);
 
-    stateMap.set("test_light", { color: { saturation: 75 } });
+    stateMap.set("test_light", { saturation: 75 });
     const value = await sat.handleGetRequest();
     expect(value).toBe(75);
   });
@@ -239,7 +240,7 @@ describe("createLightAccessory", () => {
     expect(value).toBe(0);
   });
 
-  test("onSet brightness converts HomeKit to Z2M", async () => {
+  test("onSet brightness publishes HK-native value", async () => {
     const device = makeDevice({ capabilities: ["on_off", "brightness"] });
     const accessory = createLightAccessory(device, publish, getState);
     const brightness = accessory
@@ -248,11 +249,11 @@ describe("createLightAccessory", () => {
 
     brightness.setValue(50);
     await flush();
-    expect(publish).toHaveBeenCalledWith("test_light/set", { brightness: 127 });
+    expect(publish).toHaveBeenCalledWith("test_light", { brightness: 50 });
 
     brightness.setValue(100);
     await flush();
-    expect(publish).toHaveBeenCalledWith("test_light/set", { brightness: 254 });
+    expect(publish).toHaveBeenCalledWith("test_light", { brightness: 100 });
   });
 
   test("onSet color_temp publishes mireds directly", async () => {
@@ -264,10 +265,10 @@ describe("createLightAccessory", () => {
 
     ct.setValue(250);
     await flush();
-    expect(publish).toHaveBeenCalledWith("test_light/set", { color_temp: 250 });
+    expect(publish).toHaveBeenCalledWith("test_light", { color_temp: 250 });
   });
 
-  test("onSet hue publishes color object", async () => {
+  test("onSet hue publishes top-level hue", async () => {
     const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
     const accessory = createLightAccessory(device, publish, getState);
     const hue = accessory
@@ -276,12 +277,10 @@ describe("createLightAccessory", () => {
 
     hue.setValue(180);
     await flush();
-    expect(publish).toHaveBeenCalledWith("test_light/set", {
-      color: { hue: 180 },
-    });
+    expect(publish).toHaveBeenCalledWith("test_light", { hue: 180 });
   });
 
-  test("onSet saturation publishes color object", async () => {
+  test("onSet saturation publishes top-level saturation", async () => {
     const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
     const accessory = createLightAccessory(device, publish, getState);
     const sat = accessory
@@ -290,15 +289,13 @@ describe("createLightAccessory", () => {
 
     sat.setValue(75);
     await flush();
-    expect(publish).toHaveBeenCalledWith("test_light/set", {
-      color: { saturation: 75 },
-    });
+    expect(publish).toHaveBeenCalledWith("test_light", { saturation: 75 });
   });
 });
 
 describe("write coalescing", () => {
   let publish: ReturnType<typeof mock<PublishFn>>;
-  let stateMap: Map<string, Z2MState>;
+  let stateMap: Map<string, HomeKitState>;
   let getState: GetStateFn;
 
   beforeEach(() => {
@@ -319,8 +316,9 @@ describe("write coalescing", () => {
     await flush();
 
     expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledWith("test_light/set", {
-      color: { hue: 120, saturation: 100 },
+    expect(publish).toHaveBeenCalledWith("test_light", {
+      hue: 120,
+      saturation: 100,
     });
   });
 
@@ -335,9 +333,9 @@ describe("write coalescing", () => {
     await flush();
 
     expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledWith("test_light/set", {
-      state: "ON",
-      brightness: 203,
+    expect(publish).toHaveBeenCalledWith("test_light", {
+      on: true,
+      brightness: 80,
     });
   });
 
@@ -354,23 +352,20 @@ describe("write coalescing", () => {
     await flush();
 
     expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledWith("test_light/set", {
-      color: { hue: 200 },
-    });
+    expect(publish).toHaveBeenCalledWith("test_light", { hue: 200 });
   });
 
-  test("deep-merges color objects", async () => {
+  test("merges hue and saturation as top-level keys", async () => {
     const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
     const accessory = createLightAccessory(device, publish, getState);
     const service = accessory.getService(Service.Lightbulb)!;
 
-    // Hue first, then saturation — color objects must be deep-merged
     service.getCharacteristic(Characteristic.Hue).setValue(120);
     service.getCharacteristic(Characteristic.Saturation).setValue(100);
     await flush();
 
     const call = publish.mock.calls[0]!;
-    expect(call[1]).toEqual({ color: { hue: 120, saturation: 100 } });
+    expect(call[1]).toEqual({ hue: 120, saturation: 100 });
   });
 
   test("shallow-merges non-color keys (last write wins)", async () => {
@@ -383,7 +378,7 @@ describe("write coalescing", () => {
     await flush();
 
     expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledWith("test_light/set", { state: "OFF" });
+    expect(publish).toHaveBeenCalledWith("test_light", { on: false });
   });
 
   test("independent coalescing per accessory", async () => {
@@ -410,8 +405,8 @@ describe("write coalescing", () => {
     await flush();
 
     expect(publish).toHaveBeenCalledTimes(2);
-    expect(publish).toHaveBeenCalledWith("light_1/set", { state: "ON" });
-    expect(publish).toHaveBeenCalledWith("light_2/set", { state: "OFF" });
+    expect(publish).toHaveBeenCalledWith("light_1", { on: true });
+    expect(publish).toHaveBeenCalledWith("light_2", { on: false });
   });
 
   test("flush swallows publish errors without crashing", async () => {
@@ -432,35 +427,6 @@ describe("write coalescing", () => {
     await flush();
     // Should not throw — flush catches the error
   });
-
-  test("coalescing publisher with transform converts H=0/S=0 to color_temp", async () => {
-    const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
-    stateMap.set("test_light", { color_temp: 300 });
-    const accessory = createLightAccessory(device, publish, getState);
-    const service = accessory.getService(Service.Lightbulb)!;
-
-    service.getCharacteristic(Characteristic.Hue).setValue(0);
-    service.getCharacteristic(Characteristic.Saturation).setValue(0);
-    await flush();
-
-    expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledWith("test_light/set", { color_temp: 300 });
-  });
-
-  test("coalescing publisher with transform passes through genuine colors", async () => {
-    const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
-    const accessory = createLightAccessory(device, publish, getState);
-    const service = accessory.getService(Service.Lightbulb)!;
-
-    service.getCharacteristic(Characteristic.Hue).setValue(120);
-    service.getCharacteristic(Characteristic.Saturation).setValue(100);
-    await flush();
-
-    expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledWith("test_light/set", {
-      color: { hue: 120, saturation: 100 },
-    });
-  });
 });
 
 describe("createSceneAccessory", () => {
@@ -474,7 +440,7 @@ describe("createSceneAccessory", () => {
       .getCharacteristic(Characteristic.On);
 
     on.setValue(true);
-    expect(publish).toHaveBeenCalledWith("test_light/set", { scene_recall: 1 });
+    expect(publish).toHaveBeenCalledWith("test_light", { scene_recall: 1 });
   });
 
   test("onGet always returns false", async () => {
@@ -525,7 +491,7 @@ describe("updateAccessoryState", () => {
 
   beforeEach(() => {
     publish = mock<PublishFn>();
-    getState = (): Z2MState | undefined => {
+    getState = (): HomeKitState | undefined => {
       return;
     };
   });
@@ -534,21 +500,21 @@ describe("updateAccessoryState", () => {
     const device = makeDevice({ capabilities: ["on_off"] });
     const accessory = createLightAccessory(device, publish, getState);
 
-    updateAccessoryState(accessory, { state: "ON" }, ["on_off"]);
+    updateAccessoryState(accessory, { on: true }, ["on_off"]);
     const on = accessory
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.On);
     expect(on.value).toBe(true);
 
-    updateAccessoryState(accessory, { state: "OFF" }, ["on_off"]);
+    updateAccessoryState(accessory, { on: false }, ["on_off"]);
     expect(on.value).toBe(false);
   });
 
-  test("updates brightness with conversion", () => {
+  test("updates brightness directly (HK-native)", () => {
     const device = makeDevice({ capabilities: ["on_off", "brightness"] });
     const accessory = createLightAccessory(device, publish, getState);
 
-    updateAccessoryState(accessory, { brightness: 254 }, [
+    updateAccessoryState(accessory, { brightness: 100 }, [
       "on_off",
       "brightness",
     ]);
@@ -557,7 +523,7 @@ describe("updateAccessoryState", () => {
       .getCharacteristic(Characteristic.Brightness);
     expect(b.value).toBe(100);
 
-    updateAccessoryState(accessory, { brightness: 127 }, [
+    updateAccessoryState(accessory, { brightness: 50 }, [
       "on_off",
       "brightness",
     ]);
@@ -598,11 +564,11 @@ describe("updateAccessoryState", () => {
     expect(ct.value).toBe(500);
   });
 
-  test("updates hue and saturation", () => {
+  test("updates hue and saturation as top-level keys", () => {
     const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
     const accessory = createLightAccessory(device, publish, getState);
 
-    updateAccessoryState(accessory, { color: { hue: 200, saturation: 80 } }, [
+    updateAccessoryState(accessory, { hue: 200, saturation: 80 }, [
       "on_off",
       "color_hs",
     ]);
@@ -621,7 +587,7 @@ describe("updateAccessoryState", () => {
     const accessory = createLightAccessory(device, publish, getState);
 
     // Should not throw even with brightness data when capability not declared
-    updateAccessoryState(accessory, { state: "ON", brightness: 254 }, [
+    updateAccessoryState(accessory, { on: true, brightness: 100 }, [
       "on_off",
     ]);
     const on = accessory
@@ -637,66 +603,6 @@ describe("updateAccessoryState", () => {
     const accessory = createSceneAccessory(device, scene, publish2);
 
     // Should not throw — just returns early
-    updateAccessoryState(accessory, { state: "ON" }, ["on_off"]);
-  });
-});
-
-describe("createWhiteTransform", () => {
-  let stateMap: Map<string, Z2MState>;
-  let getState: GetStateFn;
-
-  beforeEach(() => {
-    stateMap = new Map();
-    getState = (topic) => stateMap.get(topic);
-  });
-
-  test("H=0/S=0 with cached color_temp uses cached value", () => {
-    stateMap.set("test_light", { color_temp: 300 });
-    const transform = createWhiteTransform(getState, "test_light");
-    const result = transform({ color: { hue: 0, saturation: 0 } });
-    expect(result).toEqual({ color_temp: 300 });
-  });
-
-  test("H=0/S=0 with no cached state passes through (RGB-only device)", () => {
-    const transform = createWhiteTransform(getState, "test_light");
-    const result = transform({ color: { hue: 0, saturation: 0 } });
-    expect(result).toEqual({ color: { hue: 0, saturation: 0 } });
-  });
-
-  test("genuine color passes through unchanged", () => {
-    const transform = createWhiteTransform(getState, "test_light");
-    const result = transform({ color: { hue: 120, saturation: 100 } });
-    expect(result).toEqual({ color: { hue: 120, saturation: 100 } });
-  });
-
-  test("payload with color_temp passes through unchanged", () => {
-    const transform = createWhiteTransform(getState, "test_light");
-    const payload = { color_temp: 250 };
-    const result = transform(payload);
-    expect(result).toEqual({ color_temp: 250 });
-  });
-
-  test("partial color object (only hue) passes through unchanged", () => {
-    const transform = createWhiteTransform(getState, "test_light");
-    const payload = { color: { hue: 0 } };
-    const result = transform(payload);
-    expect(result).toEqual({ color: { hue: 0 } });
-  });
-
-  test("non-object color passes through unchanged", () => {
-    const transform = createWhiteTransform(getState, "test_light");
-    const payload = { state: "ON" };
-    const result = transform(payload);
-    expect(result).toEqual({ state: "ON" });
-  });
-
-  test("preserves non-color keys when converting to color_temp", () => {
-    stateMap.set("test_light", { color_temp: 300 });
-    const transform = createWhiteTransform(getState, "test_light");
-    const result = transform({
-      state: "ON",
-      color: { hue: 0, saturation: 0 },
-    });
-    expect(result).toEqual({ state: "ON", color_temp: 300 });
+    updateAccessoryState(accessory, { on: true }, ["on_off"]);
   });
 });

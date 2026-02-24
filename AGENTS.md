@@ -64,8 +64,19 @@ Each module is independently testable with dependency injection:
 | `color_temp` | `Characteristic.ColorTemperature` | mireds, passthrough       |
 | `color_hs`   | `Hue` + `Saturation`              | ranges match, passthrough |
 
+## Naming Conventions
+
+- Prefer writing out "homekit" (e.g. `homeKitToZ2m`, `HomeKitState`,
+  `HOMEKIT_CONVERTED_KEYS`) over abbreviating to "hk", except in
+  function-local variables where brevity aids readability.
+
 ## Type Conventions
 
+- **Exhaustive switches**: When switching on a union type like `Capability` or
+  `DeviceType`, rely on TypeScript's type narrowing to catch missing cases at
+  compile time — do not add a `default: never` arm. Bun's coverage engine does
+  not support ignore comments, so unreachable default branches break the 100%
+  line coverage requirement.
 - Capability type: `"on_off" | "brightness" | "color_temp" | "color_hs"`
 - `PublishFn = (topic: string, payload: Record<string, unknown>) => void`
 - `GetStateFn = (topic: string) => Z2MState | undefined`

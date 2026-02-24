@@ -112,12 +112,14 @@ function testConfig(): Config {
     devices: [
       {
         name: "Living Room",
+        type: "z2m",
         topic: "living_room",
         capabilities: ["on_off", "brightness"],
         scenes: [{ name: "Movie Mode", id: 1 }],
       },
       {
         name: "Bedroom",
+        type: "z2m",
         topic: "bedroom",
         capabilities: ["on_off"],
       },
@@ -314,9 +316,7 @@ describe("startBridge", () => {
 
     on.setValue(true);
     // Coalescing publisher defers to nextTick
-    await new Promise<void>((resolve) => {
-      process.nextTick(resolve);
-    });
+    await flush();
     expect(
       mockClient.published.some(
         (p) =>
@@ -324,6 +324,182 @@ describe("startBridge", () => {
           p.message === JSON.stringify({ state: "ON" }),
       ),
     ).toBe(true);
+
+    await shutdown();
+  });
+
+  test("HomeKit brightness publishes Z2M-converted brightness", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Living Room",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    service.getCharacteristic(Characteristic.Brightness).setValue(50);
+    await flush();
+
+    expect(
+      mockClient.published.some(
+        (p) =>
+          p.topic === "zigbee2mqtt/living_room/set" &&
+          p.message === JSON.stringify({ brightness: 126 }),
+      ),
+    ).toBe(true);
+
+    await shutdown();
+  });
+
+  test("HomeKit color_temp publishes Z2M color_temp passthrough", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "CT Light",
+          type: "z2m",
+          topic: "ct_light",
+          capabilities: ["on_off", "color_temp"],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "CT Light",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    service.getCharacteristic(Characteristic.ColorTemperature).setValue(370);
+    await flush();
+
+    expect(
+      mockClient.published.some(
+        (p) =>
+          p.topic === "zigbee2mqtt/ct_light/set" &&
+          p.message === JSON.stringify({ color_temp: 370 }),
+      ),
+    ).toBe(true);
+
+    await shutdown();
+  });
+
+  test("Z2M publish passes through unknown keys like scene_recall", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Scene Light",
+          type: "z2m",
+          topic: "scene_light",
+          capabilities: ["on_off"],
+          scenes: [{ name: "Movie", id: 3 }],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const sceneAccessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Movie",
+    )!;
+    const service = sceneAccessory.getService(Service.Switch)!;
+
+    service.getCharacteristic(Characteristic.On).setValue(true);
+    await flush();
+
+    expect(
+      mockClient.published.some(
+        (p) =>
+          p.topic === "zigbee2mqtt/scene_light/set" &&
+          p.message === JSON.stringify({ scene_recall: 3 }),
+      ),
+    ).toBe(true);
+
+    await shutdown();
+  });
+
+  test("Z2M publish white transform with cached color_temp sends color_temp", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Color Light",
+          type: "z2m",
+          topic: "color_light",
+          capabilities: ["on_off", "color_hs"],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    // Populate cache with a color_temp value
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/color_light",
+      Buffer.from(JSON.stringify({ state: "ON", color_temp: 370 })),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Color Light",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    // Send white (H=0, S=0) — should use cached color_temp
+    service.getCharacteristic(Characteristic.Hue).setValue(0);
+    service.getCharacteristic(Characteristic.Saturation).setValue(0);
+    await flush();
+
+    const setMsg = mockClient.published.find(
+      (p) => p.topic === "zigbee2mqtt/color_light/set",
+    );
+    expect(setMsg).toBeDefined();
+    const parsed = JSON.parse(setMsg!.message) as Record<string, unknown>;
+    expect(parsed.color_temp).toBe(370);
+    expect(parsed.color).toBeUndefined();
+
+    await shutdown();
+  });
+
+  test("Z2M publish white transform without cached color_temp sends color object", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Color Light",
+          type: "z2m",
+          topic: "color_light2",
+          capabilities: ["on_off", "color_hs"],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Color Light",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    // Send white (H=0, S=0) — no cached state, so should send color: {hue:0, saturation:0}
+    service.getCharacteristic(Characteristic.Hue).setValue(0);
+    service.getCharacteristic(Characteristic.Saturation).setValue(0);
+    await flush();
+
+    const setMsg = mockClient.published.find(
+      (p) => p.topic === "zigbee2mqtt/color_light2/set",
+    );
+    expect(setMsg).toBeDefined();
+    const parsed = JSON.parse(setMsg!.message) as Record<string, unknown>;
+    expect(parsed.color).toEqual({ hue: 0, saturation: 0 });
+    expect(parsed.color_temp).toBeUndefined();
 
     await shutdown();
   });
@@ -482,6 +658,7 @@ describe("startBridge", () => {
         devices: [
           {
             name: "Color Light",
+            type: "z2m",
             topic: "color_light",
             capabilities: ["on_off", "color_hs"],
           },
@@ -605,6 +782,386 @@ describe("startBridge", () => {
 
       await shutdown();
     });
+  });
+});
+
+function wledConfig(): Config {
+  return {
+    bridge: {
+      name: "Test Bridge",
+      mac: "0E:42:A1:B2:C3:D4",
+      pincode: "031-45-154",
+      port: 0,
+    },
+    mqtt: {
+      url: "mqtt://localhost:1883",
+      topic_prefix: "zigbee2mqtt",
+    },
+    devices: [
+      {
+        name: "LED Strip",
+        type: "wled",
+        topic: "wled/living-room",
+        capabilities: ["on_off", "brightness", "color_hs"],
+      },
+    ],
+  };
+}
+
+describe("WLED device support", () => {
+  test("subscribes to WLED sub-topics on MQTT connect", async () => {
+    const { shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    expect(mockClient.subscriptions).toHaveLength(1);
+    expect(mockClient.subscriptions[0]).toEqual([
+      "wled/living-room/g",
+      "wled/living-room/c",
+    ]);
+    await shutdown();
+  });
+
+  test("does not request initial state for WLED devices", async () => {
+    const { shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const getMessages = mockClient.published.filter((p) =>
+      p.topic.endsWith("/get"),
+    );
+    expect(getMessages).toHaveLength(0);
+    await shutdown();
+  });
+
+  test("WLED brightness message updates state and accessory", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    mockClient.emit(
+      "message",
+      "wled/living-room/g",
+      Buffer.from("128"),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+    expect(service.getCharacteristic(Characteristic.On).value).toBe(true);
+
+    await shutdown();
+  });
+
+  test("WLED brightness 0 sets state OFF", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    mockClient.emit(
+      "message",
+      "wled/living-room/g",
+      Buffer.from("0"),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+    expect(service.getCharacteristic(Characteristic.On).value).toBe(false);
+
+    await shutdown();
+  });
+
+  test("WLED color message updates hue and saturation", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    mockClient.emit(
+      "message",
+      "wled/living-room/c",
+      Buffer.from("#FF0000"),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+    expect(service.getCharacteristic(Characteristic.Hue).value).toBe(0);
+    expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
+      100,
+    );
+
+    await shutdown();
+  });
+
+  test("WLED ignores invalid brightness", async () => {
+    const { shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    mockClient.emit(
+      "message",
+      "wled/living-room/g",
+      Buffer.from("not-a-number"),
+    );
+    await shutdown();
+  });
+
+  test("WLED ignores invalid hex color", async () => {
+    const { shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    mockClient.emit(
+      "message",
+      "wled/living-room/c",
+      Buffer.from("xyz"),
+    );
+    await shutdown();
+  });
+
+  test("HomeKit set publishes WLED JSON API format", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    service.getCharacteristic(Characteristic.On).setValue(true);
+    await flush();
+
+    const apiMsg = mockClient.published.find(
+      (p) => p.topic === "wled/living-room/api",
+    );
+    expect(apiMsg).toBeDefined();
+    expect(JSON.parse(apiMsg!.message)).toEqual({ on: true });
+
+    await shutdown();
+  });
+
+  test("HomeKit brightness publishes WLED bri field", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    service.getCharacteristic(Characteristic.Brightness).setValue(100);
+    await flush();
+
+    const apiMsg = mockClient.published.find(
+      (p) => p.topic === "wled/living-room/api",
+    );
+    expect(apiMsg).toBeDefined();
+    const parsed = JSON.parse(apiMsg!.message) as Record<string, unknown>;
+    expect(parsed.bri).toBe(255);
+
+    await shutdown();
+  });
+
+  test("HomeKit color publishes WLED seg col format", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    service.getCharacteristic(Characteristic.Hue).setValue(0);
+    service.getCharacteristic(Characteristic.Saturation).setValue(100);
+    await flush();
+
+    const apiMsg = mockClient.published.find(
+      (p) => p.topic === "wled/living-room/api",
+    );
+    expect(apiMsg).toBeDefined();
+    const parsed = JSON.parse(apiMsg!.message) as Record<string, unknown>;
+    expect(parsed.seg).toEqual([{ col: [[255, 0, 0]] }]);
+
+    await shutdown();
+  });
+
+  test("HomeKit white (H=0/S=0) activates WLED white channel", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    service.getCharacteristic(Characteristic.Hue).setValue(0);
+    service.getCharacteristic(Characteristic.Saturation).setValue(0);
+    await flush();
+
+    const apiMsg = mockClient.published.find(
+      (p) => p.topic === "wled/living-room/api",
+    );
+    expect(apiMsg).toBeDefined();
+    const parsed = JSON.parse(apiMsg!.message) as Record<string, unknown>;
+    expect(parsed.seg).toEqual([{ col: [[255, 255, 255]] }]);
+
+    await shutdown();
+  });
+
+  test("WLED color write-back is suppressed after HomeKit write", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    // HomeKit writes a color
+    service.getCharacteristic(Characteristic.Hue).setValue(120);
+    service.getCharacteristic(Characteristic.Saturation).setValue(100);
+    await flush();
+
+    // WLED sends back color via /c
+    mockClient.emit(
+      "message",
+      "wled/living-room/c",
+      Buffer.from("#0000FF"),
+    );
+
+    // Color should be suppressed — hue should remain 120
+    expect(service.getCharacteristic(Characteristic.Hue).value).toBe(120);
+    expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
+      100,
+    );
+
+    await shutdown();
+  });
+
+  test("WLED brightness passes through during color suppression window", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    // HomeKit writes a color, triggering suppression window
+    service.getCharacteristic(Characteristic.Hue).setValue(120);
+    service.getCharacteristic(Characteristic.Saturation).setValue(100);
+    await flush();
+
+    // WLED sends brightness update via /g during suppression
+    mockClient.emit(
+      "message",
+      "wled/living-room/g",
+      Buffer.from("200"),
+    );
+
+    // Brightness (non-color) should pass through even during suppression
+    expect(service.getCharacteristic(Characteristic.On).value).toBe(true);
+
+    await shutdown();
+  });
+
+  test("WLED getState returns normalized HK state from cache", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    // Populate the state cache with WLED brightness and color
+    mockClient.emit(
+      "message",
+      "wled/living-room/g",
+      Buffer.from("128"),
+    );
+    mockClient.emit(
+      "message",
+      "wled/living-room/c",
+      Buffer.from("#FF0000"),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
+
+    // Verify getState returns normalized HK values via handleGetRequest
+    const brightness = await service
+      .getCharacteristic(Characteristic.Brightness)
+      .handleGetRequest();
+    expect(brightness).toBe(50); // wledBrightnessToHomeKit(128) = 50
+
+    const hue = await service
+      .getCharacteristic(Characteristic.Hue)
+      .handleGetRequest();
+    expect(hue).toBe(0); // red → hue 0
+
+    const saturation = await service
+      .getCharacteristic(Characteristic.Saturation)
+      .handleGetRequest();
+    expect(saturation).toBe(100); // pure red → saturation 100
+
+    await shutdown();
+  });
+
+  test("mixed Z2M and WLED devices subscribe correctly", async () => {
+    const cfg: Config = {
+      bridge: {
+        name: "Test Bridge",
+        mac: "0E:42:A1:B2:C3:D4",
+        pincode: "031-45-154",
+        port: 0,
+      },
+      mqtt: {
+        url: "mqtt://localhost:1883",
+        topic_prefix: "zigbee2mqtt",
+      },
+      devices: [
+        {
+          name: "Z2M Light",
+          type: "z2m",
+          topic: "living_room",
+          capabilities: ["on_off"],
+        },
+        {
+          name: "WLED Strip",
+          type: "wled",
+          topic: "wled/strip",
+          capabilities: ["on_off", "brightness"],
+        },
+      ],
+    };
+
+    const { shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    expect(mockClient.subscriptions).toHaveLength(1);
+    const topics = mockClient.subscriptions[0]!;
+    expect(topics).toContain("zigbee2mqtt/living_room");
+    expect(topics).toContain("wled/strip/g");
+    expect(topics).toContain("wled/strip/c");
+
+    // Only Z2M device should get state request
+    const getMessages = mockClient.published.filter((p) =>
+      p.topic.endsWith("/get"),
+    );
+    expect(getMessages).toHaveLength(1);
+    expect(getMessages[0]!.topic).toBe("zigbee2mqtt/living_room/get");
+
+    await shutdown();
   });
 });
 
@@ -818,10 +1375,12 @@ describe("buildStatusData", () => {
     expect(result.devices).toHaveLength(2);
     expect(result.devices[0]!.name).toBe("Living Room");
     expect(result.devices[0]!.topic).toBe("living_room");
+    expect(result.devices[0]!.type).toBe("z2m");
     expect(result.devices[0]!.capabilities).toEqual(["on_off", "brightness"]);
     expect(result.devices[0]!.scenes).toEqual([{ name: "Movie Mode", id: 1 }]);
     expect(result.devices[0]!.state).toEqual({ state: "ON", brightness: 200 });
     expect(result.devices[1]!.name).toBe("Bedroom");
+    expect(result.devices[1]!.type).toBe("z2m");
     expect(result.devices[1]!.state).toBeNull();
   });
 

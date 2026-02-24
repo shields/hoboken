@@ -15,7 +15,14 @@
 import { createServer } from "node:http";
 import type { Server, ServerResponse } from "node:http";
 import { Counter, Gauge, Registry, collectDefaultMetrics } from "prom-client";
-import { z2mBrightnessToHomeKit, clampColorTemp } from "./convert.ts";
+import type { Capability, DeviceType } from "./config.ts";
+import {
+  clampColorTemp,
+  wledBrightnessToHomeKit,
+  wledToHomeKit,
+  z2mBrightnessToHomeKit,
+  z2mToHomeKit,
+} from "./convert.ts";
 import * as log from "./log.ts";
 
 export interface Metrics {
@@ -99,7 +106,8 @@ export interface HapConnection {
 export interface DeviceStatus {
   name: string;
   topic: string;
-  capabilities: string[];
+  type: DeviceType;
+  capabilities: Capability[];
   scenes?: { name: string; id: number }[];
   state: Record<string, unknown> | null;
 }
@@ -259,7 +267,7 @@ interface Hint {
 function formatHint(
   key: string,
   value: unknown,
-  capabilities: string[],
+  capabilities: Capability[],
 ): Hint | null {
   if (
     key === "brightness" &&
@@ -267,7 +275,17 @@ function formatHint(
     capabilities.includes("brightness")
   ) {
     return {
-      html: `<span class="hint">\u2192 ${String(Math.round((value / 254) * 100))}%</span>`,
+      html: `<span class="hint">\u2192 ${String(z2mBrightnessToHomeKit(value))}%</span>`,
+      placement: "value",
+    };
+  }
+  if (
+    key === "bri" &&
+    typeof value === "number" &&
+    capabilities.includes("brightness")
+  ) {
+    return {
+      html: `<span class="hint">\u2192 ${String(wledBrightnessToHomeKit(value))}%</span>`,
       placement: "value",
     };
   }
@@ -290,6 +308,17 @@ function formatHint(
     if (typeof h !== "number" || typeof s !== "number") return null;
     return {
       html: `<span class="swatch" style="background:hsl(${String(h)},${String(s)}%,50%)"></span>`,
+      placement: "key",
+    };
+  }
+  if (
+    key === "col" &&
+    Array.isArray(value) &&
+    value.length >= 3
+  ) {
+    const [r, g, b] = value as number[];
+    return {
+      html: `<span class="swatch" style="background:rgb(${String(r)},${String(g)},${String(b)})"></span>`,
       placement: "key",
     };
   }
@@ -365,8 +394,18 @@ interface HomeKitRow {
 
 function computeHomeKitValues(
   state: Record<string, unknown>,
-  capabilities: string[],
+  capabilities: Capability[],
+  type: DeviceType,
 ): HomeKitRow[] {
+  let hk: ReturnType<typeof z2mToHomeKit>;
+  switch (type) {
+    case "z2m":
+      hk = z2mToHomeKit(state);
+      break;
+    case "wled":
+      hk = wledToHomeKit(state);
+      break;
+  }
   const rows: HomeKitRow[] = [];
   for (const cap of capabilities) {
     switch (cap) {
@@ -374,23 +413,21 @@ function computeHomeKitValues(
         rows.push({
           capability: "on_off",
           name: "On",
-          value: state.state === "ON" ? "true" : "false",
+          value: hk.on === true ? "true" : "false",
         });
         break;
       case "brightness": {
-        const b = state.brightness;
+        const b = hk.brightness;
         rows.push({
           capability: "brightness",
           name: "Brightness",
           value:
-            typeof b === "number"
-              ? `${String(z2mBrightnessToHomeKit(b))}%`
-              : "\u2014",
+            typeof b === "number" ? `${String(b)}%` : "\u2014",
         });
         break;
       }
       case "color_temp": {
-        const ct = state.color_temp;
+        const ct = hk.color_temp;
         const clamped = typeof ct === "number" ? clampColorTemp(ct) : undefined;
         rows.push({
           capability: "color_temp",
@@ -405,23 +442,18 @@ function computeHomeKitValues(
         break;
       }
       case "color_hs": {
-        const color = state.color as Record<string, unknown> | undefined;
-        const h =
-          color && typeof color.hue === "number" ? color.hue : undefined;
-        const s =
-          color && typeof color.saturation === "number"
-            ? color.saturation
-            : undefined;
+        const h = hk.hue;
+        const s = hk.saturation;
         rows.push(
           {
             capability: "color_hs",
             name: "Hue",
-            value: h === undefined ? "\u2014" : `${String(h)}\u00B0`,
+            value: typeof h === "number" ? `${String(h)}\u00B0` : "\u2014",
           },
           {
             capability: "color_hs",
             name: "Saturation",
-            value: s === undefined ? "\u2014" : `${String(s)}%`,
+            value: typeof s === "number" ? `${String(s)}%` : "\u2014",
           },
         );
         break;
@@ -433,13 +465,14 @@ function computeHomeKitValues(
 
 function renderHomeKitSection(
   state: Record<string, unknown> | null,
-  capabilities: string[],
+  capabilities: Capability[],
   vtPrefix: string,
+  type: DeviceType,
 ): string {
   if (state === null) {
     return `<div class="label">HomeKit</div>\n<span class="na">No state received</span>`;
   }
-  const rows = computeHomeKitValues(state, capabilities);
+  const rows = computeHomeKitValues(state, capabilities, type);
   const rowsHtml = rows
     .map((r) => {
       const vtName = `${vtPrefix}-hk-${r.name}`;
@@ -471,6 +504,7 @@ function renderStatusContent(data: StatusData): string {
       device.state,
       device.capabilities,
       vtPrefix,
+      device.type,
     );
 
     let mqttStateHtml: string;

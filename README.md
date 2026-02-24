@@ -1,7 +1,8 @@
 # Hoboken
 
-A minimal HomeKit bridge for Zigbee2MQTT. Exposes Z2M lights, smart plugs,
-and scenes to Apple Home for HomePod and Siri voice commands.
+A minimal HomeKit bridge for Zigbee2MQTT and WLED. Exposes Z2M lights, smart
+plugs, scenes, and WLED LED controllers to Apple Home for HomePod and Siri
+voice commands.
 
 It also provides an HTTP endpoint with a live-updating dashboard presenting all
 data in both MQTT and HAP forms, as well as Prometheus metrics and health check
@@ -17,7 +18,7 @@ different project.
 ## Why
 
 Matterbridge and Homebridge are too complex and hard to troubleshoot. Hoboken does one
-thing: bridge Z2M to HomeKit. It's built directly on
+thing: bridge Z2M and WLED devices to HomeKit. It's built directly on
 [`hap-nodejs`](https://github.com/homebridge/HAP-NodeJS).
 
 It does not have any device discovery, self-update, or plugins. You get exactly what
@@ -37,7 +38,7 @@ It's called "Hoboken" because that has some of the same letters as
 | Module               | Responsibility                        |
 | -------------------- | ------------------------------------- |
 | `src/config.ts`      | Load and validate YAML config         |
-| `src/convert.ts`     | Value conversion (Z2M ↔ HomeKit)      |
+| `src/convert.ts`     | Value conversion (Z2M/WLED ↔ HomeKit) |
 | `src/accessories.ts` | Create HAP accessories and scenes     |
 | `src/bridge.ts`      | MQTT client, bridge wiring, lifecycle |
 | `src/metrics.ts`     | Prometheus metrics and HTTP server    |
@@ -47,16 +48,26 @@ Modules are split for testability. Each has clear inputs/outputs and minimal
 coupling. Accessory creation takes injected `publish`/`getState` functions
 rather than an MQTT client directly.
 
+### Device Types
+
+Each device has a `type` field (defaults to `"z2m"`) that selects the MQTT
+protocol:
+
+| Type   | Protocol              | MQTT Format                    |
+| ------ | --------------------- | ------------------------------ |
+| `z2m`  | Zigbee2MQTT (default) | JSON on `<prefix>/<topic>`     |
+| `wled` | WLED MQTT API         | Sub-topics `/g`, `/c`, `/api`  |
+
 ### Capabilities
 
 Devices declare capabilities in `config.yaml`:
 
-| Capability   | HomeKit Characteristic | Conversion                   |
-| ------------ | ---------------------- | ---------------------------- |
-| `on_off`     | `On`                   | boolean, always present      |
-| `brightness` | `Brightness`           | Z2M 0–254 ↔ HomeKit 0–100    |
-| `color_temp` | `ColorTemperature`     | mireds, no conversion needed |
-| `color_hs`   | `Hue` + `Saturation`   | ranges match, no conversion  |
+| Capability   | HomeKit Characteristic | Z2M Conversion               | WLED Conversion           |
+| ------------ | ---------------------- | ---------------------------- | ------------------------- |
+| `on_off`     | `On`                   | boolean, always present      | boolean                   |
+| `brightness` | `Brightness`           | Z2M 0–254 ↔ HomeKit 0–100    | WLED 0–255 ↔ HomeKit 0–100 |
+| `color_temp` | `ColorTemperature`     | mireds, no conversion needed | not supported             |
+| `color_hs`   | `Hue` + `Saturation`   | ranges match, no conversion  | HSV ↔ RGB conversion       |
 
 ### Scenes
 
@@ -132,6 +143,11 @@ devices:
 
   - name: "Bedroom Light"
     topic: "bedroom_light"
+    capabilities: [on_off, brightness, color_hs]
+
+  - name: "LED Strip"
+    type: wled
+    topic: "wled/living-room"
     capabilities: [on_off, brightness, color_hs]
 ```
 

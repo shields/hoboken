@@ -23,3 +23,9 @@ devices:
   - name: "Bedroom Light"
     topic: "bedroom_light"
     capabilities: [on_off, brightness, color_hs]
+
+  # WLED device example (uses WLED's MQTT JSON API):
+  # - name: "LED Strip"
+  #   type: wled
+  #   topic: "wled/living-room"
+  #   capabilities: [on_off, brightness, color_hs]
