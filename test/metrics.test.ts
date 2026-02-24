@@ -275,6 +275,7 @@ function makeStatus(overrides?: Partial<StatusData>): StatusData {
       {
         name: "Desk Lamp",
         topic: "desk_lamp",
+        type: "z2m",
         capabilities: ["on_off", "brightness"],
         state: { state: "ON", brightness: 200 },
       },
@@ -359,6 +360,7 @@ describe("SSE (GET /events)", () => {
           {
             name: "Desk Lamp",
             topic: "desk_lamp",
+            type: "z2m",
             capabilities: ["on_off", "brightness"],
             state,
           },
@@ -558,6 +560,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { state: "ON" },
           },
@@ -585,6 +588,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { state: "OFF" },
           },
@@ -627,6 +631,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "desk/lamp",
+            type: "z2m",
             capabilities: ["on_off", "brightness"],
             state: { state: "ON", brightness: 200 },
           },
@@ -652,6 +657,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "brightness", "color_hs"],
             state: { state: "ON" },
           },
@@ -678,6 +684,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "brightness"],
             state: { state: "ON" },
           },
@@ -703,6 +710,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "color_hs"],
             state: { state: "ON", color: { hue: 240, saturation: 80 } },
           },
@@ -730,6 +738,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "color_temp"],
             state: { state: "ON", color_temp: 370 },
           },
@@ -756,6 +765,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "color_temp"],
             state: { state: "ON", color_temp: 50 },
           },
@@ -781,6 +791,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "brightness"],
             state: { state: "ON", brightness: 200 },
           },
@@ -807,6 +818,7 @@ describe("status page (GET /)", () => {
           {
             name: "New Bulb",
             topic: "new_bulb",
+            type: "z2m",
             capabilities: ["on_off"],
             state: null,
           },
@@ -844,6 +856,7 @@ describe("status page (GET /)", () => {
           {
             name: "Bulb",
             topic: "bulb",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { state: "OFF", brightness: 128 },
           },
@@ -869,6 +882,7 @@ describe("status page (GET /)", () => {
           {
             name: "New Bulb",
             topic: "new_bulb",
+            type: "z2m",
             capabilities: ["on_off"],
             state: null,
           },
@@ -985,6 +999,7 @@ describe("status page (GET /)", () => {
           {
             name: "Evil",
             topic: "evil",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { xss: '<script>alert("xss")</script>' },
           },
@@ -1010,6 +1025,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             scenes: [{ name: "Relax", id: 1 }],
             state: { state: "ON" },
@@ -1083,6 +1099,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "brightness"],
             state: { brightness: 200 },
           },
@@ -1107,6 +1124,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "color_temp"],
             state: { color_temp: 370 },
           },
@@ -1131,6 +1149,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "color_hs"],
             state: { color_temp: 370 },
           },
@@ -1155,6 +1174,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "color_hs"],
             state: { color: { hue: 240, saturation: 80 } },
           },
@@ -1181,6 +1201,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { last_seen: recent },
           },
@@ -1208,6 +1229,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { last_seen: hoursAgo },
           },
@@ -1233,6 +1255,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { last_seen: exactHours },
           },
@@ -1261,6 +1284,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { last_seen: daysAgo },
           },
@@ -1286,6 +1310,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { last_seen: exactDays },
           },
@@ -1311,6 +1336,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { last_seen: "not-a-date" },
           },
@@ -1328,6 +1354,118 @@ describe("status page (GET /)", () => {
     expect(body).not.toContain('class="hint"');
   });
 
+  async function renderDevice(
+    device: StatusData["devices"][number],
+  ): Promise<string> {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({ devices: [device] });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+    await listening(ms.server);
+    return (
+      await fetch(`http://127.0.0.1:${String(addr(ms.server))}/`)
+    ).text();
+  }
+
+  test("WLED bri annotation shows percentage", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "brightness"],
+      state: { on: true, bri: 128 },
+    });
+    expect(body).toContain("\u2192 50%");
+  });
+
+  test("WLED col annotation shows color swatch", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "color_hs"],
+      state: { on: true, col: [255, 0, 0] },
+    });
+    expect(body).toContain("rgb(255,0,0)");
+    expect(body).toContain('class="swatch"');
+  });
+
+  test("WLED on_off HomeKit shows true when state.on is true", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off"],
+      state: { on: true },
+    });
+    expect(body).toContain("on_off");
+    expect(body).toContain("On");
+    expect(body).toContain("true");
+  });
+
+  test("WLED on_off HomeKit shows false when state.on is false", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off"],
+      state: { on: false },
+    });
+    expect(body).toContain("false");
+  });
+
+  test("WLED brightness HomeKit shows percentage from bri", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "brightness"],
+      state: { on: true, bri: 255 },
+    });
+    expect(body).toContain("Brightness");
+    expect(body).toContain("100%");
+  });
+
+  test("WLED brightness HomeKit shows em-dash when bri is missing", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "brightness"],
+      state: { on: true },
+    });
+    expect(body).toContain("Brightness");
+    expect(body).toContain("\u2014");
+  });
+
+  test("WLED color_hs HomeKit shows Hue and Saturation from col", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "color_hs"],
+      state: { on: true, col: [255, 0, 0] },
+    });
+    expect(body).toContain("Hue");
+    expect(body).toContain("0\u00B0");
+    expect(body).toContain("Saturation");
+    expect(body).toContain("100%");
+  });
+
+  test("WLED color_hs HomeKit shows em-dash when col is missing", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "color_hs"],
+      state: { on: true },
+    });
+    expect(body).toContain("Hue");
+    expect(body).toContain("Saturation");
+    const emDashCount = (body.match(/\u2014/g) ?? []).length;
+    expect(emDashCount).toBeGreaterThanOrEqual(2);
+  });
+
   test("no annotations for unrecognized keys", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
@@ -1336,6 +1474,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { state: "ON", custom_key: 42 },
           },
@@ -1361,6 +1500,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "desk/lamp",
+            type: "z2m",
             capabilities: ["on_off", "brightness"],
             state: { state: "ON", brightness: 200 },
           },
@@ -1446,6 +1586,7 @@ describe("status page (GET /)", () => {
           {
             name: "Lamp",
             topic: "lamp",
+            type: "z2m",
             capabilities: ["on_off", "brightness"],
             state,
           },
@@ -1525,6 +1666,7 @@ describe("status page (GET /)", () => {
           {
             name: "Sensor",
             topic: "sensor",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { last_seen: ts },
           },
@@ -1550,6 +1692,7 @@ describe("status page (GET /)", () => {
           {
             name: "Sensor",
             topic: "sensor",
+            type: "z2m",
             capabilities: ["on_off"],
             state: { last_seen: '<script>"xss"</script>' },
           },

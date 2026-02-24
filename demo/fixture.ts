@@ -27,6 +27,7 @@ export const fixtureData: StatusData = {
     {
       name: "Living Room",
       topic: "living_room",
+      type: "z2m",
       capabilities: ["on_off", "brightness", "color_temp"],
       scenes: [
         { name: "Movie Mode", id: 1 },
@@ -41,6 +42,7 @@ export const fixtureData: StatusData = {
     {
       name: "Bedroom",
       topic: "bedroom",
+      type: "z2m",
       capabilities: ["on_off", "brightness", "color_hs"],
       state: {
         state: "OFF",
@@ -52,14 +54,23 @@ export const fixtureData: StatusData = {
     {
       name: "Desk Lamp",
       topic: "desk_lamp",
+      type: "z2m",
       capabilities: ["on_off", "brightness", "color_temp"],
       state: { state: "ON", brightness: 127 },
     },
     {
       name: "Kitchen Pendant",
       topic: "kitchen_pendant",
+      type: "z2m",
       capabilities: ["on_off"],
       state: null,
+    },
+    {
+      name: "LED Strip",
+      topic: "wled/living-room",
+      type: "wled",
+      capabilities: ["on_off", "brightness", "color_hs"],
+      state: { on: true, bri: 200, col: [255, 128, 0] },
     },
   ],
 };

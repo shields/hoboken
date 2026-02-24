@@ -80,6 +80,42 @@ describe("validateConfig", () => {
     ]);
   });
 
+  test("defaults type to z2m when not specified", () => {
+    const config = validateConfig(validConfig());
+    expect(config.devices[0]!.type).toBe("z2m");
+  });
+
+  test("accepts type z2m", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "z2m";
+    const config = validateConfig(data);
+    expect(config.devices[0]!.type).toBe("z2m");
+  });
+
+  test("accepts type wled", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "wled";
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    const config = validateConfig(data);
+    expect(config.devices[0]!.type).toBe("wled");
+  });
+
+  test("rejects invalid type", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "invalid";
+    expect(() => validateConfig(data)).toThrow(
+      'devices[0].type must be "z2m" or "wled"',
+    );
+  });
+
+  test("rejects scenes on WLED devices", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "wled";
+    expect(() => validateConfig(data)).toThrow(
+      "scenes are not supported for WLED devices",
+    );
+  });
+
   test("accepts color_temp without color_hs", () => {
     const data = validConfig();
     data.devices[0]!.capabilities = ["on_off", "brightness", "color_temp"];

@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
 export type Capability = "on_off" | "brightness" | "color_temp" | "color_hs";
+export type DeviceType = "z2m" | "wled";
 
 const VALID_CAPABILITIES = new Set<Capability>([
   "on_off",
@@ -24,6 +25,8 @@ const VALID_CAPABILITIES = new Set<Capability>([
   "color_hs",
 ]);
 
+const VALID_DEVICE_TYPES = new Set<DeviceType>(["z2m", "wled"]);
+
 export interface SceneConfig {
   name: string;
   id: number;
@@ -31,6 +34,7 @@ export interface SceneConfig {
 
 export interface DeviceConfig {
   name: string;
+  type: DeviceType;
   topic: string;
   capabilities: Capability[];
   scenes?: SceneConfig[];
@@ -182,6 +186,14 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
       `devices[${String(index)}].name must be a non-empty string`,
     );
   }
+  const type: DeviceType =
+    d.type === undefined ? "z2m" : (d.type as DeviceType);
+  if (!VALID_DEVICE_TYPES.has(type)) {
+    throw new Error(
+      `devices[${String(index)}].type must be "z2m" or "wled"`,
+    );
+  }
+
   if (typeof d.topic !== "string" || d.topic.length === 0) {
     throw new Error(
       `devices[${String(index)}].topic must be a non-empty string`,
@@ -225,6 +237,11 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
     if (!Array.isArray(d.scenes)) {
       throw new TypeError(`devices[${String(index)}].scenes must be an array`);
     }
+    if (type === "wled") {
+      throw new Error(
+        `devices[${String(index)}]: scenes are not supported for WLED devices`,
+      );
+    }
     scenes = d.scenes.map((s: unknown, si: number) =>
       validateScene(s, index, si),
     );
@@ -232,6 +249,7 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
 
   return {
     name: d.name,
+    type,
     topic: d.topic,
     capabilities,
     ...(scenes ? { scenes } : {}),
