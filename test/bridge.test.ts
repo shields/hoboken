@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
@@ -132,6 +132,16 @@ function flush(): Promise<void> {
   });
 }
 
+function emitConnect(): void {
+  mockClient.connected = true;
+  mockClient.published = [];
+  mockClient.emit("connect");
+}
+
+function collectGetMessages(): { topic: string; message: string }[] {
+  return mockClient.published.filter((p) => p.topic.endsWith("/get"));
+}
+
 describe("startBridge", () => {
   test("creates bridge and connects MQTT", async () => {
     const { shutdown } = await startBridge(testConfig());
@@ -212,17 +222,24 @@ describe("startBridge", () => {
   });
 
   test("requests initial state on MQTT connect", async () => {
+    const origRandom = Math.random;
+    Math.random = () => 0.5;
     const { shutdown } = await startBridge(testConfig());
-    mockClient.connected = true;
-    mockClient.emit("connect");
+    jest.useFakeTimers();
+    try {
+      emitConnect();
+      jest.advanceTimersByTime(300);
 
-    const getMessages = mockClient.published.filter((p) =>
-      p.topic.endsWith("/get"),
-    );
-    expect(getMessages).toHaveLength(2);
-    expect(getMessages[0]!.topic).toBe("zigbee2mqtt/living_room/get");
-    expect(getMessages[1]!.topic).toBe("zigbee2mqtt/bedroom/get");
-    await shutdown();
+      expect(collectGetMessages()).toHaveLength(2);
+      expect(collectGetMessages().map((p) => p.topic).toSorted()).toEqual([
+        "zigbee2mqtt/bedroom/get",
+        "zigbee2mqtt/living_room/get",
+      ]);
+    } finally {
+      jest.useRealTimers();
+      Math.random = origRandom;
+      await shutdown();
+    }
   });
 
   test("MQTT message updates state cache and accessory", async () => {
@@ -1158,6 +1175,8 @@ describe("WLED device support", () => {
   });
 
   test("mixed Z2M and WLED devices subscribe correctly", async () => {
+    const origRandom = Math.random;
+    Math.random = () => 0.5;
     const cfg: Config = {
       bridge: {
         name: "Test Bridge",
@@ -1185,23 +1204,25 @@ describe("WLED device support", () => {
     };
 
     const { shutdown } = await startBridge(cfg);
-    mockClient.connected = true;
-    mockClient.emit("connect");
+    jest.useFakeTimers();
+    try {
+      emitConnect();
 
-    expect(mockClient.subscriptions).toHaveLength(1);
-    const topics = mockClient.subscriptions[0]!;
-    expect(topics).toContain("zigbee2mqtt/living_room");
-    expect(topics).toContain("wled/strip/g");
-    expect(topics).toContain("wled/strip/c");
+      expect(mockClient.subscriptions).toHaveLength(1);
+      const topics = mockClient.subscriptions[0]!;
+      expect(topics).toContain("zigbee2mqtt/living_room");
+      expect(topics).toContain("wled/strip/g");
+      expect(topics).toContain("wled/strip/c");
 
-    // Only Z2M device should get state request
-    const getMessages = mockClient.published.filter((p) =>
-      p.topic.endsWith("/get"),
-    );
-    expect(getMessages).toHaveLength(1);
-    expect(getMessages[0]!.topic).toBe("zigbee2mqtt/living_room/get");
+      jest.advanceTimersByTime(300);
 
-    await shutdown();
+      expect(collectGetMessages()).toHaveLength(1);
+      expect(collectGetMessages()[0]!.topic).toBe("zigbee2mqtt/living_room/get");
+    } finally {
+      jest.useRealTimers();
+      Math.random = origRandom;
+      await shutdown();
+    }
   });
 });
 
@@ -1386,6 +1407,302 @@ describe("startBridge with metrics", () => {
   });
 
 
+});
+
+describe("get retry", () => {
+  const originalRandom = Math.random;
+
+  beforeEach(() => {
+    Math.random = () => 0.5;
+  });
+
+  afterEach(() => {
+    Math.random = originalRandom;
+    jest.useRealTimers();
+  });
+
+  async function startRetryTest(cfg?: Config) {
+    const result = await startBridge(cfg ?? testConfig());
+    jest.useFakeTimers();
+    emitConnect();
+    return result;
+  }
+
+  test("initial /get is jittered, not published synchronously", async () => {
+    const { shutdown } = await startRetryTest();
+    expect(collectGetMessages()).toHaveLength(0);
+    jest.advanceTimersByTime(300);
+    expect(collectGetMessages().length).toBeGreaterThanOrEqual(2);
+    await shutdown();
+  });
+
+  test("schedules retry for unresponsive Z2M devices", async () => {
+    const { shutdown } = await startRetryTest();
+    jest.advanceTimersByTime(300);
+    expect(collectGetMessages()).toHaveLength(2);
+    jest.advanceTimersByTime(2300);
+    expect(collectGetMessages()).toHaveLength(4);
+    await shutdown();
+  });
+
+  test("skips retry for devices that already responded", async () => {
+    const { shutdown } = await startRetryTest();
+    jest.advanceTimersByTime(300);
+    const initialCount = collectGetMessages().length;
+
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/living_room",
+      Buffer.from(JSON.stringify({ state: "ON" })),
+    );
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/bedroom",
+      Buffer.from(JSON.stringify({ state: "OFF" })),
+    );
+
+    jest.advanceTimersByTime(3000);
+    expect(collectGetMessages()).toHaveLength(initialCount);
+    await shutdown();
+  });
+
+  test("exponential backoff timing with sqrt(2) multiplier", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Only Device",
+          type: "z2m",
+          topic: "zigbee2mqtt/only",
+          capabilities: ["on_off"],
+        },
+      ],
+    };
+    const { shutdown } = await startRetryTest(cfg);
+
+    jest.advanceTimersByTime(300);
+    expect(collectGetMessages()).toHaveLength(1);
+
+    // Retry 0: base = 2000, jitter = 250, total = 2250
+    jest.advanceTimersByTime(2300);
+    expect(collectGetMessages()).toHaveLength(2);
+
+    // Retry 1: base = 2000*sqrt(2) ≈ 2828, jitter ≈ 354, total ≈ 3182
+    jest.advanceTimersByTime(3300);
+    expect(collectGetMessages()).toHaveLength(3);
+
+    // Retry 2: base = 2000*2 = 4000, jitter = 500, total = 4500
+    jest.advanceTimersByTime(4600);
+    expect(collectGetMessages()).toHaveLength(4);
+
+    await shutdown();
+  });
+
+  test("retries cap at 1024s and continue indefinitely", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Only Device",
+          type: "z2m",
+          topic: "zigbee2mqtt/only",
+          capabilities: ["on_off"],
+        },
+      ],
+    };
+    const { shutdown } = await startRetryTest(cfg);
+    jest.advanceTimersByTime(300);
+
+    for (let i = 0; i < 20; i++) {
+      jest.advanceTimersByTime(1_100_000);
+    }
+
+    expect(collectGetMessages().length).toBeGreaterThan(20);
+    await shutdown();
+  });
+
+  test("cancels retries on close", async () => {
+    const { shutdown } = await startRetryTest();
+    jest.advanceTimersByTime(300);
+    const afterInitial = collectGetMessages().length;
+
+    mockClient.emit("close");
+    jest.advanceTimersByTime(5000);
+
+    expect(collectGetMessages()).toHaveLength(afterInitial);
+    await shutdown();
+  });
+
+  test("cancels retries on offline", async () => {
+    const { shutdown } = await startRetryTest();
+    jest.advanceTimersByTime(300);
+    const afterInitial = collectGetMessages().length;
+
+    mockClient.emit("offline");
+    jest.advanceTimersByTime(5000);
+
+    expect(collectGetMessages()).toHaveLength(afterInitial);
+    await shutdown();
+  });
+
+  test("cancels retries and restarts on reconnect", async () => {
+    const { shutdown } = await startRetryTest();
+    jest.advanceTimersByTime(300);
+
+    mockClient.subscriptions = [];
+    emitConnect();
+    jest.advanceTimersByTime(300);
+
+    expect(collectGetMessages()).toHaveLength(2);
+    await shutdown();
+  });
+
+  test("does not retry WLED devices", async () => {
+    const { shutdown } = await startRetryTest(wledConfig());
+    jest.advanceTimersByTime(10000);
+    expect(collectGetMessages()).toHaveLength(0);
+    await shutdown();
+  });
+
+  test("skips retry for devices already in stateCache on reconnect", async () => {
+    const { shutdown } = await startRetryTest();
+    jest.advanceTimersByTime(300);
+
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/living_room",
+      Buffer.from(JSON.stringify({ state: "ON" })),
+    );
+
+    mockClient.subscriptions = [];
+    emitConnect();
+    jest.advanceTimersByTime(300);
+
+    expect(collectGetMessages()).toHaveLength(2);
+    expect(
+      mockClient.published.find(
+        (p) => p.topic === "zigbee2mqtt/living_room/get",
+      ),
+    ).toBeDefined();
+
+    jest.advanceTimersByTime(3000);
+    const bedroomRetries = mockClient.published.filter(
+      (p) => p.topic === "zigbee2mqtt/bedroom/get",
+    ).length;
+    const livingRoomRetries = mockClient.published.filter(
+      (p) => p.topic === "zigbee2mqtt/living_room/get",
+    ).length;
+    expect(bedroomRetries).toBeGreaterThan(1);
+    expect(livingRoomRetries).toBe(1);
+    await shutdown();
+  });
+
+  test("increments z2mGetRequestsTotal on each /get publish", async () => {
+    const cfg: Config = {
+      ...metricsConfig(),
+      devices: [
+        {
+          name: "Only Device",
+          type: "z2m",
+          topic: "zigbee2mqtt/only",
+          capabilities: ["on_off"],
+        },
+      ],
+    };
+    const { metricsPort, shutdown } = await startRetryTest(cfg);
+
+    jest.advanceTimersByTime(300);
+    jest.advanceTimersByTime(2300);
+
+    jest.useRealTimers();
+    const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
+    const body = await res.text();
+    const match = /hoboken_z2m_get_requests_total (\d+)/.exec(body);
+    expect(match).toBeDefined();
+    expect(Number(match![1])).toBeGreaterThanOrEqual(2);
+    await shutdown();
+  });
+});
+
+describe("devicesStateUnknown metric", () => {
+  test("starts at total device count on startup", async () => {
+    const cfg = metricsConfig();
+    const { metricsPort, shutdown } = await startBridge(cfg);
+
+    const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
+    const body = await res.text();
+    const match = /hoboken_devices_state_unknown (\d+)/.exec(body);
+    expect(match).toBeDefined();
+    expect(Number(match![1])).toBe(2);
+    await shutdown();
+  });
+
+  test("decreases as devices respond", async () => {
+    const cfg = metricsConfig();
+    const { metricsPort, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/living_room",
+      Buffer.from(JSON.stringify({ state: "ON" })),
+    );
+
+    const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
+    const body = await res.text();
+    const match = /hoboken_devices_state_unknown (\d+)/.exec(body);
+    expect(match).toBeDefined();
+    expect(Number(match![1])).toBe(1);
+    await shutdown();
+  });
+
+  test("no double-decrement on subsequent updates to same device", async () => {
+    const cfg = metricsConfig();
+    const { metricsPort, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/living_room",
+      Buffer.from(JSON.stringify({ state: "ON" })),
+    );
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/living_room",
+      Buffer.from(JSON.stringify({ state: "OFF" })),
+    );
+
+    const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
+    const body = await res.text();
+    const match = /hoboken_devices_state_unknown (\d+)/.exec(body);
+    expect(match).toBeDefined();
+    expect(Number(match![1])).toBe(1);
+    await shutdown();
+  });
+
+  test("recomputed correctly on reconnect with cached state", async () => {
+    const cfg = metricsConfig();
+    const { metricsPort, shutdown } = await startBridge(cfg);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/living_room",
+      Buffer.from(JSON.stringify({ state: "ON" })),
+    );
+
+    mockClient.emit("connect");
+
+    const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
+    const body = await res.text();
+    const match = /hoboken_devices_state_unknown (\d+)/.exec(body);
+    expect(match).toBeDefined();
+    expect(Number(match![1])).toBe(1);
+    await shutdown();
+  });
 });
 
 describe("buildStatusData", () => {

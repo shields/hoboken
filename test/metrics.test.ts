@@ -47,6 +47,8 @@ describe("createMetrics", () => {
     expect(names).toContain("hoboken_devices_configured");
     expect(names).toContain("hoboken_hap_connections_active");
     expect(names).toContain("hoboken_hap_pair_verify_total");
+    expect(names).toContain("hoboken_devices_state_unknown");
+    expect(names).toContain("hoboken_z2m_get_requests_total");
   });
 
   test("includes default process metrics", async () => {

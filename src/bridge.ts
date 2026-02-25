@@ -52,6 +52,9 @@ import type {
 } from "./metrics.ts";
 
 const WRITE_BACK_SUPPRESSION_MS = 500;
+const GET_RETRY_INITIAL_MS = 2000;
+const GET_RETRY_MAX_MS = 1_024_000;
+const GET_JITTER_FRACTION = 0.25;
 
 export function buildStatusData(
   config: Config,
@@ -85,6 +88,37 @@ interface BridgeHandle {
 export async function startBridge(config: Config): Promise<BridgeHandle> {
   const stateCache = new Map<string, RawState>();
   const lastColorPublish = new Map<string, number>();
+  const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  function cancelAllRetries(): void {
+    for (const timer of pendingGetTimers.values()) {
+      clearTimeout(timer);
+    }
+    pendingGetTimers.clear();
+  }
+
+  function publishGet(device: Config["devices"][number]): void {
+    mqttClient.publish(
+      `${device.topic}/get`,
+      JSON.stringify({ state: "" }),
+    );
+    metrics?.z2mGetRequestsTotal.inc();
+    metrics?.mqttMessagesPublished.inc();
+  }
+
+  function scheduleGetRetry(device: Config["devices"][number], attempt: number): void {
+    const baseDelay = attempt === 0
+      ? 0
+      : Math.min(GET_RETRY_INITIAL_MS * Math.SQRT2 ** (attempt - 1), GET_RETRY_MAX_MS);
+    const jitter = Math.random() * GET_JITTER_FRACTION * Math.max(baseDelay, GET_RETRY_INITIAL_MS);
+    const delay = baseDelay + jitter;
+    const timer = setTimeout(() => {
+      if (stateCache.has(device.topic) || !mqttClient.connected) return;
+      publishGet(device);
+      scheduleGetRetry(device, attempt + 1);
+    }, delay);
+    pendingGetTimers.set(device.topic, timer);
+  }
 
   let metrics: Metrics | undefined;
   let metricsServer: MetricsServer | undefined;
@@ -119,6 +153,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
   mqttClient.on("close", () => {
     log.log("MQTT connection closed");
+    cancelAllRetries();
     metrics?.mqttConnected.set(0);
     metricsServer?.notifyStateChange();
   });
@@ -129,6 +164,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
   mqttClient.on("offline", () => {
     log.log("MQTT client offline");
+    cancelAllRetries();
     metrics?.mqttConnected.set(0);
     metricsServer?.notifyStateChange();
   });
@@ -281,9 +317,11 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   }
 
   metrics?.devicesConfigured.set(config.devices.length);
+  metrics?.devicesStateUnknown.set(config.devices.length);
 
   mqttClient.on("connect", () => {
     log.log("MQTT connected");
+    cancelAllRetries();
     metrics?.mqttConnected.set(1);
     const topics = config.devices.flatMap((d) => {
       switch (d.type) {
@@ -294,15 +332,20 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       }
     });
     mqttClient.subscribe(topics);
+
+    metrics?.devicesStateUnknown.set(
+      config.devices.filter((d) => !stateCache.has(d.topic)).length,
+    );
     metricsServer?.notifyStateChange();
 
     for (const device of config.devices) {
       switch (device.type) {
         case "z2m":
-          mqttClient.publish(
-            `${device.topic}/get`,
-            JSON.stringify({ state: "" }),
-          );
+          if (stateCache.has(device.topic)) {
+            publishGet(device);
+          } else {
+            scheduleGetRetry(device, 0);
+          }
           break;
         case "wled":
           break;
@@ -318,8 +361,16 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     log.log(
       `State update for "${entry.device.name}": ${JSON.stringify(rawPartial)}`,
     );
+    if (!stateCache.has(deviceTopic)) {
+      metrics?.devicesStateUnknown.dec();
+    }
     const merged = { ...stateCache.get(deviceTopic), ...rawPartial };
     stateCache.set(deviceTopic, merged);
+    const pendingTimer = pendingGetTimers.get(deviceTopic);
+    if (pendingTimer !== undefined) {
+      clearTimeout(pendingTimer);
+      pendingGetTimers.delete(deviceTopic);
+    }
     metricsServer?.notifyStateChange();
 
     const lastPub = lastColorPublish.get(deviceTopic);
@@ -469,6 +520,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     hapPort,
     ...(metricsPort === undefined ? {} : { metricsPort }),
     shutdown: async () => {
+      cancelAllRetries();
       log.log("Shutting down: unpublishing bridge (sending mDNS goodbye)");
       await bridge.unpublish();
       log.log("Shutting down: closing MQTT connection");

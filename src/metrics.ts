@@ -33,6 +33,8 @@ export interface Metrics {
   devicesConfigured: Gauge;
   hapConnectionsActive: Gauge;
   hapPairVerify: Counter;
+  devicesStateUnknown: Gauge;
+  z2mGetRequestsTotal: Counter;
   dispose: () => void;
 }
 
@@ -84,6 +86,18 @@ export function createMetrics(register: Registry): Metrics {
     registers: [register],
   });
 
+  const devicesStateUnknown = new Gauge({
+    name: "hoboken_devices_state_unknown",
+    help: "Number of configured devices with no cached state",
+    registers: [register],
+  });
+
+  const z2mGetRequestsTotal = new Counter({
+    name: "hoboken_z2m_get_requests_total",
+    help: "Total state request messages published to Z2M device /get topics",
+    registers: [register],
+  });
+
   return {
     mqttConnected,
     mqttMessagesReceived,
@@ -92,6 +106,8 @@ export function createMetrics(register: Registry): Metrics {
     devicesConfigured,
     hapConnectionsActive,
     hapPairVerify,
+    devicesStateUnknown,
+    z2mGetRequestsTotal,
     dispose() {
       register.clear();
     },
