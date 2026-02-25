@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import { Characteristic, Service } from "@homebridge/hap-nodejs";
+import { Characteristic, HAPStatus, Service } from "@homebridge/hap-nodejs";
 import type { DeviceConfig } from "../src/config.ts";
 import {
   createLightAccessory,
@@ -111,11 +111,15 @@ describe("createLightAccessory", () => {
     expect(value2).toBe(false);
   });
 
-  test("onGet On returns false when no state cached", () => {
+  test("onGet On throws SERVICE_COMMUNICATION_FAILURE when no state cached", async () => {
     const device = makeDevice({ capabilities: ["on_off"] });
-    createLightAccessory(device, publish, getState);
+    const accessory = createLightAccessory(device, publish, getState);
+    const on = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.On);
 
-    expect(getState("test_light")).toBeUndefined();
+    await on.handleGetRequest().catch(() => { /* expected */ });
+    expect(on.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
   test("onSet On publishes HK-native boolean", async () => {
@@ -146,15 +150,15 @@ describe("createLightAccessory", () => {
     expect(value).toBe(100);
   });
 
-  test("onGet brightness returns 0 when no state cached", async () => {
+  test("onGet brightness throws SERVICE_COMMUNICATION_FAILURE when no state cached", async () => {
     const device = makeDevice({ capabilities: ["on_off", "brightness"] });
     const accessory = createLightAccessory(device, publish, getState);
     const brightness = accessory
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.Brightness);
 
-    const value = await brightness.handleGetRequest();
-    expect(value).toBe(0);
+    await brightness.handleGetRequest().catch(() => { /* expected */ });
+    expect(brightness.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
   test("onGet color_temp returns cached value", async () => {
@@ -183,15 +187,15 @@ describe("createLightAccessory", () => {
     expect(await ct.handleGetRequest()).toBe(500);
   });
 
-  test("onGet color_temp returns 140 when no state cached", async () => {
+  test("onGet color_temp throws SERVICE_COMMUNICATION_FAILURE when no state cached", async () => {
     const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
     const accessory = createLightAccessory(device, publish, getState);
     const ct = accessory
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.ColorTemperature);
 
-    const value = await ct.handleGetRequest();
-    expect(value).toBe(140);
+    await ct.handleGetRequest().catch(() => { /* expected */ });
+    expect(ct.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
   test("onGet hue returns cached value", async () => {
@@ -206,15 +210,15 @@ describe("createLightAccessory", () => {
     expect(value).toBe(200);
   });
 
-  test("onGet hue returns 0 when no state cached", async () => {
+  test("onGet hue throws SERVICE_COMMUNICATION_FAILURE when no state cached", async () => {
     const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
     const accessory = createLightAccessory(device, publish, getState);
     const hue = accessory
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.Hue);
 
-    const value = await hue.handleGetRequest();
-    expect(value).toBe(0);
+    await hue.handleGetRequest().catch(() => { /* expected */ });
+    expect(hue.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
   test("onGet saturation returns cached value", async () => {
@@ -229,15 +233,15 @@ describe("createLightAccessory", () => {
     expect(value).toBe(75);
   });
 
-  test("onGet saturation returns 0 when no state cached", async () => {
+  test("onGet saturation throws SERVICE_COMMUNICATION_FAILURE when no state cached", async () => {
     const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
     const accessory = createLightAccessory(device, publish, getState);
     const sat = accessory
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.Saturation);
 
-    const value = await sat.handleGetRequest();
-    expect(value).toBe(0);
+    await sat.handleGetRequest().catch(() => { /* expected */ });
+    expect(sat.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
   test("onSet brightness publishes HK-native value", async () => {

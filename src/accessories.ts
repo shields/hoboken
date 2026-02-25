@@ -16,6 +16,8 @@ import {
   Accessory,
   Categories,
   Characteristic,
+  HAPStatus,
+  HapStatusError,
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
@@ -175,7 +177,9 @@ function addOnCharacteristic(
 
   on.onGet(() => {
     const state = getState(topic);
-    return state?.on === true;
+    if (!state)
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    return state.on === true;
   });
 
   on.onSet((value) => {
@@ -193,7 +197,9 @@ function addBrightnessCharacteristic(
 
   brightness.onGet(() => {
     const state = getState(topic);
-    return state?.brightness ?? 0;
+    if (!state)
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    return state.brightness ?? 0;
   });
 
   brightness.onSet((value) => {
@@ -211,7 +217,9 @@ function addColorTempCharacteristic(
 
   ct.onGet(() => {
     const state = getState(topic);
-    return clampColorTemp(state?.color_temp ?? 140);
+    if (!state)
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    return clampColorTemp(state.color_temp ?? 140);
   });
 
   ct.onSet((value) => {
@@ -229,7 +237,9 @@ function addHueCharacteristic(
 
   hue.onGet(() => {
     const state = getState(topic);
-    return state?.hue ?? 0;
+    if (!state)
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    return state.hue ?? 0;
   });
 
   hue.onSet((value) => {
@@ -247,7 +257,9 @@ function addSaturationCharacteristic(
 
   sat.onGet(() => {
     const state = getState(topic);
-    return state?.saturation ?? 0;
+    if (!state)
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    return state.saturation ?? 0;
   });
 
   sat.onSet((value) => {

@@ -212,13 +212,17 @@ describe("WLED integration", { timeout: 30000 }, () => {
     }
   });
 
-  test("no initial WLED state", async () => {
+  test("no initial WLED state → SERVICE_COMMUNICATION_FAILURE", async () => {
     // WLED has no side-effect-free state request. The simulator published its
-    // state on connect, but the bridge wasn't subscribed yet. The bridge has
-    // no cached state until the next real state change from the device.
-    const values = await getCharValues(client!, onKey, briKey);
-    assert.equal(values.get(onKey), 0);
-    assert.equal(values.get(briKey), 0);
+    // state on connect, but the bridge wasn't subscribed yet. Without MQTT
+    // retain, the bridge has no cached state — onGet throws HapStatusError.
+    const res = (await client!.getCharacteristics([onKey, briKey, hueKey, satKey])) as {
+      characteristics: { aid: unknown; iid: unknown; value?: unknown; status?: number }[];
+    };
+    for (const ch of res.characteristics) {
+      const key = `${String(ch.aid)}.${String(ch.iid)}`;
+      assert.equal(ch.status, -70402, `Expected SERVICE_COMMUNICATION_FAILURE for ${key}`);
+    }
   });
 
   test("HK→WLED turn off", async () => {

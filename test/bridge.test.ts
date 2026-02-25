@@ -520,6 +520,24 @@ describe("startBridge", () => {
     await shutdown();
   });
 
+  test("Z2M get with no cached state returns SERVICE_COMMUNICATION_FAILURE", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Living Room",
+    )!;
+    const on = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.On);
+
+    await on.handleGetRequest().catch(() => { /* expected */ });
+    expect(on.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+
+    await shutdown();
+  });
+
   test("HomeKit get returns cached MQTT state", async () => {
     const { bridge, shutdown } = await startBridge(testConfig());
     mockClient.connected = true;
@@ -836,6 +854,24 @@ describe("WLED device support", () => {
       (p) => p.topic === "wled/living-room/api",
     );
     expect(apiMessages).toHaveLength(0);
+    await shutdown();
+  });
+
+  test("WLED get with no cached state returns SERVICE_COMMUNICATION_FAILURE", async () => {
+    const { bridge, shutdown } = await startBridge(wledConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "LED Strip",
+    )!;
+    const on = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.On);
+
+    await on.handleGetRequest().catch(() => { /* expected */ });
+    expect(on.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+
     await shutdown();
   });
 

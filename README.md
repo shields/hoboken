@@ -79,6 +79,14 @@ publishes `{"scene_recall": <id>}` to Z2M. The switch auto-resets to off after
 
 - **MQTT disconnect**: `onSet` throws `HapStatusError(SERVICE_COMMUNICATION_FAILURE)`
   → HomeKit shows "No Response"
+- **Unknown device state**: `onGet` throws `HapStatusError(SERVICE_COMMUNICATION_FAILURE)`
+  when no cached state exists → HomeKit shows "Not Responding" until real state
+  arrives. Z2M devices recover quickly because the bridge requests state via
+  `{topic}/get` on connect. WLED devices require **Retain** enabled in WLED's
+  MQTT settings (`Settings → Sync Interfaces → MQTT → Send on change → Retain`)
+  so the broker delivers the last `/g` and `/c` values when the bridge subscribes.
+  Without retain, the bridge has no way to learn the device's current state at
+  startup.
 - **MQTT reconnect**: re-subscribes and refreshes state automatically
 - **Config changes**: restart the container (no hot reload)
 
