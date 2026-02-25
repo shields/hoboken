@@ -821,6 +821,9 @@ describe("WLED device support", () => {
   });
 
   test("does not request initial state for WLED devices", async () => {
+    // WLED has no side-effect-free state request over MQTT. Sending {} to
+    // /api is a no-op (stateUpdated guard fails when nothing changed).
+    // The bridge relies on the next WLED state change to populate the cache.
     const { shutdown } = await startBridge(wledConfig());
     mockClient.connected = true;
     mockClient.emit("connect");
@@ -829,6 +832,10 @@ describe("WLED device support", () => {
       p.topic.endsWith("/get"),
     );
     expect(getMessages).toHaveLength(0);
+    const apiMessages = mockClient.published.filter(
+      (p) => p.topic === "wled/living-room/api",
+    );
+    expect(apiMessages).toHaveLength(0);
     await shutdown();
   });
 

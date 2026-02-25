@@ -77,6 +77,7 @@ export function buildStatusData(
 
 interface BridgeHandle {
   bridge: Bridge;
+  hapPort: number;
   metricsPort?: number;
   shutdown: () => Promise<void>;
 }
@@ -392,6 +393,12 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     log.warn(`Characteristic warning [${warning.type}]: ${warning.message}`);
   });
 
+  const hapPortPromise = new Promise<number>((resolve) => {
+    bridge.once("listening", (port: number) => {
+      resolve(port);
+    });
+  });
+
   await bridge.publish({
     username: config.bridge
       .mac as `${string}:${string}:${string}:${string}:${string}:${string}`,
@@ -400,6 +407,8 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     category: Categories.BRIDGE,
     ...(config.bridge.bind ? { bind: config.bridge.bind } : {}),
   });
+
+  const hapPort = await hapPortPromise;
 
   metricsServer?.setReady();
 
@@ -457,6 +466,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
   return {
     bridge,
+    hapPort,
     ...(metricsPort === undefined ? {} : { metricsPort }),
     shutdown: async () => {
       log.log("Shutting down: unpublishing bridge (sending mDNS goodbye)");

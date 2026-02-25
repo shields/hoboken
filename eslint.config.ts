@@ -53,4 +53,12 @@ export default tseslint.config(
       "@typescript-eslint/no-non-null-assertion": "off",
     },
   },
+  {
+    files: ["integration/wled-roundtrip.ts"],
+    rules: {
+      "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "no-console": "off",
+    },
+  },
 );

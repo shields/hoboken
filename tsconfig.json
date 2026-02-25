@@ -16,5 +16,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "demo/**/*.ts", "eslint.config.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "demo/**/*.ts", "integration/**/*.ts", "eslint.config.ts"]
 }
