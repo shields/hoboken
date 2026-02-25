@@ -524,6 +524,28 @@ describe("status page (GET /)", () => {
     expect(body).toContain("desk_lamp");
   });
 
+  test("shows type badge for z2m device", async () => {
+    const body = await renderDevice({
+      name: "Lamp",
+      topic: "lamp",
+      type: "z2m",
+      capabilities: ["on_off"],
+      state: { state: "ON" },
+    });
+    expect(body).toContain('<span class="type-badge">z2m</span>');
+  });
+
+  test("shows type badge for wled device", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off"],
+      state: { on: true },
+    });
+    expect(body).toContain('<span class="type-badge">wled</span>');
+  });
+
   test("shows 'MQTT state' label", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () => makeStatus();
