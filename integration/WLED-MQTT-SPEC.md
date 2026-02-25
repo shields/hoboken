@@ -162,16 +162,21 @@ Fields are processed in this order within `deserializeState`:
 
    Example: `{"seg":[{"col":[[0, 255, 0]]}]}` sets primary color to green.
 
-4. After all fields are processed, `stateUpdated()` is called, which triggers
-   outbound messages.
+4. After all fields are processed, `stateUpdated()` is called unconditionally.
+   However, outbound messages are only triggered if state actually changed
+   (`bri != briOld || stateChanged`). If no recognized fields were present
+   (e.g., an empty `{}`), brightness is unchanged and the internal
+   `stateChanged` flag remains false, so **no outbound messages are
+   published**.
 
 ---
 
 ## 4. Outbound Messages
 
-After any state change, the device publishes the following messages. The retain
-flag depends on a per-device configuration setting (`retainMqttMsg`); the status
-topic always uses retain.
+When state changes (brightness differs from its previous value, or the internal
+`stateChanged` flag was set during deserialization), the device publishes the
+following messages. The retain flag depends on a per-device configuration setting
+(`retainMqttMsg`); the status topic always uses retain.
 
 ### 4a. Brightness: `{topic}/g`
 
@@ -236,6 +241,20 @@ acceptable simplification.
 6. **Empty/null payloads**: Null payloads are silently ignored. Empty strings
    parse as 0 in numeric contexts.
 
-7. **Partial MQTT packets**: The device buffers partial packets and only
+7. **`stateChanged` guard**: `stateUpdated()` is called unconditionally after
+   `deserializeState`, but the code that schedules outbound messages
+   (`interfaceUpdateCallMode = callMode`) is inside a guard:
+   `if (bri != briOld || stateChanged)`. The `stateChanged` flag is set when
+   segment properties change during deserialization. For the bare topic and
+   color topic handlers (which don't go through `deserializeState`), the
+   publish path is different and always fires. A simulator that publishes
+   after every command that modifies `bri` or `col` is correct.
+
+8. **Empty JSON API payload**: Sending `{}` to the API topic calls
+   `deserializeState` which calls `stateUpdated()`, but since no fields
+   changed, the guard fails and no outbound messages are published. An empty
+   object is effectively a no-op.
+
+9. **Partial MQTT packets**: The device buffers partial packets and only
    processes the message when all parts have been received. The simulator can
    ignore this (in-process broker delivers complete messages).
