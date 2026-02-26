@@ -15,7 +15,7 @@
 # All dependencies are pure JS (no native modules), so Bun can install them
 # for a Node.js runtime without binary compatibility issues.
 # Digests pin to OCI image indexes (multi-arch) covering amd64 and arm64.
-FROM oven/bun:1.3.9@sha256:856da45d07aeb62eb38ea3e7f9e1794c0143a4ff63efb00e6c4491b627e2a521 AS build
+FROM oven/bun:1.3.10@sha256:b86c67b531d87b4db11470d9b2bd0c519b1976eee6fcd71634e73abfa6230d2e AS build
 ARG GIT_VERSION=unknown
 WORKDIR /app
 COPY package.json bun.lock ./
