@@ -1226,6 +1226,176 @@ describe("WLED device support", () => {
   });
 });
 
+function fanConfig(): Config {
+  return {
+    bridge: {
+      name: "Test Bridge",
+      mac: "0E:42:A1:B2:C3:D4",
+      pincode: "031-45-154",
+      port: 0,
+    },
+    mqtt: {
+      url: "mqtt://localhost:1883",
+    },
+    devices: [
+      {
+        name: "Ceiling Fan",
+        type: "z2m",
+        topic: "zigbee2mqtt/ceiling_fan",
+        capabilities: ["fan", "fan_speed"],
+      },
+    ],
+  };
+}
+
+describe("Fan device support", () => {
+  test("fan device creates Fanv2 accessory", async () => {
+    const { bridge, shutdown } = await startBridge(fanConfig());
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Ceiling Fan",
+    );
+    expect(accessory).toBeDefined();
+    expect(accessory!.getService(Service.Fanv2)).toBeDefined();
+    expect(accessory!.getService(Service.Lightbulb)).toBeUndefined();
+    await shutdown();
+  });
+
+  test("fan state update updates Active characteristic", async () => {
+    const { bridge, shutdown } = await startBridge(fanConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/ceiling_fan",
+      Buffer.from(JSON.stringify({ fan_state: "ON", fan_mode: "medium" })),
+    );
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Ceiling Fan",
+    )!;
+    const active = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.Active);
+    expect(active.value).toBe(1);
+
+    const speed = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.RotationSpeed);
+    expect(speed.value).toBe(67);
+
+    await shutdown();
+  });
+
+  test("HomeKit set publishes fan_state to MQTT", async () => {
+    const { bridge, shutdown } = await startBridge(fanConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Ceiling Fan",
+    )!;
+    const active = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.Active);
+
+    active.setValue(1);
+    await flush();
+
+    expect(
+      mockClient.published.some(
+        (p) =>
+          p.topic === "zigbee2mqtt/ceiling_fan/set" &&
+          p.message === JSON.stringify({ fan_state: "ON" }),
+      ),
+    ).toBe(true);
+
+    await shutdown();
+  });
+
+  test("HomeKit RotationSpeed publishes fan_mode to MQTT", async () => {
+    const { bridge, shutdown } = await startBridge(fanConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Ceiling Fan",
+    )!;
+    const speed = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.RotationSpeed);
+
+    speed.setValue(100);
+    await flush();
+
+    expect(
+      mockClient.published.some(
+        (p) =>
+          p.topic === "zigbee2mqtt/ceiling_fan/set" &&
+          p.message === JSON.stringify({ fan_mode: "high" }),
+      ),
+    ).toBe(true);
+
+    await shutdown();
+  });
+
+  test("HomeKit TargetFanState AUTO publishes fan_mode smart", async () => {
+    const { bridge, shutdown } = await startBridge(fanConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Ceiling Fan",
+    )!;
+    const target = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.TargetFanState);
+
+    target.setValue(1);
+    await flush();
+
+    expect(
+      mockClient.published.some(
+        (p) =>
+          p.topic === "zigbee2mqtt/ceiling_fan/set" &&
+          p.message === JSON.stringify({ fan_mode: "smart" }),
+      ),
+    ).toBe(true);
+
+    await shutdown();
+  });
+
+  test("fan state passes through write-back suppression window", async () => {
+    const { bridge, shutdown } = await startBridge(fanConfig());
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Ceiling Fan",
+    )!;
+    const service = accessory.getService(Service.Fanv2)!;
+
+    // HomeKit writes rotation speed, triggering suppression window
+    service.getCharacteristic(Characteristic.RotationSpeed).setValue(100);
+    await flush();
+
+    // Z2M sends back fan state during suppression window
+    mockClient.emit(
+      "message",
+      "zigbee2mqtt/ceiling_fan",
+      Buffer.from(JSON.stringify({ fan_state: "ON", fan_mode: "high" })),
+    );
+
+    // Fan properties should pass through (not be suppressed)
+    expect(service.getCharacteristic(Characteristic.Active).value).toBe(1);
+    expect(service.getCharacteristic(Characteristic.RotationSpeed).value).toBe(
+      100,
+    );
+
+    await shutdown();
+  });
+});
+
 function metricsConfig(): Config {
   return {
     ...testConfig(),

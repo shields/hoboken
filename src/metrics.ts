@@ -21,6 +21,7 @@ import {
   wledBrightnessToHomeKit,
   wledToHomeKit,
   z2mBrightnessToHomeKit,
+  z2mFanModeToHomeKit,
   z2mToHomeKit,
 } from "./convert.ts";
 import * as log from "./log.ts";
@@ -338,6 +339,26 @@ function formatHint(
       placement: "key",
     };
   }
+  if (key === "fan_state" && typeof value === "string") {
+    return {
+      html: `<span class="hint">\u2192 ${value === "ON" ? "active" : "inactive"}</span>`,
+      placement: "value",
+    };
+  }
+  if (key === "fan_mode" && typeof value === "string") {
+    const fanHk = z2mFanModeToHomeKit(value);
+    const parts: string[] = [];
+    if (fanHk.rotation_speed !== undefined)
+      parts.push(`${String(fanHk.rotation_speed)}%`);
+    if (fanHk.target_fan_state === 1) parts.push("auto");
+    if (parts.length === 0 && value === "on") parts.push("resume");
+    if (parts.length > 0) {
+      return {
+        html: `<span class="hint">\u2192 ${parts.join(", ")}</span>`,
+        placement: "value",
+      };
+    }
+  }
   if (key === "last_seen" && typeof value === "string") {
     const ms = Date.now() - new Date(value).getTime();
     if (!Number.isFinite(ms) || ms < 0) return null;
@@ -470,6 +491,33 @@ function computeHomeKitValues(
             capability: "color_hs",
             name: "Saturation",
             value: typeof s === "number" ? `${String(s)}%` : "\u2014",
+          },
+        );
+        break;
+      }
+      case "fan":
+        rows.push({
+          capability: "fan",
+          name: "Active",
+          value:
+            hk.active === 1 ? "true" : hk.active === 0 ? "false" : "\u2014",
+        });
+        break;
+      case "fan_speed": {
+        const rs = hk.rotation_speed;
+        const tfs = hk.target_fan_state;
+        rows.push(
+          {
+            capability: "fan_speed",
+            name: "RotationSpeed",
+            value:
+              typeof rs === "number" ? `${String(rs)}%` : "\u2014",
+          },
+          {
+            capability: "fan_speed",
+            name: "TargetFanState",
+            value:
+              tfs === 1 ? "AUTO" : tfs === 0 ? "MANUAL" : "\u2014",
           },
         );
         break;

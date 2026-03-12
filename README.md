@@ -1,8 +1,8 @@
 # Hoboken
 
-A minimal HomeKit bridge for Zigbee2MQTT and WLED. Exposes Z2M lights, smart
-plugs, scenes, and WLED LED controllers to Apple Home for HomePod and Siri
-voice commands.
+A minimal HomeKit bridge for Zigbee2MQTT and WLED. Exposes Z2M lights, ceiling
+fans, smart plugs, scenes, and WLED LED controllers to Apple Home for HomePod
+and Siri voice commands.
 
 It also provides an HTTP endpoint with a live-updating dashboard presenting all
 data in both MQTT and HAP forms, as well as Prometheus metrics and health check
@@ -68,6 +68,8 @@ Devices declare capabilities in `config.yaml`:
 | `brightness` | `Brightness`           | Z2M 0–254 ↔ HomeKit 0–100    | WLED 0–255 ↔ HomeKit 0–100 |
 | `color_temp` | `ColorTemperature`     | mireds, no conversion needed | not supported             |
 | `color_hs`   | `Hue` + `Saturation`   | ranges match, no conversion  | HSV ↔ RGB conversion       |
+| `fan`        | `Active` (FanV2)       | `fan_state` ON/OFF ↔ 1/0     | not supported             |
+| `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ speed thirds  | not supported             |
 
 ### Scenes
 
@@ -151,6 +153,10 @@ devices:
   - name: "Bedroom Light"
     topic: "zigbee2mqtt/bedroom_light"
     capabilities: [on_off, brightness, color_hs]
+
+  - name: "Ceiling Fan"
+    topic: "zigbee2mqtt/ceiling_fan"
+    capabilities: [fan, fan_speed]
 
   - name: "LED Strip"
     type: wled

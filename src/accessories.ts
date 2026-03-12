@@ -85,22 +85,102 @@ export function createLightAccessory(
     prePublishCheck,
   );
 
-  addOnCharacteristic(service, setPayload, getState, device.topic);
+  addSimpleCharacteristic(
+    service, Characteristic.On, "on", false,
+    setPayload, getState, device.topic,
+  );
 
   if (device.capabilities.includes("brightness")) {
-    addBrightnessCharacteristic(service, setPayload, getState, device.topic);
+    addSimpleCharacteristic(
+      service, Characteristic.Brightness, "brightness", 0,
+      setPayload, getState, device.topic,
+    );
   }
 
   if (device.capabilities.includes("color_temp")) {
-    addColorTempCharacteristic(service, setPayload, getState, device.topic);
+    addSimpleCharacteristic(
+      service, Characteristic.ColorTemperature, "color_temp", 140,
+      setPayload, getState, device.topic,
+      (v) => clampColorTemp(Number(v)),
+    );
   }
 
   if (device.capabilities.includes("color_hs")) {
-    addHueCharacteristic(service, setPayload, getState, device.topic);
-    addSaturationCharacteristic(service, setPayload, getState, device.topic);
+    addSimpleCharacteristic(
+      service, Characteristic.Hue, "hue", 0,
+      setPayload, getState, device.topic,
+    );
+    addSimpleCharacteristic(
+      service, Characteristic.Saturation, "saturation", 0,
+      setPayload, getState, device.topic,
+    );
   }
 
   return accessory;
+}
+
+export function createFanAccessory(
+  device: DeviceConfig,
+  publish: PublishFn,
+  getState: GetStateFn,
+  prePublishCheck?: () => void,
+): Accessory {
+  const accessory = new Accessory(
+    device.name,
+    uuid.generate(`hoboken:fan:${device.topic}`),
+  );
+  accessory.category = Categories.FAN;
+
+  const service = accessory.addService(Service.Fanv2, device.name);
+  const setPayload = createCoalescingPublish(
+    device.topic,
+    publish,
+    prePublishCheck,
+  );
+
+  addSimpleCharacteristic(
+    service, Characteristic.Active, "active", 0,
+    setPayload, getState, device.topic,
+  );
+
+  if (device.capabilities.includes("fan_speed")) {
+    addSimpleCharacteristic(
+      service, Characteristic.RotationSpeed, "rotation_speed", 0,
+      setPayload, getState, device.topic,
+    );
+    addSimpleCharacteristic(
+      service, Characteristic.TargetFanState, "target_fan_state", 0,
+      setPayload, getState, device.topic,
+    );
+  }
+
+  return accessory;
+}
+
+export function updateFanAccessoryState(
+  accessory: Accessory,
+  state: HomeKitState,
+  capabilities: Capability[],
+): void {
+  const service = accessory.getService(Service.Fanv2);
+  if (!service) return;
+
+  if (state.active !== undefined) {
+    service.getCharacteristic(Characteristic.Active).updateValue(state.active);
+  }
+
+  if (capabilities.includes("fan_speed")) {
+    if (state.rotation_speed !== undefined) {
+      service
+        .getCharacteristic(Characteristic.RotationSpeed)
+        .updateValue(state.rotation_speed);
+    }
+    if (state.target_fan_state !== undefined) {
+      service
+        .getCharacteristic(Characteristic.TargetFanState)
+        .updateValue(state.target_fan_state);
+    }
+  }
 }
 
 export function createSceneAccessory(
@@ -167,102 +247,27 @@ export function updateAccessoryState(
   }
 }
 
-function addOnCharacteristic(
+function addSimpleCharacteristic(
   service: Service,
+  characteristicClass: { UUID: string } & (new () => Characteristic),
+  key: keyof HomeKitState,
+  defaultValue: boolean | number,
   setPayload: SetPayloadFn,
   getState: GetStateFn,
   topic: string,
+  onGetTransform?: (value: boolean | number) => boolean | number,
 ): void {
-  const on = service.getCharacteristic(Characteristic.On);
+  const c = service.getCharacteristic(characteristicClass);
 
-  on.onGet(() => {
+  c.onGet(() => {
     const state = getState(topic);
     if (!state)
       throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    return state.on === true;
+    const raw = state[key] ?? defaultValue;
+    return onGetTransform ? onGetTransform(raw) : raw;
   });
 
-  on.onSet((value) => {
-    setPayload({ on: value as boolean });
-  });
-}
-
-function addBrightnessCharacteristic(
-  service: Service,
-  setPayload: SetPayloadFn,
-  getState: GetStateFn,
-  topic: string,
-): void {
-  const brightness = service.getCharacteristic(Characteristic.Brightness);
-
-  brightness.onGet(() => {
-    const state = getState(topic);
-    if (!state)
-      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    return state.brightness ?? 0;
-  });
-
-  brightness.onSet((value) => {
-    setPayload({ brightness: value as number });
-  });
-}
-
-function addColorTempCharacteristic(
-  service: Service,
-  setPayload: SetPayloadFn,
-  getState: GetStateFn,
-  topic: string,
-): void {
-  const ct = service.getCharacteristic(Characteristic.ColorTemperature);
-
-  ct.onGet(() => {
-    const state = getState(topic);
-    if (!state)
-      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    return clampColorTemp(state.color_temp ?? 140);
-  });
-
-  ct.onSet((value) => {
-    setPayload({ color_temp: value });
-  });
-}
-
-function addHueCharacteristic(
-  service: Service,
-  setPayload: SetPayloadFn,
-  getState: GetStateFn,
-  topic: string,
-): void {
-  const hue = service.getCharacteristic(Characteristic.Hue);
-
-  hue.onGet(() => {
-    const state = getState(topic);
-    if (!state)
-      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    return state.hue ?? 0;
-  });
-
-  hue.onSet((value) => {
-    setPayload({ hue: value as number });
-  });
-}
-
-function addSaturationCharacteristic(
-  service: Service,
-  setPayload: SetPayloadFn,
-  getState: GetStateFn,
-  topic: string,
-): void {
-  const sat = service.getCharacteristic(Characteristic.Saturation);
-
-  sat.onGet(() => {
-    const state = getState(topic);
-    if (!state)
-      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    return state.saturation ?? 0;
-  });
-
-  sat.onSet((value) => {
-    setPayload({ saturation: value as number });
+  c.onSet((value) => {
+    setPayload({ [key]: value });
   });
 }

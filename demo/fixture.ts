@@ -72,5 +72,12 @@ export const fixtureData: StatusData = {
       capabilities: ["on_off", "brightness", "color_hs"],
       state: { on: true, bri: 200, col: [255, 128, 0] },
     },
+    {
+      name: "Ceiling Fan",
+      topic: "zigbee2mqtt/ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan", "fan_speed"],
+      state: { fan_state: "ON", fan_mode: "medium" },
+    },
   ],
 };

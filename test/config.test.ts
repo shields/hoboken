@@ -267,6 +267,57 @@ describe("validateConfig", () => {
     expect(() => validateConfig(data)).toThrow('unknown capability "unknown"');
   });
 
+  test("accepts fan capability", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["fan"];
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    const config = validateConfig(data);
+    expect(config.devices[0]!.capabilities).toEqual(["fan"]);
+  });
+
+  test("accepts fan + fan_speed capabilities", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["fan", "fan_speed"];
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    const config = validateConfig(data);
+    expect(config.devices[0]!.capabilities).toEqual(["fan", "fan_speed"]);
+  });
+
+  test("rejects fan_speed without fan", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["fan_speed"];
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    expect(() => validateConfig(data)).toThrow("fan_speed requires fan");
+  });
+
+  test("rejects fan + on_off (mutually exclusive)", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["fan", "on_off"];
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    expect(() => validateConfig(data)).toThrow(
+      "fan and light capabilities are mutually exclusive",
+    );
+  });
+
+  test("rejects fan + brightness (mutually exclusive)", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["fan", "brightness"];
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    expect(() => validateConfig(data)).toThrow(
+      "fan and light capabilities are mutually exclusive",
+    );
+  });
+
+  test("rejects WLED device with fan capabilities", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "wled";
+    data.devices[0]!.capabilities = ["fan"];
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    expect(() => validateConfig(data)).toThrow(
+      "fan capabilities are not supported for WLED devices",
+    );
+  });
+
   test("rejects duplicate capabilities", () => {
     const data = validConfig();
     data.devices[0]!.capabilities = ["on_off", "brightness", "on_off"];

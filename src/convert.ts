@@ -37,6 +37,31 @@ export function clampColorTemp(mireds: number): number {
   return Math.max(COLOR_TEMP_MIN, Math.min(COLOR_TEMP_MAX, mireds));
 }
 
+export function z2mFanModeToHomeKit(mode: string): Partial<HomeKitState> {
+  switch (mode) {
+    case "off":
+      return { rotation_speed: 0, target_fan_state: 0 };
+    case "low":
+      return { rotation_speed: 33, target_fan_state: 0 };
+    case "medium":
+      return { rotation_speed: 67, target_fan_state: 0 };
+    case "high":
+      return { rotation_speed: 100, target_fan_state: 0 };
+    case "smart":
+      return { target_fan_state: 1 };
+    case "on":
+      return {};
+  }
+  return {};
+}
+
+export function homeKitSpeedToZ2mFanMode(speed: number): string {
+  if (speed <= 0) return "off";
+  if (speed <= 33) return "low";
+  if (speed <= 67) return "medium";
+  return "high";
+}
+
 export function wledBrightnessToHomeKit(wled: number): number {
   if (Number.isNaN(wled)) throw new RangeError("brightness must be a number");
   return Math.round((Math.max(0, Math.min(255, wled)) / 255) * 100);
@@ -103,6 +128,9 @@ export interface HomeKitState {
   hue?: number;
   saturation?: number;
   color_temp?: number;
+  active?: number;
+  rotation_speed?: number;
+  target_fan_state?: number;
 }
 
 export function z2mToHomeKit(raw: RawState): HomeKitState {
@@ -116,6 +144,11 @@ export function z2mToHomeKit(raw: RawState): HomeKitState {
     if (typeof color?.hue === "number") hk.hue = color.hue;
     if (typeof color?.saturation === "number")
       hk.saturation = color.saturation;
+  }
+  if ("fan_state" in raw) hk.active = raw.fan_state === "ON" ? 1 : 0;
+  if ("fan_mode" in raw) {
+    const fanHk = z2mFanModeToHomeKit(raw.fan_mode as string);
+    Object.assign(hk, fanHk);
   }
   return hk;
 }
@@ -165,6 +198,27 @@ export function homeKitToZ2m(
       if ("saturation" in payload) color.saturation = payload.saturation;
       z2m.color = color;
     }
+  }
+
+  if ("active" in payload)
+    z2m.fan_state = payload.active ? "ON" : "OFF";
+
+  if ("target_fan_state" in payload && payload.target_fan_state === 1) {
+    z2m.fan_mode = "smart";
+  } else if ("rotation_speed" in payload) {
+    z2m.fan_mode = homeKitSpeedToZ2mFanMode(payload.rotation_speed as number);
+  } else if (
+    "target_fan_state" in payload &&
+    payload.target_fan_state === 0
+  ) {
+    const cachedMode = cachedRaw?.fan_mode as string | undefined;
+    z2m.fan_mode =
+      cachedMode === "low" ||
+      cachedMode === "medium" ||
+      cachedMode === "high" ||
+      cachedMode === "off"
+        ? cachedMode
+        : "medium";
   }
 
   return z2m;

@@ -63,6 +63,8 @@ Each module is independently testable with dependency injection:
 | `brightness` | `Characteristic.Brightness`       | Z2M 0–254 ↔ HK 0–100      |
 | `color_temp` | `Characteristic.ColorTemperature` | mireds, passthrough       |
 | `color_hs`   | `Hue` + `Saturation`              | ranges match, passthrough |
+| `fan`        | `Active` (FanV2 service)          | `fan_state` ON/OFF ↔ 1/0  |
+| `fan_speed`  | `RotationSpeed` + `TargetFanState`| speed thirds, smart=AUTO  |
 
 ## Naming Conventions
 
@@ -77,7 +79,7 @@ Each module is independently testable with dependency injection:
   compile time — do not add a `default: never` arm. Bun's coverage engine does
   not support ignore comments, so unreachable default branches break the 100%
   line coverage requirement.
-- Capability type: `"on_off" | "brightness" | "color_temp" | "color_hs"`
+- Capability type: `"on_off" | "brightness" | "color_temp" | "color_hs" | "fan" | "fan_speed"`
 - `PublishFn = (topic: string, payload: Record<string, unknown>) => void`
 - `GetStateFn = (topic: string) => Z2MState | undefined`
 - `Z2MState = Record<string, unknown>` (Z2M state payloads vary by device)

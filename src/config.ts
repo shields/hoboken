@@ -15,7 +15,13 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
-export type Capability = "on_off" | "brightness" | "color_temp" | "color_hs";
+export type Capability =
+  | "on_off"
+  | "brightness"
+  | "color_temp"
+  | "color_hs"
+  | "fan"
+  | "fan_speed";
 export type DeviceType = "z2m" | "wled";
 
 const VALID_CAPABILITIES = new Set<Capability>([
@@ -23,7 +29,18 @@ const VALID_CAPABILITIES = new Set<Capability>([
   "brightness",
   "color_temp",
   "color_hs",
+  "fan",
+  "fan_speed",
 ]);
+
+const LIGHT_CAPABILITIES = new Set<Capability>([
+  "on_off",
+  "brightness",
+  "color_temp",
+  "color_hs",
+]);
+
+const FAN_CAPABILITIES = new Set<Capability>(["fan", "fan_speed"]);
 
 const VALID_DEVICE_TYPES = new Set<DeviceType>(["z2m", "wled"]);
 
@@ -224,6 +241,26 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
   ) {
     throw new Error(
       `devices[${String(index)}]: color_temp and color_hs cannot be combined (HAP spec R13 §10.11); use one or the other`,
+    );
+  }
+
+  if (capabilities.includes("fan_speed") && !capabilities.includes("fan")) {
+    throw new Error(
+      `devices[${String(index)}]: fan_speed requires fan`,
+    );
+  }
+
+  const hasLight = capabilities.some((c) => LIGHT_CAPABILITIES.has(c));
+  const hasFan = capabilities.some((c) => FAN_CAPABILITIES.has(c));
+  if (hasLight && hasFan) {
+    throw new Error(
+      `devices[${String(index)}]: fan and light capabilities are mutually exclusive`,
+    );
+  }
+
+  if (type === "wled" && hasFan) {
+    throw new Error(
+      `devices[${String(index)}]: fan capabilities are not supported for WLED devices`,
     );
   }
 

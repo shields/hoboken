@@ -16,9 +16,11 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { Characteristic, HAPStatus, Service } from "@homebridge/hap-nodejs";
 import type { DeviceConfig } from "../src/config.ts";
 import {
+  createFanAccessory,
   createLightAccessory,
   createSceneAccessory,
   updateAccessoryState,
+  updateFanAccessoryState,
 } from "../src/accessories.ts";
 import type { GetStateFn, PublishFn } from "../src/accessories.ts";
 import type { HomeKitState } from "../src/convert.ts";
@@ -608,5 +610,253 @@ describe("updateAccessoryState", () => {
 
     // Should not throw — just returns early
     updateAccessoryState(accessory, { on: true }, ["on_off"]);
+  });
+});
+
+function makeFanDevice(overrides?: Partial<DeviceConfig>): DeviceConfig {
+  return {
+    name: "Test Fan",
+    type: "z2m",
+    topic: "test_fan",
+    capabilities: ["fan", "fan_speed"],
+    ...overrides,
+  };
+}
+
+describe("createFanAccessory", () => {
+  let publish: ReturnType<typeof mock<PublishFn>>;
+  let stateMap: Map<string, HomeKitState>;
+  let getState: GetStateFn;
+
+  beforeEach(() => {
+    publish = mock<PublishFn>();
+    stateMap = new Map();
+    getState = (topic) => stateMap.get(topic);
+  });
+
+  test("creates accessory with fan only", () => {
+    const device = makeFanDevice({ capabilities: ["fan"] });
+    const accessory = createFanAccessory(device, publish, getState);
+    const service = accessory.getService(Service.Fanv2)!;
+
+    expect(service).toBeDefined();
+    expect(service.getCharacteristic(Characteristic.Active)).toBeDefined();
+    expect(service.testCharacteristic(Characteristic.RotationSpeed)).toBe(
+      false,
+    );
+    expect(service.testCharacteristic(Characteristic.TargetFanState)).toBe(
+      false,
+    );
+  });
+
+  test("creates accessory with fan + fan_speed", () => {
+    const device = makeFanDevice();
+    const accessory = createFanAccessory(device, publish, getState);
+    const service = accessory.getService(Service.Fanv2)!;
+
+    expect(service.getCharacteristic(Characteristic.Active)).toBeDefined();
+    expect(
+      service.getCharacteristic(Characteristic.RotationSpeed),
+    ).toBeDefined();
+    expect(
+      service.getCharacteristic(Characteristic.TargetFanState),
+    ).toBeDefined();
+  });
+
+  test("onGet Active returns cached state", async () => {
+    const device = makeFanDevice({ capabilities: ["fan"] });
+    const accessory = createFanAccessory(device, publish, getState);
+    const active = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.Active);
+
+    stateMap.set("test_fan", { active: 1 });
+    expect(await active.handleGetRequest()).toBe(1);
+
+    stateMap.set("test_fan", { active: 0 });
+    expect(await active.handleGetRequest()).toBe(0);
+  });
+
+  test("onGet Active throws SERVICE_COMMUNICATION_FAILURE when no state cached", async () => {
+    const device = makeFanDevice({ capabilities: ["fan"] });
+    const accessory = createFanAccessory(device, publish, getState);
+    const active = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.Active);
+
+    await active.handleGetRequest().catch(() => {
+      /* expected */
+    });
+    expect(active.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+  });
+
+  test("onSet Active publishes active value", async () => {
+    const device = makeFanDevice({ capabilities: ["fan"] });
+    const accessory = createFanAccessory(device, publish, getState);
+    const active = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.Active);
+
+    active.setValue(1);
+    await flush();
+    expect(publish).toHaveBeenCalledWith("test_fan", { active: 1 });
+  });
+
+  test("onGet RotationSpeed returns cached value", async () => {
+    const device = makeFanDevice();
+    const accessory = createFanAccessory(device, publish, getState);
+    const speed = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.RotationSpeed);
+
+    stateMap.set("test_fan", { rotation_speed: 67 });
+    expect(await speed.handleGetRequest()).toBe(67);
+  });
+
+  test("onGet RotationSpeed throws SERVICE_COMMUNICATION_FAILURE when no state", async () => {
+    const device = makeFanDevice();
+    const accessory = createFanAccessory(device, publish, getState);
+    const speed = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.RotationSpeed);
+
+    await speed.handleGetRequest().catch(() => {
+      /* expected */
+    });
+    expect(speed.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+  });
+
+  test("onSet RotationSpeed publishes rotation_speed value", async () => {
+    const device = makeFanDevice();
+    const accessory = createFanAccessory(device, publish, getState);
+    const speed = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.RotationSpeed);
+
+    speed.setValue(50);
+    await flush();
+    expect(publish).toHaveBeenCalledWith("test_fan", { rotation_speed: 50 });
+  });
+
+  test("onGet TargetFanState returns cached value", async () => {
+    const device = makeFanDevice();
+    const accessory = createFanAccessory(device, publish, getState);
+    const target = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.TargetFanState);
+
+    stateMap.set("test_fan", { target_fan_state: 1 });
+    expect(await target.handleGetRequest()).toBe(1);
+  });
+
+  test("onGet TargetFanState throws SERVICE_COMMUNICATION_FAILURE when no state", async () => {
+    const device = makeFanDevice();
+    const accessory = createFanAccessory(device, publish, getState);
+    const target = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.TargetFanState);
+
+    await target.handleGetRequest().catch(() => {
+      /* expected */
+    });
+    expect(target.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+  });
+
+  test("onSet TargetFanState publishes target_fan_state value", async () => {
+    const device = makeFanDevice();
+    const accessory = createFanAccessory(device, publish, getState);
+    const target = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.TargetFanState);
+
+    target.setValue(1);
+    await flush();
+    expect(publish).toHaveBeenCalledWith("test_fan", { target_fan_state: 1 });
+  });
+
+  test("coalesces active + rotation_speed into single publish", async () => {
+    const device = makeFanDevice();
+    const accessory = createFanAccessory(device, publish, getState);
+    const service = accessory.getService(Service.Fanv2)!;
+
+    service.getCharacteristic(Characteristic.Active).setValue(1);
+    service.getCharacteristic(Characteristic.RotationSpeed).setValue(67);
+
+    expect(publish).not.toHaveBeenCalled();
+    await flush();
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith("test_fan", {
+      active: 1,
+      rotation_speed: 67,
+    });
+  });
+});
+
+describe("updateFanAccessoryState", () => {
+  let publish: ReturnType<typeof mock<PublishFn>>;
+  let getState: GetStateFn;
+
+  beforeEach(() => {
+    publish = mock<PublishFn>();
+    getState = (): HomeKitState | undefined => {
+      return;
+    };
+  });
+
+  test("updates Active characteristic", () => {
+    const device = makeFanDevice({ capabilities: ["fan"] });
+    const accessory = createFanAccessory(device, publish, getState);
+
+    updateFanAccessoryState(accessory, { active: 1 }, ["fan"]);
+    const active = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.Active);
+    expect(active.value).toBe(1);
+
+    updateFanAccessoryState(accessory, { active: 0 }, ["fan"]);
+    expect(active.value).toBe(0);
+  });
+
+  test("updates RotationSpeed and TargetFanState", () => {
+    const device = makeFanDevice();
+    const accessory = createFanAccessory(device, publish, getState);
+
+    updateFanAccessoryState(
+      accessory,
+      { rotation_speed: 67, target_fan_state: 0 },
+      ["fan", "fan_speed"],
+    );
+    const speed = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.RotationSpeed);
+    const target = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.TargetFanState);
+    expect(speed.value).toBe(67);
+    expect(target.value).toBe(0);
+  });
+
+  test("skips RotationSpeed/TargetFanState when fan_speed not in capabilities", () => {
+    const device = makeFanDevice({ capabilities: ["fan"] });
+    const accessory = createFanAccessory(device, publish, getState);
+
+    updateFanAccessoryState(
+      accessory,
+      { active: 1, rotation_speed: 67 },
+      ["fan"],
+    );
+    const active = accessory
+      .getService(Service.Fanv2)!
+      .getCharacteristic(Characteristic.Active);
+    expect(active.value).toBe(1);
+  });
+
+  test("ignores non-Fanv2 accessory", () => {
+    const device = makeDevice();
+    const accessory = createLightAccessory(device, publish, getState);
+
+    // Should not throw — just returns early
+    updateFanAccessoryState(accessory, { active: 1 }, ["fan"]);
   });
 });

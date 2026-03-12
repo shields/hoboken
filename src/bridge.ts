@@ -30,9 +30,11 @@ import { Registry } from "prom-client";
 import type { Config } from "./config.ts";
 import * as log from "./log.ts";
 import {
+  createFanAccessory,
   createLightAccessory,
   createSceneAccessory,
   updateAccessoryState,
+  updateFanAccessoryState,
 } from "./accessories.ts";
 import type { PublishFn } from "./accessories.ts";
 import {
@@ -264,6 +266,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   interface AccessoryEntry {
     accessory: Accessory;
     device: Config["devices"][number];
+    updateState: typeof updateAccessoryState;
   }
   const accessoryMap = new Map<string, AccessoryEntry>();
   const wledTopicMap = new Map<string, { device: string; sub: string }>();
@@ -283,15 +286,17 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       return proto.toHomeKit(raw);
     };
 
-    const accessory = createLightAccessory(
-      device,
-      proto.publish,
-      getState,
-      prePublishCheck,
-    );
+    const isFan = device.capabilities.includes("fan");
+    const accessory = isFan
+      ? createFanAccessory(device, proto.publish, getState, prePublishCheck)
+      : createLightAccessory(device, proto.publish, getState, prePublishCheck);
     setAccessoryInfo(accessory, "Hoboken", device.topic, device.topic, version);
     bridge.addBridgedAccessory(accessory);
-    accessoryMap.set(device.topic, { accessory, device });
+    accessoryMap.set(device.topic, {
+      accessory,
+      device,
+      updateState: isFan ? updateFanAccessoryState : updateAccessoryState,
+    });
     switch (device.type) {
       case "z2m":
         break;
@@ -377,15 +382,14 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     const suppressing =
       lastPub !== undefined &&
       Date.now() - lastPub < WRITE_BACK_SUPPRESSION_MS;
-    let hkState = protocols[entry.device.type].toHomeKit(rawPartial);
+    const hkState = protocols[entry.device.type].toHomeKit(rawPartial);
     if (suppressing) {
-      const { on, brightness } = hkState;
-      hkState = {};
-      if (on !== undefined) hkState.on = on;
-      if (brightness !== undefined) hkState.brightness = brightness;
+      delete hkState.hue;
+      delete hkState.saturation;
+      delete hkState.color_temp;
     }
     if (Object.keys(hkState).length > 0) {
-      updateAccessoryState(
+      entry.updateState(
         entry.accessory,
         hkState,
         entry.device.capabilities,

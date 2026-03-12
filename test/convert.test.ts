@@ -19,6 +19,7 @@ import {
   homeKitToZ2m,
   homeKitBrightnessToZ2M,
   homeKitBrightnessToWled,
+  homeKitSpeedToZ2mFanMode,
   hsToRgb,
   parseWledHexColor,
   parseWledMessage,
@@ -26,6 +27,7 @@ import {
   wledBrightnessToHomeKit,
   wledToHomeKit,
   z2mBrightnessToHomeKit,
+  z2mFanModeToHomeKit,
   z2mToHomeKit,
 } from "../src/convert.ts";
 
@@ -364,6 +366,39 @@ describe("z2mToHomeKit", () => {
   test("returns empty object for empty input", () => {
     expect(z2mToHomeKit({})).toEqual({});
   });
+
+  test("converts fan_state ON to active: 1", () => {
+    expect(z2mToHomeKit({ fan_state: "ON" })).toEqual({ active: 1 });
+  });
+
+  test("converts fan_state OFF to active: 0", () => {
+    expect(z2mToHomeKit({ fan_state: "OFF" })).toEqual({ active: 0 });
+  });
+
+  test("converts fan_mode medium to rotation_speed and target_fan_state", () => {
+    expect(z2mToHomeKit({ fan_mode: "medium" })).toEqual({
+      rotation_speed: 67,
+      target_fan_state: 0,
+    });
+  });
+
+  test("converts fan_mode smart to target_fan_state: 1", () => {
+    expect(z2mToHomeKit({ fan_mode: "smart" })).toEqual({
+      target_fan_state: 1,
+    });
+  });
+
+  test("converts fan_mode on to empty (resume)", () => {
+    expect(z2mToHomeKit({ fan_mode: "on" })).toEqual({});
+  });
+
+  test("converts fan_state and fan_mode together", () => {
+    expect(z2mToHomeKit({ fan_state: "ON", fan_mode: "high" })).toEqual({
+      active: 1,
+      rotation_speed: 100,
+      target_fan_state: 0,
+    });
+  });
 });
 
 describe("wledToHomeKit", () => {
@@ -472,6 +507,152 @@ describe("homeKitToZ2m", () => {
   test("returns empty object for empty input", () => {
     expect(homeKitToZ2m({})).toEqual({});
   });
+
+  test("active: 1 → fan_state: ON", () => {
+    expect(homeKitToZ2m({ active: 1 })).toEqual({ fan_state: "ON" });
+  });
+
+  test("active: 0 → fan_state: OFF", () => {
+    expect(homeKitToZ2m({ active: 0 })).toEqual({ fan_state: "OFF" });
+  });
+
+  test("rotation_speed → fan_mode via speed mapping", () => {
+    expect(homeKitToZ2m({ rotation_speed: 33 })).toEqual({ fan_mode: "low" });
+    expect(homeKitToZ2m({ rotation_speed: 67 })).toEqual({ fan_mode: "medium" });
+    expect(homeKitToZ2m({ rotation_speed: 0 })).toEqual({ fan_mode: "off" });
+  });
+
+  test("target_fan_state: 1 → fan_mode: smart (overrides rotation_speed)", () => {
+    expect(homeKitToZ2m({ target_fan_state: 1, rotation_speed: 50 })).toEqual({
+      fan_mode: "smart",
+    });
+  });
+
+  test("target_fan_state: 0 without rotation_speed converts cached speed back", () => {
+    expect(
+      homeKitToZ2m({ target_fan_state: 0 }, { fan_mode: "high" }),
+    ).toEqual({ fan_mode: "high" });
+  });
+
+  test("target_fan_state: 0 with cached smart mode defaults to medium", () => {
+    expect(
+      homeKitToZ2m({ target_fan_state: 0 }, { fan_mode: "smart" }),
+    ).toEqual({ fan_mode: "medium" });
+  });
+
+  test("target_fan_state: 0 with no cache defaults to medium", () => {
+    expect(homeKitToZ2m({ target_fan_state: 0 })).toEqual({
+      fan_mode: "medium",
+    });
+  });
+
+  test("active and rotation_speed together", () => {
+    expect(homeKitToZ2m({ active: 1, rotation_speed: 100 })).toEqual({
+      fan_state: "ON",
+      fan_mode: "high",
+    });
+  });
+});
+
+describe("z2mFanModeToHomeKit", () => {
+  test("off → rotation_speed: 0, target_fan_state: 0", () => {
+    expect(z2mFanModeToHomeKit("off")).toEqual({
+      rotation_speed: 0,
+      target_fan_state: 0,
+    });
+  });
+
+  test("low → rotation_speed: 33, target_fan_state: 0", () => {
+    expect(z2mFanModeToHomeKit("low")).toEqual({
+      rotation_speed: 33,
+      target_fan_state: 0,
+    });
+  });
+
+  test("medium → rotation_speed: 67, target_fan_state: 0", () => {
+    expect(z2mFanModeToHomeKit("medium")).toEqual({
+      rotation_speed: 67,
+      target_fan_state: 0,
+    });
+  });
+
+  test("high → rotation_speed: 100, target_fan_state: 0", () => {
+    expect(z2mFanModeToHomeKit("high")).toEqual({
+      rotation_speed: 100,
+      target_fan_state: 0,
+    });
+  });
+
+  test("smart → target_fan_state: 1 (no rotation_speed)", () => {
+    expect(z2mFanModeToHomeKit("smart")).toEqual({ target_fan_state: 1 });
+  });
+
+  test("on → empty (resume previous speed)", () => {
+    expect(z2mFanModeToHomeKit("on")).toEqual({});
+  });
+
+  test("unknown mode → empty", () => {
+    expect(z2mFanModeToHomeKit("unknown")).toEqual({});
+  });
+});
+
+describe("homeKitSpeedToZ2mFanMode", () => {
+  test("0 → off", () => {
+    expect(homeKitSpeedToZ2mFanMode(0)).toBe("off");
+  });
+
+  test("negative → off", () => {
+    expect(homeKitSpeedToZ2mFanMode(-5)).toBe("off");
+  });
+
+  test("1 → low", () => {
+    expect(homeKitSpeedToZ2mFanMode(1)).toBe("low");
+  });
+
+  test("33 → low", () => {
+    expect(homeKitSpeedToZ2mFanMode(33)).toBe("low");
+  });
+
+  test("34 → medium", () => {
+    expect(homeKitSpeedToZ2mFanMode(34)).toBe("medium");
+  });
+
+  test("66 → medium", () => {
+    expect(homeKitSpeedToZ2mFanMode(66)).toBe("medium");
+  });
+
+  test("67 → medium", () => {
+    expect(homeKitSpeedToZ2mFanMode(67)).toBe("medium");
+  });
+
+  test("68 → high", () => {
+    expect(homeKitSpeedToZ2mFanMode(68)).toBe("high");
+  });
+
+  test("100 → high", () => {
+    expect(homeKitSpeedToZ2mFanMode(100)).toBe("high");
+  });
+});
+
+describe("fan speed round-trip", () => {
+  const ROUND_TRIP_MODES = ["off", "low", "medium", "high"] as const;
+
+  for (const mode of ROUND_TRIP_MODES) {
+    test(`Z2M → HomeKit → Z2M: "${mode}" round-trips`, () => {
+      const hk = z2mFanModeToHomeKit(mode);
+      expect(hk.rotation_speed).toBeDefined();
+      expect(homeKitSpeedToZ2mFanMode(hk.rotation_speed!)).toBe(mode);
+    });
+  }
+
+  for (let speed = 0; speed <= 100; speed++) {
+    test(`HomeKit → Z2M → HomeKit: ${String(speed)}% round-trips to canonical value`, () => {
+      const mode = homeKitSpeedToZ2mFanMode(speed);
+      const hk = z2mFanModeToHomeKit(mode);
+      const canonical = hk.rotation_speed!;
+      expect(homeKitSpeedToZ2mFanMode(canonical)).toBe(mode);
+    });
+  }
 });
 
 describe("homeKitToWled", () => {

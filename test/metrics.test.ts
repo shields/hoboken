@@ -1490,6 +1490,137 @@ describe("status page (GET /)", () => {
     expect(emDashCount).toBeGreaterThanOrEqual(2);
   });
 
+  test("fan HomeKit shows Active true when fan_state ON", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan"],
+      state: { fan_state: "ON" },
+    });
+    expect(body).toContain("fan");
+    expect(body).toContain("Active");
+    expect(body).toContain("true");
+  });
+
+  test("fan HomeKit shows Active false when fan_state OFF", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan"],
+      state: { fan_state: "OFF" },
+    });
+    expect(body).toContain("false");
+  });
+
+  test("fan_speed HomeKit shows RotationSpeed and TargetFanState", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan", "fan_speed"],
+      state: { fan_state: "ON", fan_mode: "medium" },
+    });
+    expect(body).toContain("RotationSpeed");
+    expect(body).toContain("67%");
+    expect(body).toContain("TargetFanState");
+    expect(body).toContain("MANUAL");
+  });
+
+  test("fan_speed HomeKit shows AUTO for smart mode", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan", "fan_speed"],
+      state: { fan_state: "ON", fan_mode: "smart" },
+    });
+    expect(body).toContain("AUTO");
+  });
+
+  test("fan_speed HomeKit shows em-dash when no fan_mode", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan", "fan_speed"],
+      state: { fan_state: "ON" },
+    });
+    expect(body).toContain("RotationSpeed");
+    const emDashCount = (body.match(/\u2014/g) ?? []).length;
+    expect(emDashCount).toBeGreaterThanOrEqual(2);
+  });
+
+  test("fan_state annotation shows active/inactive hint", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan"],
+      state: { fan_state: "ON" },
+    });
+    expect(body).toContain("\u2192 active");
+  });
+
+  test("fan_state OFF annotation shows inactive hint", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan"],
+      state: { fan_state: "OFF" },
+    });
+    expect(body).toContain("\u2192 inactive");
+  });
+
+  test("fan_mode annotation shows speed percentage", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan", "fan_speed"],
+      state: { fan_mode: "high" },
+    });
+    expect(body).toContain("\u2192 100%");
+  });
+
+  test("fan_mode smart annotation shows auto", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan", "fan_speed"],
+      state: { fan_mode: "smart" },
+    });
+    expect(body).toContain("\u2192 auto");
+  });
+
+  test("fan_mode on annotation shows resume", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan"],
+      state: { fan_mode: "on" },
+    });
+    expect(body).toContain("\u2192 resume");
+  });
+
+  test("fan_mode unknown value shows no hint", async () => {
+    const body = await renderDevice({
+      name: "Ceiling Fan",
+      topic: "ceiling_fan",
+      type: "z2m",
+      capabilities: ["fan"],
+      state: { fan_mode: "turbo" },
+    });
+    expect(body).toContain("turbo");
+    // The fan_mode cell itself should have no hint annotation
+    const fanModeCell = /turbo[^<]*/.exec(body)?.[0] ?? "";
+    expect(fanModeCell).not.toContain("\u2192");
+  });
+
   test("no annotations for unrecognized keys", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
