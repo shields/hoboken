@@ -17,6 +17,7 @@ import {
   clampColorTemp,
   homeKitToWled,
   homeKitToZ2m,
+  isWhite,
   homeKitBrightnessToZ2M,
   homeKitBrightnessToWled,
   homeKitSpeedToZ2mFanMode,
@@ -30,6 +31,22 @@ import {
   z2mFanModeToHomeKit,
   z2mToHomeKit,
 } from "../src/convert.ts";
+
+describe("isWhite", () => {
+  test("H=0/S=0 is white", () => {
+    expect(isWhite(0, 0)).toBe(true);
+  });
+
+  test("H=228/S=56 is white", () => {
+    expect(isWhite(228, 56)).toBe(true);
+  });
+
+  test("other values are not white", () => {
+    expect(isWhite(240, 80)).toBe(false);
+    expect(isWhite(0, 56)).toBe(false);
+    expect(isWhite(228, 0)).toBe(false);
+  });
+});
 
 describe("z2mBrightnessToHomeKit", () => {
   test("converts 0 to 0", () => {
@@ -495,6 +512,18 @@ describe("homeKitToZ2m", () => {
     });
   });
 
+  test("H=228/S=56 with cached color_temp sends color_temp", () => {
+    expect(homeKitToZ2m({ hue: 228, saturation: 56 }, { color_temp: 300 })).toEqual({
+      color_temp: 300,
+    });
+  });
+
+  test("H=228/S=56 without cached color_temp sends color object", () => {
+    expect(homeKitToZ2m({ hue: 228, saturation: 56 })).toEqual({
+      color: { hue: 228, saturation: 56 },
+    });
+  });
+
   test("converts all fields together", () => {
     expect(homeKitToZ2m({ on: true, brightness: 80, hue: 120, saturation: 100 }))
       .toEqual({
@@ -675,6 +704,12 @@ describe("homeKitToWled", () => {
 
   test("H=0/S=0 sends full white RGB", () => {
     expect(homeKitToWled({ hue: 0, saturation: 0 })).toEqual({
+      seg: [{ col: [[255, 255, 255]] }],
+    });
+  });
+
+  test("H=228/S=56 sends full white RGB", () => {
+    expect(homeKitToWled({ hue: 228, saturation: 56 })).toEqual({
       seg: [{ col: [[255, 255, 255]] }],
     });
   });

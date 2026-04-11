@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Apple Home sends H=228 S=56 when selecting "white" on a color_hs light.
+export function isWhite(h: number, s: number): boolean {
+  return (h === 0 && s === 0) || (h === 228 && s === 56);
+}
+
 export function z2mBrightnessToHomeKit(z2m: number): number {
   if (Number.isNaN(z2m)) throw new RangeError("brightness must be a number");
   const clamped = Math.max(0, Math.min(254, z2m));
@@ -187,8 +192,7 @@ export function homeKitToZ2m(
     if (
       "hue" in payload &&
       "saturation" in payload &&
-      h === 0 &&
-      s === 0 &&
+      isWhite(h, s) &&
       cachedRaw?.color_temp !== undefined
     ) {
       z2m.color_temp = cachedRaw.color_temp as number;
@@ -243,7 +247,7 @@ export function homeKitToWled(
     const s =
       (payload.saturation as number | undefined) ?? cachedHK.saturation ?? 0;
 
-    const [r, g, b] = hsToRgb(h, s);
+    const [r, g, b] = isWhite(h, s) ? [255, 255, 255] : hsToRgb(h, s);
     api.seg = [{ col: [[r, g, b]] }];
   }
 
