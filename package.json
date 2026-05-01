@@ -29,7 +29,7 @@
     "eslint-plugin-unicorn": "64.0.0",
     "hap-controller": "0.10.2",
     "jiti": "2.6.1",
-    "pixelmatch": "7.1.0",
+    "pixelmatch": "7.1.1",
     "playwright": "1.59.1",
     "pngjs": "7.0.0",
     "typescript": "6.0.3",
