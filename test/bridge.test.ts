@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   Characteristic,
   HAPStatus,
@@ -31,11 +32,9 @@ HAPStorage.setCustomStoragePath(
 );
 
 const expectedVersion = execFileSync(
-  "git",
-  ["describe", "--always", "--dirty"],
-  {
-    encoding: "utf8",
-  },
+  fileURLToPath(new URL("../scripts/gitcalver.sh", import.meta.url)),
+  ["--dirty", "-dev"],
+  { encoding: "utf8" },
 ).trim();
 
 // eslint-disable-next-line unicorn/prefer-event-target -- mocks hap-nodejs EventEmitter API

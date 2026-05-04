@@ -25,6 +25,7 @@ import {
 import type { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { connect } from "mqtt";
 import { Registry } from "prom-client";
 import type { Config } from "./config.ts";
@@ -225,11 +226,13 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     ).trim();
   } catch {
     try {
-      version = execFileSync("git", ["describe", "--always", "--dirty"], {
-        encoding: "utf8",
-      }).trim();
+      version = execFileSync(
+        fileURLToPath(new URL("../scripts/gitcalver.sh", import.meta.url)),
+        ["--dirty", "-dev"],
+        { encoding: "utf8" },
+      ).trim();
     } catch {
-      // Neither VERSION file nor git available
+      /* version stays "unknown" */
     }
   }
 

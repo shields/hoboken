@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # bridge.test.ts invokes gitcalver, which requires full history.
+          fetch-depth: 0
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -62,6 +65,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # gitcalver requires full history to count commits per date.
+          fetch-depth: 0
+
+      - name: Compute version
+        id: version
+        run: echo "version=$(./scripts/gitcalver.sh --dirty -dev)" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
@@ -82,9 +92,9 @@ jobs:
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # Immutable run-number tags only; no :latest to avoid ambiguity.
+          # Immutable version tags only; no :latest to avoid ambiguity.
           tags: |
-            type=raw,value=r${{ github.run_number }}
+            type=raw,value=${{ steps.version.outputs.version }}
 
       - name: Build image
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
@@ -93,7 +103,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
           build-args: |
-            GIT_VERSION=${{ github.sha }}
+            GIT_VERSION=${{ steps.version.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
