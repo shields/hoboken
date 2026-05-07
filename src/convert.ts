@@ -195,7 +195,7 @@ export function homeKitToZ2m(
       isWhite(h, s) &&
       cachedRaw?.color_temp !== undefined
     ) {
-      z2m.color_temp = cachedRaw.color_temp as number;
+      z2m.color_temp = cachedRaw.color_temp;
     } else {
       const color: Record<string, unknown> = {};
       if ("hue" in payload) color.hue = payload.hue;
