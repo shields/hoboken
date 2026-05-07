@@ -458,9 +458,8 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   });
 
   await bridge.publish({
-    username: config.bridge
-      .mac as `${string}:${string}:${string}:${string}:${string}:${string}`,
-    pincode: config.bridge.pincode as `${string}-${string}-${string}`,
+    username: config.bridge.mac,
+    pincode: config.bridge.pincode,
     port: config.bridge.port,
     category: Categories.BRIDGE,
     ...(config.bridge.bind ? { bind: config.bridge.bind } : {}),
@@ -484,7 +483,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       log.log(
         `HAP connection closed from ${connection.remoteAddress}:${String(connection.remotePort)}`,
       );
-      hapConnections.delete(connection as unknown as EventEmitter);
+      hapConnections.delete(connection);
       metrics?.hapConnectionsActive.dec();
       metricsServer?.notifyStateChange();
     });
