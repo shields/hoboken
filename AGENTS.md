@@ -99,11 +99,6 @@ Each module is independently testable with dependency injection:
   and CI testing run inside the same Docker image so fonts and rendering match
   exactly. The `PLAYWRIGHT_IN_DOCKER` env var triggers `--no-sandbox` for
   Chromium inside the container.
-- **ciao mDNS patch**: `@homebridge/ciao` has a shutdown race condition where
-  mDNS probe/announce timers fire after the server socket is closed, throwing
-  `ERR_SERVER_CLOSED` as an uncaught exception. A `bun patch` in
-  `patches/@homebridge%2Fciao@1.3.5.patch` fixes this by adding early-return
-  guards to send methods. See https://github.com/homebridge/ciao/pull/60
 
 ## Docker Images
 
