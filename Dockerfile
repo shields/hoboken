@@ -23,7 +23,7 @@ RUN bun install --frozen-lockfile --production
 RUN printf '%s' "${GIT_VERSION}" > VERSION
 
 # Node 24 runs .ts files directly (built-in type stripping, unflagged since 23.6)
-FROM gcr.io/distroless/nodejs24-debian13:latest@sha256:e70510b44870c5686983f2b11f22b884f2dfacf86aea69b6b0edb2ccb3f237f4
+FROM gcr.io/distroless/nodejs24-debian13:latest@sha256:e7192174b2b2e5db60cb8f8fc3dcb8cb8e0456f961387c4e0556118f09dcb7c8
 WORKDIR /app
 COPY --from=build /app/node_modules node_modules/
 COPY --from=build /app/VERSION .
