@@ -43,13 +43,18 @@ describe.skipIf(!process.env.PLAYWRIGHT_IN_DOCKER)("screenshot golden file", () 
 
       const diff = new PNG({ width: actual.width, height: actual.height });
 
+      // Golden generation and this test run in the same Docker image, so
+      // rendering is byte-identical: enforce zero pixel tolerance. threshold: 0
+      // counts any nonzero color difference, and includeAA: true disables
+      // pixelmatch's default anti-aliasing detection (which would otherwise
+      // skip differing edge pixels).
       const numDiff = pixelmatch(
         actual.data,
         expected.data,
         diff.data,
         actual.width,
         actual.height,
-        { threshold: 0.1 },
+        { threshold: 0, includeAA: true },
       );
 
       if (numDiff > 0) {
