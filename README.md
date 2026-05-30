@@ -185,7 +185,7 @@ first octet set, bit 0 clear). The PIN is 8 random digits formatted as
 Generate both with:
 
 ```sh
-python3 -c "import random; b=random.randbytes(6); print(f'MAC: {b[0]|2&~1:02X}:{b[1]:02X}:{b[2]:02X}:{b[3]:02X}:{b[4]:02X}:{b[5]:02X}'); d=[random.randint(0,9) for _ in range(8)]; print(f'PIN: {d[0]}{d[1]}{d[2]}-{d[3]}{d[4]}-{d[5]}{d[6]}{d[7]}')"
+python3 -c "import random; b=random.randbytes(6); print(f'MAC: {(b[0]|2)&~1:02X}:{b[1]:02X}:{b[2]:02X}:{b[3]:02X}:{b[4]:02X}:{b[5]:02X}'); d=[random.randint(0,9) for _ in range(8)]; print(f'PIN: {d[0]}{d[1]}{d[2]}-{d[3]}{d[4]}-{d[5]}{d[6]}{d[7]}')"
 ```
 
 ### Z2M Groups as Devices
