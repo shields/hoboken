@@ -483,9 +483,14 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       log.log(
         `HAP connection closed from ${connection.remoteAddress}:${String(connection.remotePort)}`,
       );
-      hapConnections.delete(connection);
-      metrics?.hapConnectionsActive.dec();
-      metricsServer?.notifyStateChange();
+      // Only decrement when we actually counted this connection on
+      // connection-opened. A connection that opened in the window between the
+      // HAP server starting to listen and this listener being attached is not
+      // tracked, and decrementing for it would drive the gauge negative.
+      if (hapConnections.delete(connection)) {
+        metrics?.hapConnectionsActive.dec();
+        metricsServer?.notifyStateChange();
+      }
     });
 
     // EventedHTTPServer is the internal HTTP layer that emits connection-opened
