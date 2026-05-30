@@ -219,6 +219,9 @@ describe("WLED integration", { timeout: 30000 }, () => {
     const res = (await client!.getCharacteristics([onKey, briKey, hueKey, satKey])) as {
       characteristics: { aid: unknown; iid: unknown; value?: unknown; status?: number }[];
     };
+    // Guard against a vacuous pass: every requested characteristic must report
+    // the failure status, so the loop below must actually iterate over all four.
+    assert.equal(res.characteristics.length, 4);
     for (const ch of res.characteristics) {
       const key = `${String(ch.aid)}.${String(ch.iid)}`;
       assert.equal(ch.status, -70402, `Expected SERVICE_COMMUNICATION_FAILURE for ${key}`);
