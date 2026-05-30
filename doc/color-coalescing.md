@@ -100,6 +100,8 @@ homebridge-deconz, homebridge-z2m) converts HS→CT on the write path.
 - **CT-only lights**: Home app shows a color temperature slider that sends
   `ColorTemperature` directly.
 - **Siri "set lights white"**: HomeKit sends Hue=0, Saturation=0.
+- **Home app "white" swatch** (HS color picker): HomeKit sends Hue=228,
+  Saturation=56.
 
 ### Z2M color_mode behavior
 
@@ -118,17 +120,18 @@ Hoboken forbids combining `color_temp` and `color_hs` capabilities on the
 same device (config validation rejects this). Devices are configured as
 either CT-only or HS-only.
 
-For `color_hs` devices, when HomeKit sends Hue=0 and Saturation=0 (Siri's
-"set lights white" command), the coalescing publisher's `transformPayload`
-hook converts this to a `color_temp` write using the last known
-`color_temp` from the state cache. This causes Z2M to switch to CT mode
-so the bulb uses its WW/CW LEDs instead of mixing RGB to approximate
-white.
+For `color_hs` devices, when HomeKit sends a recognized "white" request —
+either Hue=0/Saturation=0 (Siri's "set lights white" command) or
+Hue=228/Saturation=56 (the Home app's white swatch in the HS color
+picker) — the coalescing publisher's `transformPayload` hook converts it
+to a `color_temp` write using the last known `color_temp` from the state
+cache. This causes Z2M to switch to CT mode so the bulb uses its WW/CW
+LEDs instead of mixing RGB to approximate white.
 
 The transform only fires when the state cache contains a `color_temp`
 value, confirming that the device has CCT hardware. RGB-only devices
-never report `color_temp` in their state, so H=0/S=0 passes through as a
-normal HS write for those devices.
+never report `color_temp` in their state, so these white requests pass
+through as normal HS writes for those devices.
 
 ## Write-Back Suppression
 
@@ -217,5 +220,6 @@ color selection popup. Converting all the values from this would
 require reverse-engineering what path in color space the slider is
 traversing.
 
-Currently only the exact H=0/S=0 case (Siri's "set lights white") is
-converted.
+Currently only the two exact white inputs are converted: H=0/S=0 (Siri's
+"set lights white") and H=228/S=56 (the Home app's white swatch). The
+five preset values above are not yet handled.

@@ -10,8 +10,8 @@ Minimal HomeKit bridge for Zigbee2MQTT. Uses `@homebridge/hap-nodejs` directly
 - **Runtime**: Node.js 24 LTS with unflagged TypeScript type stripping
 - **Package manager**: Bun (`bun install`, `bun.lock`)
 - **Test runner**: Bun test (`bun test`, `bun test --coverage`)
-- **TypeScript 5.9**: type checking only (`noEmit`), `erasableSyntaxOnly`
-- **ESLint 10**: `typescript-eslint` with `strictTypeChecked` + `stylisticTypeChecked`
+- **TypeScript 6.0**: type checking only (`noEmit`), `erasableSyntaxOnly`
+- **ESLint 9**: `typescript-eslint` with `strictTypeChecked` + `stylisticTypeChecked`
 - **Container**: `gcr.io/distroless/nodejs24-debian13`
 
 ## Commands
