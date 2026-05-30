@@ -312,8 +312,13 @@ function formatHint(
     };
   }
   if (key === "color_temp" && typeof value === "number") {
+    // Raw mireds are shown as-is, but the Kelvin hint is only meaningful for a
+    // positive value: color_temp 0 would render "Infinity K" and negatives a
+    // bogus negative Kelvin, so suppress the hint in those cases.
+    const kelvin = Math.round(1_000_000 / value);
+    if (!Number.isFinite(kelvin) || kelvin <= 0) return null;
     return {
-      html: `<span class="hint">\u2192 ${String(Math.round(1_000_000 / value))} K</span>`,
+      html: `<span class="hint">\u2192 ${String(kelvin)} K</span>`,
       placement: "value",
     };
   }
@@ -333,7 +338,12 @@ function formatHint(
       placement: "key",
     };
   }
-  if (key === "col" && Array.isArray(value) && value.length >= 3) {
+  if (
+    key === "col" &&
+    Array.isArray(value) &&
+    value.length >= 3 &&
+    capabilities.includes("color_hs")
+  ) {
     const [r, g, b] = value as unknown[];
     if (
       typeof r !== "number" ||

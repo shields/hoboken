@@ -82,9 +82,9 @@ The payload is interpreted as a brightness/power command:
 2. **Contains `"T"` or `"t"`** (substring match):
    toggle on/off. Then apply state.
 
-3. **Otherwise**: parse the entire payload as a decimal unsigned integer
-   (0–255). If the parsed value is 0 and `bri > 0`, save `bri` to `briLast`
-   first. Then set `bri` to the parsed value. Then apply state.
+3. **Otherwise**: parse the entire payload as a decimal integer and clamp it
+   to 0–255. If the clamped value is 0 and `bri > 0`, save `bri` to `briLast`
+   first. Then set `bri` to the clamped value. Then apply state.
 
 Matching is checked in the order listed: `ON`/`on`/`true` first, then `T`/`t`,
 then numeric. The check uses substring matching (`strstr`), so a payload like
@@ -124,7 +124,7 @@ API state deserializer. Otherwise it is treated as an HTTP API query string
 
 Fields are processed in this order within `deserializeState`:
 
-1. **`bri`** (integer 0–255): Sets brightness directly.
+1. **`bri`** (integer): Sets brightness directly, clamped to 0–255.
 
 2. **`on`** (boolean or string `"t"`):
    - Boolean `true`: if device is currently off (`bri === 0`), toggle on

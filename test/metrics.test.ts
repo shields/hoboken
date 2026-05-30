@@ -1222,6 +1222,33 @@ describe("status page (GET /)", () => {
     expect(body).toContain("\u2192 2703 K");
   });
 
+  test("color_temp annotation is suppressed for non-positive mireds", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Lamp",
+            topic: "lamp",
+            type: "z2m",
+            capabilities: ["on_off"],
+            state: { color_temp: 0 },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${String(port)}/`)
+    ).text();
+    expect(body).toContain("color_temp");
+    expect(body).not.toContain("Infinity");
+    expect(body).not.toContain(" K</span>");
+  });
+
   test("color_hs annotation shows swatch", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>
@@ -1455,6 +1482,18 @@ describe("status page (GET /)", () => {
       state: { on: true, col: ['"></span><img src=x onerror=alert(1)>', 0, 0] },
     });
     expect(body).not.toContain("<img src=x onerror=alert(1)>");
+    expect(body).not.toContain('class="swatch"');
+  });
+
+  test("col annotation is suppressed without color_hs capability", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "brightness"],
+      state: { on: true, col: [255, 0, 0] },
+    });
+    expect(body).not.toContain("rgb(255,0,0)");
     expect(body).not.toContain('class="swatch"');
   });
 

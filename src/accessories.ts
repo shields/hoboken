@@ -199,12 +199,20 @@ export function createSceneAccessory(
 
   on.onGet(() => false);
 
+  // Momentary switch: each recall publishes, then auto-resets to off after 1s.
+  let resetTimer: ReturnType<typeof setTimeout> | undefined;
   on.onSet((value) => {
     if (value) {
       publish(device.topic, { scene_recall: scene.id });
-      setTimeout(() => {
+      // Replace any pending reset so a rapid re-tap doesn't leave overlapping
+      // timers, and unref() so a pending reset can't keep the process alive
+      // during shutdown.
+      if (resetTimer !== undefined) clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        resetTimer = undefined;
         on.updateValue(false);
       }, 1000);
+      resetTimer.unref();
     }
   });
 

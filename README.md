@@ -179,13 +179,13 @@ host's LAN interface name (e.g., `eno1`) so HomeKit clients can reach the bridge
 
 The bridge MAC must be a locally-administered unicast address (bit 1 of the
 first octet set, bit 0 clear). The PIN is 8 random digits formatted as
-`XXX-XX-XXX` and must not be a HAP-excluded value (e.g., `000-00-000`,
-`111-11-111`, `123-45-678`).
+`XXX-XX-XXX` and must not be a HAP-excluded value (`000-00-000`,
+`111-11-111` … `999-99-999`, `123-45-678`, `876-54-321`).
 
-Generate both with:
+Generate both with (the PIN is redrawn until it is not an excluded value):
 
 ```sh
-python3 -c "import random; b=random.randbytes(6); print(f'MAC: {(b[0]|2)&~1:02X}:{b[1]:02X}:{b[2]:02X}:{b[3]:02X}:{b[4]:02X}:{b[5]:02X}'); d=[random.randint(0,9) for _ in range(8)]; print(f'PIN: {d[0]}{d[1]}{d[2]}-{d[3]}{d[4]}-{d[5]}{d[6]}{d[7]}')"
+python3 -c "import random; b=random.randbytes(6); excluded={d*8 for d in '0123456789'}|{'12345678','87654321'}; p=next(s for s in iter(lambda: ''.join(random.choices('0123456789',k=8)), None) if s not in excluded); print(f'MAC: {(b[0]|2)&~1:02X}:{b[1]:02X}:{b[2]:02X}:{b[3]:02X}:{b[4]:02X}:{b[5]:02X}'); print(f'PIN: {p[0:3]}-{p[3:5]}-{p[5:8]}')"
 ```
 
 ### Z2M Groups as Devices

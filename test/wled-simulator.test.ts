@@ -263,6 +263,19 @@ describe("WledSimulator", () => {
       expect(sim.state.bri).toBe(128);
       expect(mockClient.published).toHaveLength(3);
     });
+
+    test("clamps out-of-range brightness to 255", () => {
+      const sim = createSimulator();
+      sendMessage("", "300");
+      expect(sim.state.bri).toBe(255);
+    });
+
+    test("clamps negative brightness to 0", () => {
+      const sim = createSimulator();
+      sendMessage("", "-5");
+      expect(sim.state.bri).toBe(0);
+      expect(sim.state.briLast).toBe(128);
+    });
   });
 
   describe("color payload (/col)", () => {
@@ -330,6 +343,12 @@ describe("WledSimulator", () => {
       expect(sim.state.briLast).toBe(128);
     });
 
+    test("{bri} clamps out-of-range value to 255", () => {
+      const sim = createSimulator();
+      sendMessage("/api", JSON.stringify({ bri: 300 }));
+      expect(sim.state.bri).toBe(255);
+    });
+
     test("{on: true} restores briLast when off", () => {
       const sim = createSimulator();
       sim.setBrightness(0);
@@ -383,6 +402,50 @@ describe("WledSimulator", () => {
       clearPublished();
       sendMessage("/api", JSON.stringify({ seg: [{ col: [[0, 255, 128]] }] }));
       expect(sim.state.col).toEqual([0, 255, 128]);
+    });
+
+    test("seg col as a 6-digit hex string sets color", () => {
+      const sim = createSimulator();
+      sendMessage("/api", JSON.stringify({ seg: [{ col: ["00FF00"] }] }));
+      expect(sim.state.col).toEqual([0, 255, 0]);
+    });
+
+    test("seg col as an RGBW hex string ignores the white byte", () => {
+      const sim = createSimulator();
+      sendMessage("/api", JSON.stringify({ seg: [{ col: ["FF000080"] }] }));
+      expect(sim.state.col).toEqual([255, 0, 0]);
+    });
+
+    test("seg col as an {r,g,b} object sets color", () => {
+      const sim = createSimulator();
+      sendMessage(
+        "/api",
+        JSON.stringify({ seg: [{ col: [{ r: 10, g: 20, b: 30 }] }] }),
+      );
+      expect(sim.state.col).toEqual([10, 20, 30]);
+    });
+
+    test("seg col as a partial object keeps unspecified channels", () => {
+      const sim = createSimulator();
+      // Initial col is [255, 160, 0]; only green is supplied.
+      sendMessage("/api", JSON.stringify({ seg: [{ col: [{ g: 99 }] }] }));
+      expect(sim.state.col).toEqual([255, 99, 0]);
+    });
+
+    test("seg col with a non-numeric array element is a no-op", () => {
+      const sim = createSimulator();
+      clearPublished();
+      sendMessage("/api", JSON.stringify({ seg: [{ col: [[1, 2, "x"]] }] }));
+      expect(mockClient.published).toEqual([]);
+      expect(sim.state.col).toEqual([255, 160, 0]);
+    });
+
+    test("seg col with a primitive slot is a no-op", () => {
+      const sim = createSimulator();
+      clearPublished();
+      sendMessage("/api", JSON.stringify({ seg: [{ col: [42] }] }));
+      expect(mockClient.published).toEqual([]);
+      expect(sim.state.col).toEqual([255, 160, 0]);
     });
 
     test("{} is a no-op", () => {

@@ -256,8 +256,12 @@ describe("WLED integration", { timeout: 30000 }, () => {
   });
 
   test("color round-trip read-back", async () => {
-    // After setting green (H=120, S=100) above, wait for the WLED echo to
-    // propagate back through the bridge, then verify HK reads the same values.
+    // The green write above (H=120, S=100) set HomeKit's local hue/sat. WLED
+    // echoes the color back almost immediately, but that echo lands inside the
+    // bridge's 500ms color write-back suppression window and is dropped, so
+    // this does not exercise the echo path. After waiting that window out, we
+    // confirm HomeKit still reports the locally-written values (they were not
+    // clobbered or reset).
     await new Promise<void>((r) => setTimeout(r, 600));
     const values = await getCharValues(client!, hueKey, satKey);
     assert.equal(values.get(hueKey), 120);

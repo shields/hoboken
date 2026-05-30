@@ -20,6 +20,12 @@ export interface WledState {
   col: [number, number, number];
 }
 
+// Brightness is a 0–255 quantity (WLED-MQTT-SPEC.md §2); clamp parsed inbound
+// values into range rather than letting out-of-range input corrupt the state.
+function clampBri(n: number): number {
+  return Math.min(255, Math.max(0, n));
+}
+
 export class WledSimulator {
   private bri = 128;
   private briLast = 128;
@@ -101,10 +107,11 @@ export class WledSimulator {
     } else {
       const val = Number.parseInt(payload, 10);
       if (!Number.isNaN(val)) {
-        if (val === 0 && this.bri > 0) {
+        const bri = clampBri(val);
+        if (bri === 0 && this.bri > 0) {
           this.briLast = this.bri;
         }
-        this.bri = val;
+        this.bri = bri;
       }
     }
     this.publishState();
@@ -143,10 +150,11 @@ export class WledSimulator {
 
     // Process bri first
     if (typeof data.bri === "number") {
-      if (data.bri === 0 && this.bri > 0) {
+      const bri = clampBri(data.bri);
+      if (bri === 0 && this.bri > 0) {
         this.briLast = this.bri;
       }
-      this.bri = data.bri;
+      this.bri = bri;
     }
 
     // Process on second
@@ -172,17 +180,12 @@ export class WledSimulator {
       }
     }
 
-    // Process seg[0].col
+    // Process seg[0].col (primary color slot)
     if (Array.isArray(data.seg)) {
       const seg0 = data.seg[0] as Record<string, unknown> | undefined;
       if (seg0 && Array.isArray(seg0.col)) {
         const colSlot0 = (seg0.col as unknown[])[0];
-        if (Array.isArray(colSlot0) && colSlot0.length >= 3) {
-          this.col = [
-            colSlot0[0] as number,
-            colSlot0[1] as number,
-            colSlot0[2] as number,
-          ];
+        if (this.parseSegColor(colSlot0)) {
           stateChanged = true;
         }
       }
@@ -194,6 +197,47 @@ export class WledSimulator {
     if (this.bri !== briOld || stateChanged) {
       this.publishState();
     }
+  }
+
+  // Parse one seg[].col slot. Per WLED-MQTT-SPEC.md §3c a slot may be an
+  // [R,G,B] (or [R,G,B,W]) array, an "RRGGBB"/"RRGGBBWW" hex string, or an
+  // {r,g,b} object (each channel optional, defaulting to its current value).
+  // Returns whether a recognized color was applied.
+  private parseSegColor(entry: unknown): boolean {
+    if (Array.isArray(entry)) {
+      if (entry.length < 3) return false;
+      const [r, g, b] = entry as unknown[];
+      if (
+        typeof r !== "number" ||
+        typeof g !== "number" ||
+        typeof b !== "number"
+      ) {
+        return false;
+      }
+      this.col = [r, g, b];
+      return true;
+    }
+    if (typeof entry === "string") {
+      // colorFromHexString uses standard RRGGBB[WW] byte order: take the first
+      // three bytes as R, G, B and ignore any trailing white byte.
+      if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(entry)) return false;
+      this.col = [
+        Number.parseInt(entry.slice(0, 2), 16),
+        Number.parseInt(entry.slice(2, 4), 16),
+        Number.parseInt(entry.slice(4, 6), 16),
+      ];
+      return true;
+    }
+    if (typeof entry === "object" && entry !== null) {
+      const o = entry as Record<string, unknown>;
+      this.col = [
+        typeof o.r === "number" ? o.r : this.col[0],
+        typeof o.g === "number" ? o.g : this.col[1],
+        typeof o.b === "number" ? o.b : this.col[2],
+      ];
+      return true;
+    }
+    return false;
   }
 
   private publishState(): void {

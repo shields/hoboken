@@ -17,27 +17,43 @@ import { loadConfig } from "./config.ts";
 import { startBridge } from "./bridge.ts";
 import * as log from "./log.ts";
 
-// eslint-disable-next-line prefer-const -- assigned via destructuring after signal handlers are installed
+// eslint-disable-next-line prefer-const -- assigned after signal handlers are installed
 let shutdown: (() => Promise<void>) | undefined;
 let shuttingDown = false;
+let pendingSignal: string | undefined;
+
+const runShutdown = (fn: () => Promise<void>) => {
+  void fn()
+    // eslint-disable-next-line unicorn/no-process-exit -- HAP server keeps handles open
+    .then(() => process.exit(0))
+    .catch((err: unknown) => {
+      log.error(
+        `Shutdown error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      // eslint-disable-next-line unicorn/no-process-exit -- must terminate despite active handles
+      process.exit(1);
+    });
+};
+
 const onShutdown = (signal: string) => {
-  if (shuttingDown) return;
+  if (shuttingDown) {
+    // A second signal forces an immediate exit, so an operator can always
+    // terminate the process even if a clean shutdown — or a startup that
+    // never resolves — is taking too long.
+    log.log(`Received ${signal} again; forcing exit`);
+    // eslint-disable-next-line unicorn/no-process-exit -- force-terminate on repeat signal
+    process.exit(1);
+  }
   shuttingDown = true;
   log.log(`Received ${signal}`);
   if (shutdown) {
-    void shutdown()
-      // eslint-disable-next-line unicorn/no-process-exit -- HAP server keeps handles open
-      .then(() => process.exit(0))
-      .catch((err: unknown) => {
-        log.error(
-          `Shutdown error: ${err instanceof Error ? err.message : String(err)}`,
-        );
-        // eslint-disable-next-line unicorn/no-process-exit -- must terminate despite active handles
-        process.exit(1);
-      });
+    runShutdown(shutdown);
   } else {
-    // eslint-disable-next-line unicorn/no-process-exit -- no shutdown handler registered yet
-    process.exit(0);
+    // Signal arrived during startup. Buffer it and run a clean shutdown once
+    // startBridge resolves, rather than exiting and leaking a half-started
+    // HAP server / MQTT client. If startup never completes, a second signal
+    // (above) still forces exit.
+    pendingSignal = signal;
   }
 };
 process.on("SIGTERM", () => {
@@ -52,4 +68,6 @@ const configPath = process.env.CONFIG_PATH ?? "/config/config.yaml";
 HAPStorage.setCustomStoragePath(process.env.PERSIST_PATH ?? "/persist");
 
 const config = loadConfig(configPath);
-({ shutdown } = await startBridge(config));
+const handle = await startBridge(config);
+shutdown = handle.shutdown;
+if (pendingSignal !== undefined) runShutdown(handle.shutdown);

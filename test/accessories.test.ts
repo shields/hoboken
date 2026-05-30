@@ -462,7 +462,7 @@ describe("createSceneAccessory", () => {
     expect(value).toBe(false);
   });
 
-  test("auto-resets to off after timeout", () => {
+  test("auto-resets to off after timeout and unrefs the timer", () => {
     const publish = mock<PublishFn>();
     const device = makeDevice();
     const scene = { name: "Movie Mode", id: 2 };
@@ -472,21 +472,70 @@ describe("createSceneAccessory", () => {
       .getCharacteristic(Characteristic.On);
 
     const origSetTimeout = globalThis.setTimeout;
-    const timeouts: { fn: () => void; delay: number }[] = [];
+    const timeouts: { fn: () => void; delay: number; unrefCalled: boolean }[] =
+      [];
     globalThis.setTimeout = ((fn: () => void, delay: number) => {
-      timeouts.push({ fn, delay });
-      return 0 as unknown as ReturnType<typeof setTimeout>;
+      const entry = { fn, delay, unrefCalled: false };
+      timeouts.push(entry);
+      return {
+        unref() {
+          entry.unrefCalled = true;
+        },
+      } as unknown as ReturnType<typeof setTimeout>;
     }) as typeof setTimeout;
 
     try {
       on.setValue(true);
       expect(timeouts).toHaveLength(1);
       expect(timeouts[0]!.delay).toBe(1000);
+      expect(timeouts[0]!.unrefCalled).toBe(true);
 
       timeouts[0]!.fn();
       expect(on.value).toBe(false);
     } finally {
       globalThis.setTimeout = origSetTimeout;
+    }
+  });
+
+  test("a rapid re-tap clears the prior reset timer", () => {
+    const publish = mock<PublishFn>();
+    const device = makeDevice();
+    const scene = { name: "Movie Mode", id: 3 };
+    const accessory = createSceneAccessory(device, scene, publish);
+    const on = accessory
+      .getService(Service.Switch)!
+      .getCharacteristic(Characteristic.On);
+
+    const origSetTimeout = globalThis.setTimeout;
+    const origClearTimeout = globalThis.clearTimeout;
+    let nextId = 1;
+    const timeouts: { id: number; fn: () => void }[] = [];
+    const cleared: number[] = [];
+    globalThis.setTimeout = ((fn: () => void) => {
+      const id = nextId++;
+      timeouts.push({ id, fn });
+      return { id, unref() { /* no-op */ } } as unknown as ReturnType<
+        typeof setTimeout
+      >;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((handle: { id: number }) => {
+      cleared.push(handle.id);
+    }) as unknown as typeof clearTimeout;
+
+    try {
+      on.setValue(true);
+      on.setValue(true);
+      // The second tap must clear the first timer before scheduling its own.
+      expect(cleared).toEqual([1]);
+      expect(timeouts).toHaveLength(2);
+      expect(publish).toHaveBeenCalledTimes(2);
+
+      // The surviving timer still resets the switch to off.
+      timeouts[1]!.fn();
+      expect(on.value).toBe(false);
+    } finally {
+      globalThis.setTimeout = origSetTimeout;
+      globalThis.clearTimeout = origClearTimeout;
     }
   });
 });
