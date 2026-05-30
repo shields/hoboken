@@ -475,6 +475,38 @@ describe("SSE (GET /events)", () => {
     ms = undefined; // already closed, skip afterEach close
   });
 
+  test("carriage returns in values do not break SSE framing", async () => {
+    const register = new Registry();
+    const getStatus: GetStatusFn = () =>
+      makeStatus({
+        devices: [
+          {
+            name: "Sensor",
+            topic: "sensor",
+            type: "z2m",
+            capabilities: ["on_off"],
+            state: { note: "foo\rbar" },
+          },
+        ],
+      });
+    ms = startMetricsServer(0, register, undefined, getStatus);
+
+    await listening(ms.server);
+    const port = addr(ms.server);
+
+    const controller = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${String(port)}/events`, {
+      signal: controller.signal,
+    });
+    const reader = res.body!.getReader();
+    const text = new TextDecoder().decode((await reader.read()).value);
+    // A lone CR must be turned into a line break with a data: prefix, never
+    // left inside a data: line where the client would treat it as a line end.
+    expect(text).not.toContain("foo\rbar");
+    expect(text).toContain("foo\ndata: bar");
+    controller.abort();
+  });
+
   test("POST /events returns 404", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () => makeStatus();
@@ -1412,6 +1444,18 @@ describe("status page (GET /)", () => {
     });
     expect(body).toContain("rgb(255,0,0)");
     expect(body).toContain('class="swatch"');
+  });
+
+  test("col annotation does not inject HTML for non-numeric elements", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "color_hs"],
+      state: { on: true, col: ['"></span><img src=x onerror=alert(1)>', 0, 0] },
+    });
+    expect(body).not.toContain("<img src=x onerror=alert(1)>");
+    expect(body).not.toContain('class="swatch"');
   });
 
   test("WLED on_off HomeKit shows true when state.on is true", async () => {
