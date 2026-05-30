@@ -260,8 +260,13 @@ export function startMetricsServer(
 // No res.writable guard needed: res.write() never throws — it returns false
 // on a broken connection. The req "close" handler removes clients from
 // sseClients, so stale entries are short-lived (one event loop tick at most).
+//
+// Split on every SSE line terminator (CR, LF, CRLF), not just LF: a lone CR
+// embedded in a raw Z2M value would otherwise be sent inside a data: line and
+// the client's EventSource parser would treat it as an early line break,
+// truncating the payload. Prefixing each line keeps the HTML intact.
 function sendSseEvent(res: ServerResponse, content: string): void {
-  const lines = content.split("\n").map((line) => `data: ${line}`);
+  const lines = content.split(/\r\n|\r|\n/).map((line) => `data: ${line}`);
   res.write(`${lines.join("\n")}\n\n`);
 }
 
@@ -328,12 +333,14 @@ function formatHint(
       placement: "key",
     };
   }
-  if (
-    key === "col" &&
-    Array.isArray(value) &&
-    value.length >= 3
-  ) {
-    const [r, g, b] = value as number[];
+  if (key === "col" && Array.isArray(value) && value.length >= 3) {
+    const [r, g, b] = value as unknown[];
+    if (
+      typeof r !== "number" ||
+      typeof g !== "number" ||
+      typeof b !== "number"
+    )
+      return null;
     return {
       html: `<span class="swatch" style="background:rgb(${String(r)},${String(g)},${String(b)})"></span>`,
       placement: "key",
