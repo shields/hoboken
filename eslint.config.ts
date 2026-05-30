@@ -19,7 +19,9 @@ import tseslint from "typescript-eslint";
 // eslint-disable-next-line @typescript-eslint/no-deprecated -- no defineConfig() in ESLint 9
 export default tseslint.config(
   {
-    ignores: ["node_modules/"],
+    // .claude holds Claude Code's workspace, including worktree copies of this
+    // repo under .claude/worktrees/ that would otherwise be linted as source.
+    ignores: ["node_modules/", ".claude/"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
