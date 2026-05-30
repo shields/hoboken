@@ -1,6 +1,8 @@
-// Type declarations for aedes v1.
-// The package's own .d.ts files use bare re-exports from ./types/* which
-// lack .js counterparts, breaking NodeNext module resolution.
+// Minimal type declarations for aedes v1, covering only the API this test
+// uses. The package ships its own types, but its `Aedes.on()` is declared
+// solely with literal-event overloads (no `on(event: string, ...)` fallback).
+// The `waitFor` helper subscribes with the event name passed as a `string`,
+// which matches no literal overload, so we add the generic fallback here.
 
 /* eslint-disable unicorn/prefer-event-target -- mirrors aedes internal API */
 
