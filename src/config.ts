@@ -143,6 +143,26 @@ export function validateConfig(data: unknown): Config {
     topics.add(device.topic);
   }
 
+  // WLED devices subscribe to the derived sub-topics `${topic}/g` and
+  // `${topic}/c`, which the bridge router resolves before raw device topics.
+  // If another device's topic equals one of them, that device's messages are
+  // silently routed to the WLED device instead, so reject the collision.
+  for (const device of devices) {
+    if (device.type !== "wled") continue;
+    const gTopic = `${device.topic}/g`;
+    const cTopic = `${device.topic}/c`;
+    if (topics.has(gTopic)) {
+      throw new Error(
+        `WLED device "${device.topic}" sub-topic "${gTopic}" collides with another device topic`,
+      );
+    }
+    if (topics.has(cTopic)) {
+      throw new Error(
+        `WLED device "${device.topic}" sub-topic "${cTopic}" collides with another device topic`,
+      );
+    }
+  }
+
   if (bridge.bind !== undefined && typeof bridge.bind !== "string") {
     throw new Error("bridge.bind must be a string (interface name or IP)");
   }

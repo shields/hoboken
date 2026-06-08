@@ -376,6 +376,50 @@ describe("validateConfig", () => {
     );
   });
 
+  test("rejects WLED /g sub-topic colliding with another device topic", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "wled";
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    (data.devices[0]! as Record<string, unknown>).topic = "wled/desk";
+    (data.devices as unknown[]).push({
+      name: "Shadowed",
+      topic: "wled/desk/g",
+      capabilities: ["on_off"],
+    });
+    expect(() => validateConfig(data)).toThrow(
+      'WLED device "wled/desk" sub-topic "wled/desk/g" collides with another device topic',
+    );
+  });
+
+  test("rejects WLED /c sub-topic colliding with another device topic", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "wled";
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    (data.devices[0]! as Record<string, unknown>).topic = "wled/desk";
+    (data.devices as unknown[]).push({
+      name: "Shadowed",
+      topic: "wled/desk/c",
+      capabilities: ["on_off"],
+    });
+    expect(() => validateConfig(data)).toThrow(
+      'WLED device "wled/desk" sub-topic "wled/desk/c" collides with another device topic',
+    );
+  });
+
+  test("accepts WLED device alongside non-colliding topics", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "wled";
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    (data.devices[0]! as Record<string, unknown>).topic = "wled/desk";
+    (data.devices as unknown[]).push({
+      name: "Other Light",
+      topic: "zigbee2mqtt/other",
+      capabilities: ["on_off"],
+    });
+    const config = validateConfig(data);
+    expect(config.devices).toHaveLength(2);
+  });
+
   test("accepts config without metrics", () => {
     const config = validateConfig(validConfig());
     expect(config.metrics).toBeUndefined();
