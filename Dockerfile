@@ -23,9 +23,15 @@ RUN bun install --frozen-lockfile --production
 RUN printf '%s' "${GIT_VERSION}" > VERSION
 
 # Node 24 runs .ts files directly (built-in type stripping, unflagged since 23.6)
-FROM gcr.io/distroless/nodejs24-debian13:latest@sha256:e7192174b2b2e5db60cb8f8fc3dcb8cb8e0456f961387c4e0556118f09dcb7c8
+# :nonroot runs as uid 65532; the HAP (51826) and metrics ports are unprivileged
+# so root is never needed. The k8s manifest sets fsGroup so /persist stays writable.
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:4c11c00f9d72bbe5d42fbcab421229b3c046d949f4e0a8e2d50e88a9b319a9e2
 WORKDIR /app
 COPY --from=build /app/node_modules node_modules/
 COPY --from=build /app/VERSION .
 COPY src/ src/
+# The :nonroot base already runs as uid 65532; set it explicitly so the
+# container also runs unprivileged under `docker run`, independent of the base
+# image default. COPY above runs as root, so the app's files stay root-owned.
+USER 65532:65532
 CMD ["src/main.ts"]

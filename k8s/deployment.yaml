@@ -24,9 +24,23 @@ spec:
       # which cannot resolve cluster service names (e.g. the mqtt:// broker).
       # ClusterFirstWithHostNet restores cluster DNS.
       dnsPolicy: ClusterFirstWithHostNet
+      # The image runs as uid 65532 (distroless :nonroot). fsGroup makes the
+      # persist volume group-writable by that uid so HAP can store pairing data.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: hoboken
           image: hoboken:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           env:
             - name: CONFIG_PATH
               value: /config/config.yaml
