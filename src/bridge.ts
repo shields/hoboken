@@ -248,7 +248,9 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     metricsServer = startMetricsServer(
       config.metrics.port,
       metricsRegister,
-      config.metrics.bind,
+      // The metrics/status endpoint is meant to be scraped across the pod or
+      // host network, so bind all interfaces unless an operator pins an address.
+      config.metrics.bind ?? "0.0.0.0",
       getStatus,
     );
   }

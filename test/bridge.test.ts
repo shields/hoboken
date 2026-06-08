@@ -1419,6 +1419,19 @@ describe("startBridge with metrics", () => {
     await shutdown();
   });
 
+  test("metrics server honors a configured bind address", async () => {
+    const cfg: Config = {
+      ...metricsConfig(),
+      metrics: { port: 0, bind: "127.0.0.1" },
+    };
+    const { metricsPort, shutdown } = await startBridge(cfg);
+    expect(metricsPort).toBeGreaterThan(0);
+
+    const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
+    expect(res.status).toBe(200);
+    await shutdown();
+  });
+
   test("status page reflects bridge state", async () => {
     const cfg = metricsConfig();
     const { metricsPort, shutdown } = await startBridge(cfg);

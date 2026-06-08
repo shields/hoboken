@@ -223,7 +223,10 @@ export function startMetricsServer(
     process.exit(1);
   });
 
-  const host = bind ?? "0.0.0.0";
+  // Default to loopback so callers that omit a bind (e.g. tests) don't expose
+  // the server on every interface. The production path opts into all interfaces
+  // explicitly (see startBridge).
+  const host = bind ?? "127.0.0.1";
   server.listen(port, host, () => {
     const addr = server.address();
     const boundPort = typeof addr === "object" && addr ? addr.port : port;
