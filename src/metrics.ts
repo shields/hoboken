@@ -41,7 +41,8 @@ export interface Metrics {
 
 export function createMetrics(register: Registry): Metrics {
   // prom-client v15: collectDefaultMetrics() returns void (not a stop function).
-  // Its internal timers are cleaned up by register.clear() in dispose() below.
+  // It registers pull-based metrics whose collect() callbacks run on scrape; the
+  // metrics are removed by register.clear() in dispose() below.
   collectDefaultMetrics({ register });
 
   const mqttConnected = new Gauge({
@@ -646,9 +647,7 @@ function renderStatusPage(data: StatusData): string {
   h1 { margin-bottom: 0.25rem; }
   .version { color: #888; font-size: 0.9rem; margin-bottom: 1rem; }
   .status { display: flex; gap: 2rem; align-items: start; margin-bottom: 1.5rem; padding: 1rem; background: #fff; border-radius: 8px; }
-  .status-section { }
   .status-label { font-weight: bold; margin-bottom: 0.25rem; }
-  .status .ok { color: #2a2; font-weight: bold; }
   .status .err { color: #c22; font-weight: bold; }
   .device { background: #fff; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
   .device h2 { margin-top: 0; margin-bottom: 0.15rem; }
@@ -656,7 +655,6 @@ function renderStatusPage(data: StatusData): string {
   .type-badge { font-size: 0.55em; font-weight: normal; color: #888; background: #f0f0f0; padding: 0.05em 0.4em; border-radius: 3px; vertical-align: middle; margin-left: 0.3em; }
   .label { font-weight: bold; margin-top: 0.5rem; }
   .key { color: #999; }
-  .value { font-family: monospace; }
   .na { color: #888; font-style: italic; }
   table { border-collapse: collapse; width: auto; margin-top: 0.25rem; font-family: monospace; font-size: 0.9rem; }
   td { text-align: left; padding: 0.15rem 0.5rem; border-bottom: 1px solid #eee; white-space: pre-line; }
