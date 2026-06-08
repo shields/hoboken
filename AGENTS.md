@@ -2,8 +2,8 @@
 
 ## Project Overview
 
-Minimal HomeKit bridge for Zigbee2MQTT. Uses `@homebridge/hap-nodejs` directly
-(no framework). Connects to MQTT, reads device config from YAML.
+Minimal HomeKit bridge for Zigbee2MQTT and WLED. Uses `@homebridge/hap-nodejs`
+directly (no framework). Connects to MQTT, reads device config from YAML.
 
 ## Toolchain
 
