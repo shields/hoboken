@@ -164,7 +164,7 @@ devices:
     capabilities: [on_off, brightness, color_hs]
 ```
 
-Neither `username` nor `pincode` are secrets. The MAC is broadcast via mDNS.
+Neither `mac` nor `pincode` are secrets. The MAC is broadcast via mDNS.
 The PIN is only used during initial pairing and is not reusable afterward.
 
 ### Bind Interface

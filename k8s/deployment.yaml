@@ -20,6 +20,10 @@ spec:
       #   prometheus.io/path: "/metrics"
     spec:
       hostNetwork: true
+      # With hostNetwork the pod inherits the host's resolv.conf by default,
+      # which cannot resolve cluster service names (e.g. the mqtt:// broker).
+      # ClusterFirstWithHostNet restores cluster DNS.
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: hoboken
           image: hoboken:latest
