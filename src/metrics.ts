@@ -420,6 +420,9 @@ export function msUntilChange(elapsedMs: number): number {
 
 function formatValue(v: unknown): string {
   if (typeof v === "string") return v;
+  // JSON.stringify(undefined) yields the value `undefined`, not a string, which
+  // would make the caller's escapeHtml throw; render it literally instead.
+  if (v === undefined) return "undefined";
   if (typeof v !== "object" || v === null || Array.isArray(v)) {
     return JSON.stringify(v);
   }

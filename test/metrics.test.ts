@@ -1450,6 +1450,18 @@ describe("status page (GET /)", () => {
     ).text();
   }
 
+  test("renders an undefined state value as a literal without throwing", async () => {
+    const body = await renderDevice({
+      name: "Quirky",
+      topic: "zigbee2mqtt/quirky",
+      type: "z2m",
+      capabilities: ["on_off"],
+      state: { mystery: undefined },
+    });
+    expect(body).toContain("mystery");
+    expect(body).toContain("undefined");
+  });
+
   test("WLED bri annotation shows percentage", async () => {
     const body = await renderDevice({
       name: "LED Strip",
