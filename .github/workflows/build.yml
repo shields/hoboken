@@ -35,8 +35,8 @@ jobs:
       - name: Type check
         run: bun run check
 
-      # bun test --coverage runs unit tests; screenshot.test.ts gracefully
-      # skips when Playwright is not installed (no browser on the runner).
+      # bun test --coverage runs unit tests; screenshot.test.ts skips here
+      # because PLAYWRIGHT_IN_DOCKER is unset (it runs in the Docker step below).
       - name: Unit tests
         run: bun run test
 
