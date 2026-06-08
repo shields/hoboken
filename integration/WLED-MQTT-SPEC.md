@@ -151,11 +151,16 @@ Fields are processed in this order within `deserializeState`:
    - **Array of integers**: `[R, G, B]` or `[R, G, B, W]`. Values 0–255.
      Example: `[255, 0, 0]` for red.
 
-   - **Hex string**: `"RRGGBB"` or `"RRGGBBWW"`. Parsed by `colorFromHexString`
-     which uses standard byte order (NOT the same as `colorFromDecOrHexString`):
-     - 6 chars: `RR` = bytes 4–5, `GG` = bytes 2–3, `BB` = bytes 0–1
-     - 8 chars: `RR` = bytes 6–7, `GG` = bytes 4–5, `BB` = bytes 2–3,
-       `WW` = bytes 0–1
+   - **Hex string**: `"RRGGBB"` or `"RRGGBBWW"`. Parsed by `colorFromHexString`,
+     which reads the channels left-to-right (`RRGGBB`/`RRGGBBWW` order). The
+     whole string is parsed as a hex integer and decomposed:
+     - 6 chars: `RR` = chars 0–1, `GG` = chars 2–3, `BB` = chars 4–5
+     - 8 chars: `RR` = chars 0–1, `GG` = chars 2–3, `BB` = chars 4–5,
+       `WW` = chars 6–7
+
+     This differs from `colorFromDecOrHexString` (§3b) only for 8-digit values:
+     there the white byte is the high byte (`WWRRGGBB`), whereas here it is the
+     low byte (`RRGGBBWW`). For 6-digit values both produce identical RGB.
 
    - **Object**: `{"r": R, "g": G, "b": B}` (each field optional, defaults to
      current value). `"w"` field also accepted.

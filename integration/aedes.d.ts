@@ -1,46 +1,15 @@
-// Minimal type declarations for aedes v1, covering only the API this test
-// uses. The package ships its own types, but its `Aedes.on()` is declared
-// solely with literal-event overloads (no `on(event: string, ...)` fallback).
-// The `waitFor` helper subscribes with the event name passed as a `string`,
-// which matches no literal overload, so we add the generic fallback here.
+// aedes ships its own types, but its `Aedes.on()` is declared solely with
+// literal-event overloads (no `on(event: string, ...)` fallback). The
+// `waitFor` helper in wled-roundtrip.ts subscribes with the event name passed
+// as a `string`, which matches no literal overload. Augment the class with the
+// generic EventEmitter fallback so that call type-checks; the packet and
+// subscription types and the literal overloads all come from the package.
 
-/* eslint-disable unicorn/prefer-event-target -- mirrors aedes internal API */
+import "aedes";
 
 declare module "aedes" {
-  import { EventEmitter } from "node:events";
-  import { type Duplex } from "node:stream";
-  import { type IncomingMessage } from "node:http";
-
-  interface AedesPublishPacket {
-    topic: string;
-    payload: Buffer;
-    cmd: "publish";
-    qos?: 0 | 1 | 2;
-    retain?: boolean;
-    dup?: boolean;
-  }
-
-  interface Subscription {
-    topic: string;
-  }
-
-  interface Client {
-    id: string;
-  }
-
-  type Connection = Duplex;
-
-  class Aedes extends EventEmitter {
-    handle: (stream: Connection, request?: IncomingMessage) => Client;
-    on(event: "publish", listener: (packet: AedesPublishPacket, client: Client | null) => void): this;
-    on(event: "subscribe", listener: (subscriptions: Subscription[], client: Client) => void): this;
-    on(event: "closed", listener: () => void): this;
+  interface Aedes {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- base EventEmitter fallback
     on(event: string, listener: (...args: any[]) => void): this;
-    publish(packet: AedesPublishPacket, callback?: (error?: Error | null) => void): void;
-    close(callback?: () => void): void;
-    static createBroker(): Promise<Aedes>;
   }
-
-  export { Aedes, AedesPublishPacket, Client, Subscription };
 }
