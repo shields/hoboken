@@ -13,5 +13,7 @@
 # limitations under the License.
 
 FROM mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948
-RUN npm install -g bun@1.3.9
+# Keep this bun version in sync with the main Dockerfile. Renovate tracks it via
+# a customManager and groups it with oven/bun (see .github/renovate.json5).
+RUN npm install -g bun@1.3.14
 WORKDIR /app

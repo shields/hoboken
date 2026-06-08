@@ -4,6 +4,21 @@
   ignorePaths: [],
   abandonmentThreshold: "2 years",
   platformAutomerge: true,
+  customManagers: [
+    {
+      // The main Dockerfile pins oven/bun (handled by the dockerfile manager),
+      // but Dockerfile.playwright installs bun inline, which no built-in manager
+      // sees. Track that version as the npm "bun" package so it can't drift.
+      customType: "regex",
+      description: "Track the inline bun version in Dockerfile.playwright",
+      // managerFilePatterns is the current field; it replaced fileMatch in
+      // Renovate 40 (older fileMatch configs are auto-migrated).
+      managerFilePatterns: ["/^Dockerfile\\.playwright$/"],
+      matchStrings: ["bun@(?<currentValue>[0-9.]+)"],
+      datasourceTemplate: "npm",
+      depNameTemplate: "bun",
+    },
+  ],
   packageRules: [
     {
       description: "Automerge non-major updates",
@@ -24,6 +39,13 @@
       description: "Group Playwright npm package and Docker image together",
       matchPackageNames: ["playwright", "mcr.microsoft.com/playwright"],
       groupName: "playwright",
+    },
+    {
+      // The oven/bun Docker tag and the bun npm package track the same release,
+      // so bump them in one PR to keep the two Dockerfiles on the same version.
+      description: "Group the bun npm package and oven/bun Docker image together",
+      matchPackageNames: ["bun", "oven/bun"],
+      groupName: "bun",
     },
     {
       description: "Hold eslint at v9 until typescript-eslint supports v10",
