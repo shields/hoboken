@@ -33,6 +33,6 @@
     "playwright": "1.61.0",
     "pngjs": "7.0.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.61.1"
+    "typescript-eslint": "8.62.0"
   }
 }
