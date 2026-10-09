@@ -18,6 +18,17 @@
       datasourceTemplate: "npm",
       depNameTemplate: "bun",
     },
+    {
+      // The github-actions manager doesn't look inside action inputs.
+      customType: "regex",
+      description: "Track the binfmt image pinned in setup-qemu-action steps",
+      managerFilePatterns: ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      matchStrings: [
+        "image: (?<depName>docker\\.io/tonistiigi/binfmt):(?<currentValue>qemu-v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
+      ],
+      datasourceTemplate: "docker",
+      versioningTemplate: "regex:^qemu-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+    },
   ],
   packageRules: [
     {
