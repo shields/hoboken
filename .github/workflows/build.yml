@@ -123,6 +123,7 @@ jobs:
         with:
           # gitcalver requires full history to count commits per date.
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Compute version
         id: version
