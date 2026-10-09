@@ -17,12 +17,14 @@ directly (no framework). Connects to MQTT, reads device config from YAML.
 ## Commands
 
 ```sh
-bun install                       # Install dependencies
-bun run check                     # TypeScript type checking (tsc --noEmit)
-bun run lint                      # ESLint
-bun run test                      # Run all tests with coverage
-bun run start                     # Run with Node.js
-bun run demo:golden-screenshot    # Regenerate status page golden file (Docker)
+bun install               # Install dependencies
+make lint                 # TypeScript type checking (tsc --noEmit) and ESLint
+make test                 # Unit tests with coverage
+make test-integration     # WLED round-trip integration test (Node.js)
+make test-screenshot      # Compare status page against golden file (Docker)
+make run                  # Run with Node.js
+make demo                 # Serve the status page with sample data
+make golden-screenshot    # Regenerate status page golden file (Docker)
 ```
 
 ## Module Architecture
@@ -90,12 +92,12 @@ Each module is independently testable with dependency injection:
 - All HAP objects instantiated directly (no mocking hap-nodejs)
 - MQTT client is the only mock: use `bun:test` module mocking for `mqtt`
 - Use Bun's fake timers for scene auto-reset tests
-- Tests must pass: `bun run lint && bun run check && bun run test`
+- Tests must pass: `make lint test`
 - **Screenshot golden file**: `demo/status-page.png` is a committed screenshot
   of the status page rendered from `demo/fixture.ts` inside a Docker container
   (`Dockerfile.playwright`) for cross-platform determinism. The test in
   `test/screenshot.test.ts` compares a fresh Playwright screenshot against this
-  file with zero pixel tolerance. Both golden generation (`bun run demo:golden-screenshot`)
+  file with zero pixel tolerance. Both golden generation (`make golden-screenshot`)
   and CI testing run inside the same Docker image so fonts and rendering match
   exactly. The `PLAYWRIGHT_IN_DOCKER` env var triggers `--no-sandbox` for
   Chromium inside the container.
@@ -126,7 +128,7 @@ All verification is automated — no manual browser testing. Run before each
 commit:
 
 ```sh
-bun run lint && bun run check && bun run test
+make lint test
 ```
 
 ## Config Validation Rules

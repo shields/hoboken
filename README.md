@@ -122,7 +122,7 @@ The page loads new data in real time using SSE.
 To preview the status page with sample data:
 
 ```sh
-bun run demo:status
+make demo
 ```
 
 ## Config
@@ -202,6 +202,7 @@ of intersecting capabilities.
 
 - [Bun](https://bun.sh/) (package manager and test runner)
 - Node.js 24+ (runtime, for TypeScript type stripping)
+- Make (task runner)
 
 ### Setup
 
@@ -212,11 +213,9 @@ bun install
 ### Commands
 
 ```sh
-bun run check    # TypeScript type checking
-bun run lint     # ESLint (strict + stylistic)
-bun test         # Run tests
-bun test --coverage  # Tests with coverage report
-bun run start    # Run with Node.js
+make lint    # TypeScript type checking and ESLint (strict + stylistic)
+make test    # Run tests with coverage
+make run     # Run with Node.js
 ```
 
 ## Deployment

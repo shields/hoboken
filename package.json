@@ -4,15 +4,6 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
-    "demo:status": "node --disable-warning=ExperimentalWarning demo/status-page.ts",
-    "demo:golden-screenshot": "demo/docker-screenshot.sh",
-    "check": "tsc",
-    "lint": "eslint .",
-    "test": "bun test --coverage",
-    "integration:wled": "node --experimental-strip-types --test integration/wled-roundtrip.ts"
-  },
   "dependencies": {
     "@homebridge/hap-nodejs": "^2.1.0",
     "mqtt": "^5.15.0",

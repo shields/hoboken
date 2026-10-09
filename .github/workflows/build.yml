@@ -5,61 +5,65 @@ on:
   # pull_request covers external fork contributions (requires maintainer approval).
   # Duplicate runs on branches with open PRs are an acceptable tradeoff.
   push:
+    branches: ["**"]
   pull_request:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   test:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    name: test
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # bridge.test.ts invokes gitcalver, which requires full history.
           fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Lint
-        run: bun run lint
+        run: make lint
 
-      - name: Type check
-        run: bun run check
-
-      # bun test --coverage runs unit tests; screenshot.test.ts skips here
-      # because PLAYWRIGHT_IN_DOCKER is unset (it runs in the Docker step below).
+      # screenshot.test.ts skips here because PLAYWRIGHT_IN_DOCKER is unset (it
+      # runs in the Docker step below).
       - name: Unit tests
-        run: bun run test
+        run: make test
 
+      # The runner image's default Node can change; the integration test must
+      # run on the Node major the production image ships.
       - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
 
       - name: Integration test (WLED)
-        run: bun run integration:wled
+        run: make test-integration
         env:
           VERBOSE: "1"
 
       # Screenshot test runs separately inside Docker for font determinism.
       - name: Screenshot test
-        run: demo/docker-screenshot.sh test test/screenshot.test.ts
+        run: make test-screenshot
 
   build:
+    name: build
+    # On main, publish builds the same image.
+    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
     needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    runs-on: ubuntu-26.04
 
     env:
       REGISTRY: ghcr.io
@@ -67,24 +71,27 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # gitcalver requires full history to count commits per date.
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Compute version
         id: version
-        run: echo "version=$(./scripts/gitcalver.sh --dirty -dev)" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(./scripts/gitcalver.sh --dirty -dev)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           # Immutable version tags only; no :latest to avoid ambiguity.
@@ -92,7 +99,7 @@ jobs:
             type=raw,value=${{ steps.version.outputs.version }}
 
       - name: Build image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -102,16 +109,15 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          # Only write cache from main to avoid evicting it with branch builds.
-          cache-to: ''
 
   publish:
+    name: publish
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
-      packages: write
+      packages: write # Push the image to GHCR.
 
     env:
       REGISTRY: ghcr.io
@@ -119,7 +125,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # gitcalver requires full history to count commits per date.
           fetch-depth: 0
@@ -127,17 +133,20 @@ jobs:
 
       - name: Compute version
         id: version
-        run: echo "version=$(./scripts/gitcalver.sh --dirty -dev)" >> "$GITHUB_OUTPUT"
+        # Without --dirty, gitcalver fails on a dirty or off-main checkout, so
+        # only clean main versions publish.
+        run: |
+          version=$(./scripts/gitcalver.sh)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to Container Registry
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -145,7 +154,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           # Immutable version tags only; no :latest to avoid ambiguity.
@@ -153,7 +162,7 @@ jobs:
             type=raw,value=${{ steps.version.outputs.version }}
 
       - name: Build image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -164,4 +173,4 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           # Only write cache from main to avoid evicting it with branch builds.
-          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
+          cache-to: type=gha,mode=max

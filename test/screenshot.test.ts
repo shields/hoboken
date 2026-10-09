@@ -28,7 +28,7 @@ describe.skipIf(!process.env.PLAYWRIGHT_IN_DOCKER)("screenshot golden file", () 
     async () => {
       if (!existsSync(GOLDEN_FILE)) {
         throw new Error(
-          `Golden file ${GOLDEN_FILE} not found. Run \`bun run demo:golden-screenshot\` to generate it.`,
+          `Golden file ${GOLDEN_FILE} not found. Run \`make golden-screenshot\` to generate it.`,
         );
       }
 
@@ -62,7 +62,7 @@ describe.skipIf(!process.env.PLAYWRIGHT_IN_DOCKER)("screenshot golden file", () 
         await writeFile("demo/status-page-diff.png", PNG.sync.write(diff));
         throw new Error(
           `Screenshot differs by ${String(numDiff)} pixels. ` +
-            "Actual and diff saved to demo/. Run `bun run demo:golden-screenshot` to regenerate.",
+            "Actual and diff saved to demo/. Run `make golden-screenshot` to regenerate.",
         );
       }
     },
