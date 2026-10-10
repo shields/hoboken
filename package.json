@@ -23,7 +23,7 @@
     "pixelmatch": "8.0.0",
     "playwright": "1.63.0",
     "pngjs": "7.0.0",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "typescript-eslint": "8.71.1"
   }
 }
