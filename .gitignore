@@ -1,4 +1,5 @@
 node_modules/
+.build/
 coverage/
 VERSION
 demo/status-page-actual.png

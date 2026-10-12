@@ -51,7 +51,10 @@ jobs:
         with:
           node-version: 24
 
-      - name: Integration test (WLED)
+      - name: Install MQTT broker build dependencies
+        run: make test-broker-deps
+
+      - name: Integration tests (WLED and mattress)
         run: make test-integration
         env:
           VERBOSE: "1"

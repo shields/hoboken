@@ -247,6 +247,7 @@ of intersecting capabilities.
 - [Bun](https://bun.sh/) (package manager and test runner)
 - Node.js 24+ (runtime, for TypeScript type stripping)
 - Make (task runner)
+- A C compiler, CMake, OpenSSL headers, and cJSON headers for integration tests
 
 ### Setup
 
@@ -261,6 +262,18 @@ make lint    # TypeScript type checking and ESLint (strict + stylistic)
 make test    # Run tests with coverage
 make run     # Run with Node.js
 ```
+
+On Debian or Ubuntu, install the broker build packages with
+`make test-broker-deps`. Then run `make test-integration` on Node.js 24.
+The target builds the pinned Mosquitto release and runs the existing WLED
+tests plus mattress tests over paired HAP HTTP and MQTT 5 connections.
+Use `NODE=/path/to/node make test-integration` to select the runtime.
+
+Mattress integration covers reported state on both zones, fan-write
+ordering, stateful preheat, rejected and retained results, session changes,
+the full HAP write deadline, and broker restart without command replay.
+The simulated MQTT controller exercises the contract; actual Sunbeam, Home
+app, and Siri qualification still requires hardware.
 
 ## Deployment
 
