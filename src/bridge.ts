@@ -29,6 +29,12 @@ import { fileURLToPath } from "node:url";
 import { connect } from "mqtt";
 import { Registry } from "prom-client";
 import type { Config } from "./config.ts";
+import { MattressMqtt } from "./mattress-mqtt.ts";
+import type { MattressSource } from "./mattress-source.ts";
+import {
+  createMattressAccessories,
+  type MattressAccessories,
+} from "./mattress-accessories.ts";
 import * as log from "./log.ts";
 import {
   createFanAccessory,
@@ -65,6 +71,7 @@ export function buildStatusData(
   mqtt: { url: string; connected: boolean },
   hapConnections: HapConnection[],
   version: string,
+  mattress?: MattressSource,
 ): StatusData {
   return {
     mqtt,
@@ -78,6 +85,25 @@ export function buildStatusData(
       ...(d.scenes ? { scenes: d.scenes } : {}),
       state: stateCache.get(d.topic) ?? null,
     })),
+    ...(config.mattresses?.length
+      ? {
+          mattresses: config.mattresses.map((zone) => {
+            const topic = `${zone.prefix}/${zone.controller}/${zone.zone}`;
+            let state = null;
+            try {
+              state = mattress?.getState(topic) ?? null;
+            } catch (error: unknown) {
+              if (!(error instanceof HapStatusError)) throw error;
+            }
+            return {
+              name: zone.name,
+              topic,
+              state,
+              pending: mattress?.pendingCount(topic) ?? 0,
+            };
+          }),
+        }
+      : {}),
   };
 }
 
@@ -92,6 +118,8 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   const stateCache = new Map<string, RawState>();
   const lastColorPublish = new Map<string, number>();
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let mattress: MattressMqtt | undefined;
+  const mattressAccessories: MattressAccessories[] = [];
 
   function cancelAllRetries(): void {
     for (const timer of pendingGetTimers.values()) {
@@ -101,7 +129,10 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   }
 
   function publishGet(device: Config["devices"][number]): void {
-    mqttClient.publish(`${device.topic}/get`, JSON.stringify({ state: "" }));
+    prePublishCheck().publish(
+      `${device.topic}/get`,
+      JSON.stringify({ state: "" }),
+    );
     metrics?.z2mGetRequestsTotal.inc();
     metrics?.mqttMessagesPublished.inc();
   }
@@ -123,7 +154,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       Math.max(baseDelay, GET_RETRY_INITIAL_MS);
     const delay = baseDelay + jitter;
     const timer = setTimeout(() => {
-      if (stateCache.has(device.topic) || !mqttClient.connected) return;
+      if (stateCache.has(device.topic) || !mqttClient?.connected) return;
       publishGet(device);
       scheduleGetRetry(device, attempt + 1);
     }, delay);
@@ -150,29 +181,61 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     // but mqtt.connect() accepts (e.g. bare hostnames).
     sanitizedUrl = config.mqtt.url.replace(/\/\/[^@/]*@/, "//");
   }
-  log.log(`Connecting to MQTT at ${sanitizedUrl}`);
+  if (config.devices.length) log.log(`Connecting to MQTT at ${sanitizedUrl}`);
 
   // mqtt.connect() is more lenient than new URL() — it handles bare hostnames,
   // missing protocols, etc. — so an unparseable URL here is not an error.
-  const mqttClient = connect(config.mqtt.url);
+  const mqttClient = config.devices.length
+    ? connect(config.mqtt.url)
+    : undefined;
 
-  mqttClient.on("error", (err) => {
+  function mqttConnected(): boolean {
+    return (
+      (config.devices.length === 0 || mqttClient?.connected === true) &&
+      (mattress?.connected ?? (config.mattresses?.length ?? 0) === 0)
+    );
+  }
+
+  function updateMetrics(): void {
+    metrics?.mqttConnected.set(mqttConnected() ? 1 : 0);
+    let unknown = config.devices.filter(
+      (device) => !stateCache.has(device.topic),
+    ).length;
+    for (const zone of config.mattresses ?? []) {
+      try {
+        if (mattress) {
+          mattress.source.getState(
+            `${zone.prefix}/${zone.controller}/${zone.zone}`,
+          );
+        } else {
+          unknown++;
+        }
+      } catch (error: unknown) {
+        if (!(error instanceof HapStatusError)) throw error;
+        unknown++;
+      }
+    }
+    metrics?.devicesStateUnknown.set(unknown);
+    metricsServer?.notifyStateChange();
+  }
+
+  mqttClient?.on("error", (err) => {
     log.error(`MQTT error: ${err.message}`);
     metrics?.mqttErrors.inc();
   });
 
-  mqttClient.on("close", () => {
+  mqttClient?.on("close", () => {
     log.log("MQTT connection closed");
     cancelAllRetries();
     metrics?.mqttConnected.set(0);
     metricsServer?.notifyStateChange();
   });
 
-  mqttClient.on("reconnect", () => {
+  mqttClient?.on("reconnect", () => {
     log.log("MQTT reconnecting");
   });
 
-  mqttClient.on("offline", () => {
+  mqttClient?.on("offline", () => {
     log.log("MQTT client offline");
     cancelAllRetries();
     metrics?.mqttConnected.set(0);
@@ -180,14 +243,14 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   });
 
   const prePublishCheck = () => {
-    if (!mqttClient.connected) {
+    if (!mqttClient?.connected) {
       throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
+    return mqttClient;
   };
 
   const rawPublish = (mqttTopic: string, message: string) => {
-    prePublishCheck();
-    mqttClient.publish(mqttTopic, message);
+    prePublishCheck().publish(mqttTopic, message);
     metrics?.mqttMessagesPublished.inc();
   };
 
@@ -252,9 +315,10 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       buildStatusData(
         config,
         stateCache,
-        { url: sanitizedUrl, connected: mqttClient.connected },
+        { url: sanitizedUrl, connected: mqttConnected() },
         [...hapConnections.values()],
         version,
+        mattress?.source,
       );
     metricsServer = startMetricsServer(
       config.metrics.port,
@@ -347,13 +411,58 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     }
   }
 
-  metrics?.devicesConfigured.set(config.devices.length);
-  metrics?.devicesStateUnknown.set(config.devices.length);
+  if (config.mattresses?.length) {
+    const zoneTopics = new Map(
+      config.mattresses.flatMap((zone) => {
+        const topic = `${zone.prefix}/${zone.controller}/${zone.zone}`;
+        return [
+          [topic, topic],
+          [`${topic}/result`, topic],
+        ];
+      }),
+    );
+    mattress = new MattressMqtt(config.mqtt.url, config.mattresses, {
+      changed: () => {
+        for (const accessories of mattressAccessories) accessories.update();
+        updateMetrics();
+      },
+      received: (topic) => {
+        const zone = zoneTopics.get(topic);
+        if (zone) metrics?.mqttMessagesReceived.labels(zone).inc();
+      },
+      published: () => {
+        metrics?.mqttMessagesPublished.inc();
+      },
+      failed: () => {
+        metrics?.mqttErrors.inc();
+      },
+    });
+    for (const zone of config.mattresses) {
+      const accessories = createMattressAccessories(zone, mattress.source);
+      for (const [accessory, kind] of [
+        [accessories.fan, "Mattress Fan"],
+        [accessories.preheat, "Mattress Preheat"],
+      ] as const) {
+        setAccessoryInfo(
+          accessory,
+          "Hoboken",
+          kind,
+          `${zone.controller}/${zone.zone}/${kind}`,
+          version,
+        );
+        bridge.addBridgedAccessory(accessory);
+      }
+      mattressAccessories.push(accessories);
+    }
+  }
+  metrics?.devicesConfigured.set(
+    config.devices.length + (config.mattresses?.length ?? 0),
+  );
+  updateMetrics();
 
-  mqttClient.on("connect", () => {
+  mqttClient?.on("connect", () => {
     log.log("MQTT connected");
     cancelAllRetries();
-    metrics?.mqttConnected.set(1);
     const topics = config.devices.flatMap((d) => {
       switch (d.type) {
         case "z2m":
@@ -364,10 +473,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     });
     mqttClient.subscribe(topics);
 
-    metrics?.devicesStateUnknown.set(
-      config.devices.filter((d) => !stateCache.has(d.topic)).length,
-    );
-    metricsServer?.notifyStateChange();
+    updateMetrics();
 
     for (const device of config.devices) {
       switch (device.type) {
@@ -392,17 +498,14 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     log.log(
       `State update for "${entry.device.name}": ${JSON.stringify(rawPartial)}`,
     );
-    if (!stateCache.has(deviceTopic)) {
-      metrics?.devicesStateUnknown.dec();
-    }
     const merged = { ...stateCache.get(deviceTopic), ...rawPartial };
     stateCache.set(deviceTopic, merged);
+    updateMetrics();
     const pendingTimer = pendingGetTimers.get(deviceTopic);
     if (pendingTimer !== undefined) {
       clearTimeout(pendingTimer);
       pendingGetTimers.delete(deviceTopic);
     }
-    metricsServer?.notifyStateChange();
 
     const lastPub = lastColorPublish.get(deviceTopic);
     const suppressing =
@@ -418,7 +521,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     }
   }
 
-  mqttClient.on("message", (topic, payload) => {
+  mqttClient?.on("message", (topic, payload) => {
     // Try WLED sub-topic lookup first.
     const wled = wledTopicMap.get(topic);
     if (wled !== undefined) {
@@ -552,14 +655,17 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     ...(metricsPort === undefined ? {} : { metricsPort }),
     shutdown: async () => {
       cancelAllRetries();
+      await mattress?.stop();
       log.log("Shutting down: unpublishing bridge (sending mDNS goodbye)");
       await bridge.unpublish();
       log.log("Shutting down: closing MQTT connection");
-      await new Promise<void>((resolve) => {
-        mqttClient.end(false, () => {
-          resolve();
+      if (mqttClient) {
+        await new Promise<void>((resolve) => {
+          mqttClient.end(false, () => {
+            resolve();
+          });
         });
-      });
+      }
       const ms = metricsServer;
       if (ms) {
         log.log("Shutting down: stopping metrics server");
