@@ -1,4 +1,5 @@
 [test]
+coverage = true
 preload = ["./test/preload.ts"]
 coverageThreshold = { lines = 1.0, functions = 1.0, statements = 1.0 }
 # https://bun.sh/docs/test/configuration#coverage-path-ignore-patterns

@@ -53,23 +53,23 @@ rather than an MQTT client directly.
 Each device has a `type` field (defaults to `"z2m"`) that selects the MQTT
 protocol:
 
-| Type   | Protocol              | MQTT Format                    |
-| ------ | --------------------- | ------------------------------ |
-| `z2m`  | Zigbee2MQTT (default) | JSON on `<topic>`              |
-| `wled` | WLED MQTT API         | Sub-topics `/g`, `/c`, `/api`  |
+| Type   | Protocol              | MQTT Format                   |
+| ------ | --------------------- | ----------------------------- |
+| `z2m`  | Zigbee2MQTT (default) | JSON on `<topic>`             |
+| `wled` | WLED MQTT API         | Sub-topics `/g`, `/c`, `/api` |
 
 ### Capabilities
 
 Devices declare capabilities in `config.yaml`:
 
-| Capability   | HomeKit Characteristic | Z2M Conversion               | WLED Conversion           |
-| ------------ | ---------------------- | ---------------------------- | ------------------------- |
-| `on_off`     | `On`                   | boolean, always present      | boolean                   |
-| `brightness` | `Brightness`           | Z2M 0–254 ↔ HomeKit 0–100    | WLED 0–255 ↔ HomeKit 0–100 |
-| `color_temp` | `ColorTemperature`     | mireds, no conversion needed | not supported             |
-| `color_hs`   | `Hue` + `Saturation`   | ranges match, no conversion  | HSV ↔ RGB conversion       |
-| `fan`        | `Active` (FanV2)       | `fan_state` ON/OFF ↔ 1/0     | not supported             |
-| `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ speed thirds  | not supported             |
+| Capability   | HomeKit Characteristic             | Z2M Conversion               | WLED Conversion            |
+| ------------ | ---------------------------------- | ---------------------------- | -------------------------- |
+| `on_off`     | `On`                               | boolean, always present      | boolean                    |
+| `brightness` | `Brightness`                       | Z2M 0–254 ↔ HomeKit 0–100    | WLED 0–255 ↔ HomeKit 0–100 |
+| `color_temp` | `ColorTemperature`                 | mireds, no conversion needed | not supported              |
+| `color_hs`   | `Hue` + `Saturation`               | ranges match, no conversion  | HSV ↔ RGB conversion       |
+| `fan`        | `Active` (FanV2)                   | `fan_state` ON/OFF ↔ 1/0     | not supported              |
+| `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ speed thirds    | not supported              |
 
 ### Scenes
 

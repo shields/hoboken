@@ -32,14 +32,14 @@ applied before the hue change propagated through the Zigbee radio.
 
 ## Survey of Coalescing Strategies
 
-| Plugin | Timer | Strategy | Source |
-|---|---|---|---|
-| homebridge-z2m | 0ms (`nextTick`) | Flag-based: wait for both H+S, then flush | [src/converters/light.ts](https://github.com/itavero/homebridge-z2m/blob/master/src/converters/light.ts) |
-| homebridge-hue | 20ms (0–500ms) | `setTimeout` debounce, accumulate `desiredState` | [lib/HueBridge.js](https://github.com/ebaauw/homebridge-hue/blob/master/lib/HueBridge.js) |
-| homebridge-deconz | 100ms (0–500ms) | Counter-based async debounce | [lib/DeconzAccessory/Light.js](https://github.com/ebaauw/homebridge-deconz/blob/master/lib/DeconzAccessory/Light.js) |
-| homebridge-tplink | 100ms | `deferAndCombine` utility | [src/utils/deferAndCombine.ts](https://github.com/plasticrake/homebridge-tplink-smarthome/blob/master/src/utils/deferAndCombine.ts) |
-| Home Assistant | 10ms | `async_call_later` with "newest wins" conflict resolution | [homeassistant/components/homekit/type_lights.py](https://github.com/home-assistant/core/blob/dev/homeassistant/components/homekit/type_lights.py) |
-| homebridge-mqttthing | N/A | Single combined HSV MQTT topic | [docs/Configuration.md](https://github.com/arachnetech/homebridge-mqttthing/blob/master/docs/Configuration.md) |
+| Plugin               | Timer            | Strategy                                                  | Source                                                                                                                                             |
+| -------------------- | ---------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| homebridge-z2m       | 0ms (`nextTick`) | Flag-based: wait for both H+S, then flush                 | [src/converters/light.ts](https://github.com/itavero/homebridge-z2m/blob/master/src/converters/light.ts)                                           |
+| homebridge-hue       | 20ms (0–500ms)   | `setTimeout` debounce, accumulate `desiredState`          | [lib/HueBridge.js](https://github.com/ebaauw/homebridge-hue/blob/master/lib/HueBridge.js)                                                          |
+| homebridge-deconz    | 100ms (0–500ms)  | Counter-based async debounce                              | [lib/DeconzAccessory/Light.js](https://github.com/ebaauw/homebridge-deconz/blob/master/lib/DeconzAccessory/Light.js)                               |
+| homebridge-tplink    | 100ms            | `deferAndCombine` utility                                 | [src/utils/deferAndCombine.ts](https://github.com/plasticrake/homebridge-tplink-smarthome/blob/master/src/utils/deferAndCombine.ts)                |
+| Home Assistant       | 10ms             | `async_call_later` with "newest wins" conflict resolution | [homeassistant/components/homekit/type_lights.py](https://github.com/home-assistant/core/blob/dev/homeassistant/components/homekit/type_lights.py) |
+| homebridge-mqttthing | N/A              | Single combined HSV MQTT topic                            | [docs/Configuration.md](https://github.com/arachnetech/homebridge-mqttthing/blob/master/docs/Configuration.md)                                     |
 
 ## Why `process.nextTick`
 
@@ -153,15 +153,16 @@ to HomeKit, causing a visible snap to the wrong color before settling.
 
 ### Survey of write-back handling
 
-| Project | Suppresses? | Mechanism | Window | Scope |
-|---|---|---|---|---|
-| homebridge-hue | **Yes** | `recentlyUpdated` flag + `setTimeout` | 500ms | bri, ct, xy |
-| homebridge-deconz | **Yes** | `recentlyUpdated` flag + `await timeout` | 500ms | bri, ct, xy |
-| homebridge-mqttthing | Partial | Optional `debounceRecvms` (unconditional) | configurable | all properties |
-| homebridge-z2m | No | — | — | — |
-| Home Assistant | No | pyhap value-changed dedup only | — | — |
+| Project              | Suppresses? | Mechanism                                 | Window       | Scope          |
+| -------------------- | ----------- | ----------------------------------------- | ------------ | -------------- |
+| homebridge-hue       | **Yes**     | `recentlyUpdated` flag + `setTimeout`     | 500ms        | bri, ct, xy    |
+| homebridge-deconz    | **Yes**     | `recentlyUpdated` flag + `await timeout`  | 500ms        | bri, ct, xy    |
+| homebridge-mqttthing | Partial     | Optional `debounceRecvms` (unconditional) | configurable | all properties |
+| homebridge-z2m       | No          | —                                         | —            | —              |
+| Home Assistant       | No          | pyhap value-changed dedup only            | —            | —              |
 
 Sources:
+
 - homebridge-hue: [`lib/HueLight.js`](https://github.com/ebaauw/homebridge-hue/blob/master/lib/HueLight.js) — `recentlyUpdated` flag in `_put()`, checked in `checkBri()`, `checkCt()`, `checkXy()`
 - homebridge-deconz: [`lib/DeconzService/LightsResource.js`](https://github.com/ebaauw/homebridge-deconz/blob/master/lib/DeconzService/LightsResource.js) — identical pattern
 - homebridge-mqttthing: [`lib/handlers.js`](https://github.com/arachnetech/homebridge-mqttthing/blob/master/lib/handlers.js) — `debounceRecvms` config
@@ -207,13 +208,13 @@ WW/CW LEDs, which produces inferior white quality.
 A future enhancement could map these specific preset values to
 `color_temp` writes. Observed preset values from the Home app:
 
-| Preset | Hue | Sat | Z2M color_temp |
-|--------|-----|-----|----------------|
-| Coolest | 222 | 20 | 138 |
-| Cool | 251 | 5 | 163 |
-| Neutral | 28 | 23 | 207 |
-| Warm | 30 | 48 | 265 |
-| Warmest | 30 | 67 | 325 |
+| Preset  | Hue | Sat | Z2M color_temp |
+| ------- | --- | --- | -------------- |
+| Coolest | 222 | 20  | 138            |
+| Cool    | 251 | 5   | 163            |
+| Neutral | 28  | 23  | 207            |
+| Warm    | 30  | 48  | 265            |
+| Warmest | 30  | 67  | 325            |
 
 The Home app also provides a color temperature slider as a tab in the
 color selection popup. Converting all the values from this would

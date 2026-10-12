@@ -101,19 +101,26 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   }
 
   function publishGet(device: Config["devices"][number]): void {
-    mqttClient.publish(
-      `${device.topic}/get`,
-      JSON.stringify({ state: "" }),
-    );
+    mqttClient.publish(`${device.topic}/get`, JSON.stringify({ state: "" }));
     metrics?.z2mGetRequestsTotal.inc();
     metrics?.mqttMessagesPublished.inc();
   }
 
-  function scheduleGetRetry(device: Config["devices"][number], attempt: number): void {
-    const baseDelay = attempt === 0
-      ? 0
-      : Math.min(GET_RETRY_INITIAL_MS * Math.SQRT2 ** (attempt - 1), GET_RETRY_MAX_MS);
-    const jitter = Math.random() * GET_JITTER_FRACTION * Math.max(baseDelay, GET_RETRY_INITIAL_MS);
+  function scheduleGetRetry(
+    device: Config["devices"][number],
+    attempt: number,
+  ): void {
+    const baseDelay =
+      attempt === 0
+        ? 0
+        : Math.min(
+            GET_RETRY_INITIAL_MS * Math.SQRT2 ** (attempt - 1),
+            GET_RETRY_MAX_MS,
+          );
+    const jitter =
+      Math.random() *
+      GET_JITTER_FRACTION *
+      Math.max(baseDelay, GET_RETRY_INITIAL_MS);
     const delay = baseDelay + jitter;
     const timer = setTimeout(() => {
       if (stateCache.has(device.topic) || !mqttClient.connected) return;
@@ -196,7 +203,11 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
         mqttTopic(topic),
         JSON.stringify(convert(payload, stateCache.get(topic))),
       );
-      if ("hue" in payload || "saturation" in payload || "color_temp" in payload) {
+      if (
+        "hue" in payload ||
+        "saturation" in payload ||
+        "color_temp" in payload
+      ) {
         lastColorPublish.set(topic, Date.now());
       }
     };
@@ -306,14 +317,24 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       case "z2m":
         break;
       case "wled":
-        wledTopicMap.set(`${device.topic}/g`, { device: device.topic, sub: "g" });
-        wledTopicMap.set(`${device.topic}/c`, { device: device.topic, sub: "c" });
+        wledTopicMap.set(`${device.topic}/g`, {
+          device: device.topic,
+          sub: "g",
+        });
+        wledTopicMap.set(`${device.topic}/c`, {
+          device: device.topic,
+          sub: "c",
+        });
         break;
     }
 
     if (device.scenes) {
       for (const scene of device.scenes) {
-        const sceneAccessory = createSceneAccessory(device, scene, scenePublish);
+        const sceneAccessory = createSceneAccessory(
+          device,
+          scene,
+          scenePublish,
+        );
         setAccessoryInfo(
           sceneAccessory,
           "Hoboken",
@@ -385,8 +406,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
 
     const lastPub = lastColorPublish.get(deviceTopic);
     const suppressing =
-      lastPub !== undefined &&
-      Date.now() - lastPub < WRITE_BACK_SUPPRESSION_MS;
+      lastPub !== undefined && Date.now() - lastPub < WRITE_BACK_SUPPRESSION_MS;
     const hkState = protocols[entry.device.type].toHomeKit(rawPartial);
     if (suppressing) {
       delete hkState.hue;
@@ -394,11 +414,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       delete hkState.color_temp;
     }
     if (Object.keys(hkState).length > 0) {
-      entry.updateState(
-        entry.accessory,
-        hkState,
-        entry.device.capabilities,
-      );
+      entry.updateState(entry.accessory, hkState, entry.device.capabilities);
     }
   }
 
@@ -489,10 +505,12 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       // connection-opened. A connection that opened in the window between the
       // HAP server starting to listen and this listener being attached is not
       // tracked, and decrementing for it would drive the gauge negative.
-      if (hapConnections.delete(connection)) {
-        metrics?.hapConnectionsActive.dec();
-        metricsServer?.notifyStateChange();
+      if (!hapConnections.delete(connection)) {
+        return;
       }
+
+      metrics?.hapConnectionsActive.dec();
+      metricsServer?.notifyStateChange();
     });
 
     // EventedHTTPServer is the internal HTTP layer that emits connection-opened

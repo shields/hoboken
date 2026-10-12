@@ -20,11 +20,11 @@ passthrough over MQTT are out of scope.
 On connect, the device subscribes (QoS 0) to three topics under its device
 prefix:
 
-| Topic              | Purpose           |
-| ------------------ | ----------------- |
-| `{topic}`          | Brightness/power  |
-| `{topic}/col`      | Color command      |
-| `{topic}/api`      | JSON API           |
+| Topic         | Purpose          |
+| ------------- | ---------------- |
+| `{topic}`     | Brightness/power |
+| `{topic}/col` | Color command    |
+| `{topic}/api` | JSON API         |
 
 If a group topic is configured, the same three suffixes are also subscribed under
 the group prefix. The simulator need not implement group topics.
@@ -47,11 +47,11 @@ Immediately after subscribing, the device publishes its full current state (see
 
 The device maintains three pieces of state relevant to MQTT:
 
-| Variable   | Type       | Range   | Default           | Description                        |
-| ---------- | ---------- | ------- | ----------------- | ---------------------------------- |
-| `bri`      | integer    | 0–255   | 128               | Current brightness                 |
-| `briLast`  | integer    | 1–255   | 128               | Brightness before last turn-off    |
-| `col`      | byte[3]    | 0–255 ea| `[255, 160, 0]`   | Primary color (RGB)                |
+| Variable  | Type    | Range    | Default         | Description                     |
+| --------- | ------- | -------- | --------------- | ------------------------------- |
+| `bri`     | integer | 0–255    | 128             | Current brightness              |
+| `briLast` | integer | 1–255    | 128             | Brightness before last turn-off |
+| `col`     | byte[3] | 0–255 ea | `[255, 160, 0]` | Primary color (RGB)             |
 
 ### Power semantics
 
@@ -65,6 +65,7 @@ The device maintains three pieces of state relevant to MQTT:
 ### Toggle
 
 Toggle checks current `bri`:
+
 - If `bri === 0`: set `bri = briLast` (turn on).
 - If `bri > 0`: set `briLast = bri`, then set `bri = 0` (turn off).
 

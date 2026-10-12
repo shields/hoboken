@@ -20,15 +20,13 @@ export function isWhite(h: number, s: number): boolean {
 export function z2mBrightnessToHomeKit(z2m: number): number {
   if (Number.isNaN(z2m)) throw new RangeError("brightness must be a number");
   const clamped = Math.max(0, Math.min(254, z2m));
-  if (clamped === 0) return 0;
-  return Math.round(((clamped - 1) / 253) * 99 + 1);
+  return clamped === 0 ? 0 : Math.round(((clamped - 1) / 253) * 99 + 1);
 }
 
 export function homeKitBrightnessToZ2M(hk: number): number {
   if (Number.isNaN(hk)) throw new RangeError("brightness must be a number");
   const clamped = Math.max(0, Math.min(100, hk));
-  if (clamped === 0) return 0;
-  return Math.round(((clamped - 1) / 99) * 253 + 1);
+  return clamped === 0 ? 0 : Math.round(((clamped - 1) / 99) * 253 + 1);
 }
 
 // HAP ColorTemperature characteristic only accepts 140–500 mireds.
@@ -63,8 +61,7 @@ export function z2mFanModeToHomeKit(mode: string): Partial<HomeKitState> {
 export function homeKitSpeedToZ2mFanMode(speed: number): string {
   if (speed <= 0) return "off";
   if (speed <= 33) return "low";
-  if (speed <= 67) return "medium";
-  return "high";
+  return speed <= 67 ? "medium" : "high";
 }
 
 export function wledBrightnessToHomeKit(wled: number): number {
@@ -77,10 +74,7 @@ export function homeKitBrightnessToWled(hk: number): number {
   return Math.round((Math.max(0, Math.min(100, hk)) / 100) * 255);
 }
 
-export function hsToRgb(
-  h: number,
-  s: number,
-): [number, number, number] {
+export function hsToRgb(h: number, s: number): [number, number, number] {
   const c = s / 100;
   const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
   const m = 1 - c;
@@ -147,8 +141,7 @@ export function z2mToHomeKit(raw: RawState): HomeKitState {
   if ("color" in raw) {
     const color = raw.color as Record<string, unknown> | null;
     if (typeof color?.hue === "number") hk.hue = color.hue;
-    if (typeof color?.saturation === "number")
-      hk.saturation = color.saturation;
+    if (typeof color?.saturation === "number") hk.saturation = color.saturation;
   }
   if ("fan_state" in raw) hk.active = raw.fan_state === "ON" ? 1 : 0;
   if ("fan_mode" in raw) {
@@ -161,8 +154,7 @@ export function z2mToHomeKit(raw: RawState): HomeKitState {
 export function wledToHomeKit(raw: RawState): HomeKitState {
   const hk: HomeKitState = {};
   if ("on" in raw) hk.on = raw.on === true;
-  if ("bri" in raw)
-    hk.brightness = wledBrightnessToHomeKit(raw.bri as number);
+  if ("bri" in raw) hk.brightness = wledBrightnessToHomeKit(raw.bri as number);
   if ("col" in raw) {
     const col = raw.col;
     if (Array.isArray(col) && col.length >= 3) {
@@ -204,17 +196,13 @@ export function homeKitToZ2m(
     }
   }
 
-  if ("active" in payload)
-    z2m.fan_state = payload.active ? "ON" : "OFF";
+  if ("active" in payload) z2m.fan_state = payload.active ? "ON" : "OFF";
 
   if ("target_fan_state" in payload && payload.target_fan_state === 1) {
     z2m.fan_mode = "smart";
   } else if ("rotation_speed" in payload) {
     z2m.fan_mode = homeKitSpeedToZ2mFanMode(payload.rotation_speed as number);
-  } else if (
-    "target_fan_state" in payload &&
-    payload.target_fan_state === 0
-  ) {
+  } else if ("target_fan_state" in payload && payload.target_fan_state === 0) {
     const cachedMode = cachedRaw?.fan_mode as string | undefined;
     z2m.fan_mode =
       cachedMode === "low" ||
@@ -242,8 +230,7 @@ export function homeKitToWled(
     // Fill the missing HS component from cached raw state. This round-trips
     // through RGB→HSV→RGB, which is lossy due to integer rounding at each step.
     const cachedHK = cachedRaw ? wledToHomeKit(cachedRaw) : {};
-    const h =
-      (payload.hue as number | undefined) ?? cachedHK.hue ?? 0;
+    const h = (payload.hue as number | undefined) ?? cachedHK.hue ?? 0;
     const s =
       (payload.saturation as number | undefined) ?? cachedHK.saturation ?? 0;
 
@@ -262,8 +249,9 @@ export function parseWledHexColor(
   const r = Number.parseInt(cleaned.slice(0, 2), 16);
   const g = Number.parseInt(cleaned.slice(2, 4), 16);
   const b = Number.parseInt(cleaned.slice(4, 6), 16);
-  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return undefined;
-  return [r, g, b];
+  return Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)
+    ? undefined
+    : [r, g, b];
 }
 
 export function parseWledMessage(
@@ -272,13 +260,11 @@ export function parseWledMessage(
 ): RawState | undefined {
   if (subTopic === "g") {
     const bri = Number.parseInt(raw, 10);
-    if (Number.isNaN(bri)) return undefined;
-    return { on: bri > 0, bri };
+    return Number.isNaN(bri) ? undefined : { on: bri > 0, bri };
   }
   if (subTopic === "c") {
     const col = parseWledHexColor(raw);
-    if (!col) return undefined;
-    return { col };
+    return col ? { col } : undefined;
   }
   return undefined;
 }

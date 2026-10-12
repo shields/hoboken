@@ -70,7 +70,7 @@ describe("z2mBrightnessToHomeKit", () => {
   });
 
   test("throws on Number.NaN", () => {
-    expect(() => z2mBrightnessToHomeKit(Number.NaN)).toThrow(
+    expect(() => z2mBrightnessToHomeKit(NaN)).toThrow(
       "brightness must be a number",
     );
   });
@@ -98,7 +98,7 @@ describe("homeKitBrightnessToZ2M", () => {
   });
 
   test("throws on Number.NaN", () => {
-    expect(() => homeKitBrightnessToZ2M(Number.NaN)).toThrow(
+    expect(() => homeKitBrightnessToZ2M(NaN)).toThrow(
       "brightness must be a number",
     );
   });
@@ -155,7 +155,7 @@ describe("wledBrightnessToHomeKit", () => {
   });
 
   test("throws on Number.NaN", () => {
-    expect(() => wledBrightnessToHomeKit(Number.NaN)).toThrow(
+    expect(() => wledBrightnessToHomeKit(NaN)).toThrow(
       "brightness must be a number",
     );
   });
@@ -183,7 +183,7 @@ describe("homeKitBrightnessToWled", () => {
   });
 
   test("throws on Number.NaN", () => {
-    expect(() => homeKitBrightnessToWled(Number.NaN)).toThrow(
+    expect(() => homeKitBrightnessToWled(NaN)).toThrow(
       "brightness must be a number",
     );
   });
@@ -491,7 +491,9 @@ describe("homeKitToZ2m", () => {
   });
 
   test("wraps saturation in color object", () => {
-    expect(homeKitToZ2m({ saturation: 80 })).toEqual({ color: { saturation: 80 } });
+    expect(homeKitToZ2m({ saturation: 80 })).toEqual({
+      color: { saturation: 80 },
+    });
   });
 
   test("wraps hue and saturation together", () => {
@@ -501,7 +503,9 @@ describe("homeKitToZ2m", () => {
   });
 
   test("H=0/S=0 with cached color_temp sends color_temp", () => {
-    expect(homeKitToZ2m({ hue: 0, saturation: 0 }, { color_temp: 300 })).toEqual({
+    expect(
+      homeKitToZ2m({ hue: 0, saturation: 0 }, { color_temp: 300 }),
+    ).toEqual({
       color_temp: 300,
     });
   });
@@ -513,7 +517,9 @@ describe("homeKitToZ2m", () => {
   });
 
   test("H=228/S=56 with cached color_temp sends color_temp", () => {
-    expect(homeKitToZ2m({ hue: 228, saturation: 56 }, { color_temp: 300 })).toEqual({
+    expect(
+      homeKitToZ2m({ hue: 228, saturation: 56 }, { color_temp: 300 }),
+    ).toEqual({
       color_temp: 300,
     });
   });
@@ -525,12 +531,13 @@ describe("homeKitToZ2m", () => {
   });
 
   test("converts all fields together", () => {
-    expect(homeKitToZ2m({ on: true, brightness: 80, hue: 120, saturation: 100 }))
-      .toEqual({
-        state: "ON",
-        brightness: 203,
-        color: { hue: 120, saturation: 100 },
-      });
+    expect(
+      homeKitToZ2m({ on: true, brightness: 80, hue: 120, saturation: 100 }),
+    ).toEqual({
+      state: "ON",
+      brightness: 203,
+      color: { hue: 120, saturation: 100 },
+    });
   });
 
   test("returns empty object for empty input", () => {
@@ -547,7 +554,9 @@ describe("homeKitToZ2m", () => {
 
   test("rotation_speed → fan_mode via speed mapping", () => {
     expect(homeKitToZ2m({ rotation_speed: 33 })).toEqual({ fan_mode: "low" });
-    expect(homeKitToZ2m({ rotation_speed: 67 })).toEqual({ fan_mode: "medium" });
+    expect(homeKitToZ2m({ rotation_speed: 67 })).toEqual({
+      fan_mode: "medium",
+    });
     expect(homeKitToZ2m({ rotation_speed: 0 })).toEqual({ fan_mode: "off" });
   });
 
@@ -558,9 +567,9 @@ describe("homeKitToZ2m", () => {
   });
 
   test("target_fan_state: 0 without rotation_speed converts cached speed back", () => {
-    expect(
-      homeKitToZ2m({ target_fan_state: 0 }, { fan_mode: "high" }),
-    ).toEqual({ fan_mode: "high" });
+    expect(homeKitToZ2m({ target_fan_state: 0 }, { fan_mode: "high" })).toEqual(
+      { fan_mode: "high" },
+    );
   });
 
   test("target_fan_state: 0 with cached smart mode defaults to medium", () => {
@@ -729,12 +738,13 @@ describe("homeKitToWled", () => {
   });
 
   test("converts all fields together", () => {
-    expect(homeKitToWled({ on: true, brightness: 100, hue: 0, saturation: 100 }))
-      .toEqual({
-        on: true,
-        bri: 255,
-        seg: [{ col: [[255, 0, 0]] }],
-      });
+    expect(
+      homeKitToWled({ on: true, brightness: 100, hue: 0, saturation: 100 }),
+    ).toEqual({
+      on: true,
+      bri: 255,
+      seg: [{ col: [[255, 0, 0]] }],
+    });
   });
 
   test("returns empty object for empty input", () => {

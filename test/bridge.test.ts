@@ -12,7 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { afterEach, beforeEach, describe, expect, jest, mock, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  jest,
+  mock,
+  test,
+} from "bun:test";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
@@ -230,10 +238,11 @@ describe("startBridge", () => {
       jest.advanceTimersByTime(300);
 
       expect(collectGetMessages()).toHaveLength(2);
-      expect(collectGetMessages().map((p) => p.topic).toSorted()).toEqual([
-        "zigbee2mqtt/bedroom/get",
-        "zigbee2mqtt/living_room/get",
-      ]);
+      expect(
+        collectGetMessages()
+          .map((p) => p.topic)
+          .toSorted((a, b) => a.localeCompare(b)),
+      ).toEqual(["zigbee2mqtt/bedroom/get", "zigbee2mqtt/living_room/get"]);
     } finally {
       jest.useRealTimers();
       Math.random = origRandom;
@@ -548,7 +557,9 @@ describe("startBridge", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.On);
 
-    await on.handleGetRequest().catch(() => { /* expected */ });
+    expect(await Promise.allSettled([on.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(on.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
 
     await shutdown();
@@ -776,9 +787,9 @@ describe("startBridge", () => {
 
         // Color should go through
         expect(service.getCharacteristic(Characteristic.Hue).value).toBe(80);
-        expect(
-          service.getCharacteristic(Characteristic.Saturation).value,
-        ).toBe(60);
+        expect(service.getCharacteristic(Characteristic.Saturation).value).toBe(
+          60,
+        );
 
         await shutdown();
       } finally {
@@ -885,7 +896,9 @@ describe("WLED device support", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.On);
 
-    await on.handleGetRequest().catch(() => { /* expected */ });
+    expect(await Promise.allSettled([on.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(on.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
 
     await shutdown();
@@ -896,11 +909,7 @@ describe("WLED device support", () => {
     mockClient.connected = true;
     mockClient.emit("connect");
 
-    mockClient.emit(
-      "message",
-      "wled/living-room/g",
-      Buffer.from("128"),
-    );
+    mockClient.emit("message", "wled/living-room/g", Buffer.from("128"));
 
     const accessory = bridge.bridgedAccessories.find(
       (a) => a.displayName === "LED Strip",
@@ -916,11 +925,7 @@ describe("WLED device support", () => {
     mockClient.connected = true;
     mockClient.emit("connect");
 
-    mockClient.emit(
-      "message",
-      "wled/living-room/g",
-      Buffer.from("0"),
-    );
+    mockClient.emit("message", "wled/living-room/g", Buffer.from("0"));
 
     const accessory = bridge.bridgedAccessories.find(
       (a) => a.displayName === "LED Strip",
@@ -936,11 +941,7 @@ describe("WLED device support", () => {
     mockClient.connected = true;
     mockClient.emit("connect");
 
-    mockClient.emit(
-      "message",
-      "wled/living-room/c",
-      Buffer.from("#FF0000"),
-    );
+    mockClient.emit("message", "wled/living-room/c", Buffer.from("#FF0000"));
 
     const accessory = bridge.bridgedAccessories.find(
       (a) => a.displayName === "LED Strip",
@@ -972,11 +973,7 @@ describe("WLED device support", () => {
     mockClient.connected = true;
     mockClient.emit("connect");
 
-    mockClient.emit(
-      "message",
-      "wled/living-room/c",
-      Buffer.from("xyz"),
-    );
+    mockClient.emit("message", "wled/living-room/c", Buffer.from("xyz"));
     await shutdown();
   });
 
@@ -1089,11 +1086,7 @@ describe("WLED device support", () => {
     await flush();
 
     // WLED sends back color via /c
-    mockClient.emit(
-      "message",
-      "wled/living-room/c",
-      Buffer.from("#0000FF"),
-    );
+    mockClient.emit("message", "wled/living-room/c", Buffer.from("#0000FF"));
 
     // Color should be suppressed — hue should remain 120
     expect(service.getCharacteristic(Characteristic.Hue).value).toBe(120);
@@ -1120,11 +1113,7 @@ describe("WLED device support", () => {
     await flush();
 
     // WLED sends brightness update via /g during suppression
-    mockClient.emit(
-      "message",
-      "wled/living-room/g",
-      Buffer.from("200"),
-    );
+    mockClient.emit("message", "wled/living-room/g", Buffer.from("200"));
 
     // Brightness (non-color) should pass through even during suppression
     expect(service.getCharacteristic(Characteristic.On).value).toBe(true);
@@ -1138,16 +1127,8 @@ describe("WLED device support", () => {
     mockClient.emit("connect");
 
     // Populate the state cache with WLED brightness and color
-    mockClient.emit(
-      "message",
-      "wled/living-room/g",
-      Buffer.from("128"),
-    );
-    mockClient.emit(
-      "message",
-      "wled/living-room/c",
-      Buffer.from("#FF0000"),
-    );
+    mockClient.emit("message", "wled/living-room/g", Buffer.from("128"));
+    mockClient.emit("message", "wled/living-room/c", Buffer.from("#FF0000"));
 
     const accessory = bridge.bridgedAccessories.find(
       (a) => a.displayName === "LED Strip",
@@ -1216,7 +1197,9 @@ describe("WLED device support", () => {
       jest.advanceTimersByTime(300);
 
       expect(collectGetMessages()).toHaveLength(1);
-      expect(collectGetMessages()[0]!.topic).toBe("zigbee2mqtt/living_room/get");
+      expect(collectGetMessages()[0]!.topic).toBe(
+        "zigbee2mqtt/living_room/get",
+      );
     } finally {
       jest.useRealTimers();
       Math.random = origRandom;
@@ -1587,8 +1570,6 @@ describe("startBridge with metrics", () => {
 
     await shutdown();
   });
-
-
 });
 
 describe("get retry", () => {
