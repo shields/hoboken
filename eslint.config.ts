@@ -22,7 +22,7 @@ export default defineConfig(
   {
     // .claude holds Claude Code's workspace, including worktree copies of this
     // repo under .claude/worktrees/ that would otherwise be linted as source.
-    ignores: ["node_modules/", ".claude/"],
+    ignores: ["node_modules/", ".claude/", ".build/"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
@@ -81,7 +81,7 @@ export default defineConfig(
     },
   },
   {
-    files: ["integration/wled-roundtrip.ts"],
+    files: ["integration/*-roundtrip.ts"],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-non-null-assertion": "off",

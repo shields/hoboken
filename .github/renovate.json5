@@ -6,6 +6,18 @@
   platformAutomerge: true,
   customManagers: [
     {
+      customType: "regex",
+      description: "Track the Mosquitto integration broker release and source commit",
+      managerFilePatterns: ["/^Makefile$/"],
+      matchStrings: [
+        "TEST_BROKER_VERSION = (?<currentValue>v[0-9.]+)\\nTEST_BROKER_REVISION = (?<currentDigest>[a-f0-9]{40})",
+      ],
+      depNameTemplate: "eclipse-mosquitto/mosquitto",
+      // GitHub tags resolves peeled commit digests, keeping both pins together.
+      datasourceTemplate: "github-tags",
+      versioningTemplate: "semver",
+    },
+    {
       // The github-actions manager doesn't look inside action inputs.
       customType: "regex",
       description: "Track the binfmt image pinned in setup-qemu-action steps",

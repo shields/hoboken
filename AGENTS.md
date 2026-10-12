@@ -22,7 +22,8 @@ make fmt                  # ESLint fixes and Prettier for code and non-code file
 bun install               # Install dependencies
 make lint                 # TypeScript type checking (tsc --noEmit) and ESLint
 make test                 # Unit tests with coverage
-make test-integration     # WLED round-trip integration test (Node.js)
+make test-broker-deps     # System packages for the pinned Mosquitto build
+make test-integration     # WLED and mattress round trips (Node.js)
 make test-screenshot      # Compare status page against golden file (Docker)
 make run                  # Run with Node.js
 make demo                 # Serve the status page with sample data

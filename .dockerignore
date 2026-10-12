@@ -1,4 +1,5 @@
 .git
+.build
 node_modules
 test
 k8s
