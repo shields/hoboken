@@ -275,6 +275,13 @@ the full HAP write deadline, and broker restart without command replay.
 The simulated MQTT controller exercises the contract; actual Sunbeam, Home
 app, and Siri qualification still requires hardware.
 
+To qualify the complete controller path, run Tucson's `make homekit` target
+with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 24.
+The `integration/tucson-roundtrip.ts` driver pairs through HAP HTTP and
+checks writes, controller-originated updates, and Tucson shutdown. Both
+repositories require their frozen dependencies; missing prerequisites fail
+qualification.
+
 ## Deployment
 
 ### Container
