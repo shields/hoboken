@@ -19,11 +19,18 @@ cd "$(dirname "$0")/.."
 IMAGE=hoboken-playwright
 docker build -q -t "$IMAGE" - < Dockerfile.playwright
 
+git_mounts=()
+if [[ -f .git ]]; then
+  git_common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+  git_mounts=(-v "$git_common_dir:$git_common_dir:ro")
+fi
+
 # All npm deps are pure JS; host node_modules works in the container.
 docker run --rm --ipc=host \
   -u "$(id -u):$(id -g)" \
   -e HOME=/tmp \
   -e PLAYWRIGHT_IN_DOCKER=1 \
   -v "$PWD:/app" -w /app \
+  ${git_mounts[@]+"${git_mounts[@]}"} \
   "$IMAGE" \
   bun "${@:-demo/screenshot.ts}"
