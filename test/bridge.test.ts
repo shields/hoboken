@@ -34,6 +34,13 @@ import {
   Service,
 } from "@homebridge/hap-nodejs";
 import type { Config } from "../src/config.ts";
+import { MattressSource } from "../src/mattress-source.ts";
+import type {
+  IClientOptions,
+  IClientPublishOptions,
+  IClientSubscribeOptions,
+  ISubscriptionGrant,
+} from "mqtt";
 
 HAPStorage.setCustomStoragePath(
   mkdtempSync(path.join(tmpdir(), "hoboken-test-")),
@@ -74,14 +81,46 @@ class MockMqttClient extends EventEmitter {
   connected = false;
   subscriptions: string[][] = [];
   published: { topic: string; message: string }[] = [];
+  options: IClientOptions | undefined;
+  mattressSubscriptions: Record<string, IClientSubscribeOptions> | undefined;
+  acknowledged:
+    ((error: Error | null, grants?: ISubscriptionGrant[]) => void) | undefined;
+  mattressPublications: {
+    topic: string;
+    message: string;
+    complete: (error?: Error) => void;
+  }[] = [];
 
-  subscribe(topics: string[]): this {
-    this.subscriptions.push(topics);
+  constructor(options?: IClientOptions) {
+    super();
+    this.options = options;
+  }
+
+  connect(): this {
     return this;
   }
 
-  publish(topic: string, message: string): this {
+  subscribe(
+    topics: string[] | Record<string, IClientSubscribeOptions>,
+    complete?: (error: Error | null, grants?: ISubscriptionGrant[]) => void,
+  ): this {
+    if (Array.isArray(topics)) this.subscriptions.push(topics);
+    else {
+      this.mattressSubscriptions = topics;
+      this.acknowledged = complete;
+    }
+    return this;
+  }
+
+  publish(
+    topic: string,
+    message: string,
+    options?: IClientPublishOptions,
+    complete?: (error?: Error) => void,
+  ): this {
     this.published.push({ topic, message });
+    if (options && complete)
+      this.mattressPublications.push({ topic, message, complete });
     return this;
   }
 
@@ -94,15 +133,58 @@ class MockMqttClient extends EventEmitter {
 // Each startBridge() call invokes connect(), creating a fresh MockMqttClient.
 // No state leaks between tests.
 let mockClient: MockMqttClient;
+const mockClients: MockMqttClient[] = [];
 
 mock.module("mqtt", () => ({
-  connect: () => {
-    mockClient = new MockMqttClient();
+  connect: (_url: string, options?: IClientOptions) => {
+    mockClient = new MockMqttClient(options);
+    mockClients.push(mockClient);
     return mockClient;
   },
 }));
 
 const { startBridge, buildStatusData } = await import("../src/bridge.ts");
+
+const MATTRESSES = [
+  { name: "Mattress A", prefix: "tuya", controller: "bed", zone: "side_a" },
+  { name: "Mattress B", prefix: "tuya", controller: "bed", zone: "side_b" },
+];
+const MATTRESS_STATE = {
+  session_id: "live",
+  power: false,
+  heat_level: 4,
+  preheat: false,
+};
+
+function mattressMessage(
+  client: MockMqttClient,
+  topic: string,
+  value: unknown,
+): void {
+  client.emit(
+    "message",
+    topic,
+    Buffer.from(typeof value === "string" ? value : JSON.stringify(value)),
+    { retain: false },
+  );
+}
+
+function readyMattress(client: MockMqttClient): void {
+  client.connected = true;
+  client.emit("connect", { sessionPresent: false });
+  client.acknowledged!(
+    null,
+    Object.entries(client.mattressSubscriptions!).map(([topic, options]) => ({
+      topic,
+      ...options,
+    })),
+  );
+  mattressMessage(client, "tuya/bridge/availability", "online");
+  mattressMessage(client, "tuya/bed/availability", "online");
+  mattressMessage(client, "tuya/bridge/heartbeat", { session_id: "live" });
+  for (const zone of MATTRESSES)
+    mattressMessage(client, `tuya/bed/${zone.zone}`, MATTRESS_STATE);
+}
 
 function testConfig(): Config {
   return {
@@ -150,6 +232,239 @@ function collectGetMessages(): { topic: string; message: string }[] {
 }
 
 describe("startBridge", () => {
+  test("each device state update produces one dashboard SSE event", async () => {
+    const { metricsPort, shutdown } = await startBridge(metricsConfig());
+    const controller = new AbortController();
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${String(metricsPort)}/events`,
+        { signal: controller.signal },
+      );
+      reader = response.body!.getReader();
+      let buffered = "";
+      const decoder = new TextDecoder();
+      const nextEvent = async (): Promise<string> => {
+        for (;;) {
+          const boundary = buffered.indexOf("\n\n");
+          if (boundary !== -1) {
+            const event = buffered.slice(0, boundary);
+            buffered = buffered.slice(boundary + 2);
+            return event;
+          }
+          const chunk = await reader!.read();
+          expect(chunk.done).toBe(false);
+          buffered += decoder.decode(chunk.value, { stream: true });
+        }
+      };
+      await nextEvent();
+      mockClient.emit(
+        "message",
+        "zigbee2mqtt/living_room",
+        Buffer.from('{"state":"ON"}'),
+      );
+      expect(await nextEvent()).toContain("ON");
+      mockClient.emit(
+        "message",
+        "zigbee2mqtt/living_room",
+        Buffer.from('{"state":"OFF"}'),
+      );
+      expect(await nextEvent()).toContain("OFF");
+    } finally {
+      controller.abort();
+      await shutdown();
+    }
+  });
+
+  test("a mattress-only bridge creates stable fans and preheat switches on one MQTT 5 connection", async () => {
+    const config = {
+      ...testConfig(),
+      devices: [],
+      mattresses: [
+        {
+          name: "Mattress A",
+          prefix: "tuya",
+          controller: "bed",
+          zone: "side_a",
+        },
+        {
+          name: "Mattress B",
+          prefix: "tuya",
+          controller: "bed",
+          zone: "side_b",
+        },
+      ],
+    };
+    const count = mockClients.length;
+    const { bridge, shutdown } = await startBridge(config);
+    try {
+      expect(mockClients.length - count).toBe(1);
+      expect(mockClient.options?.protocolVersion).toBe(5);
+      expect(bridge.bridgedAccessories).toHaveLength(4);
+      expect(
+        bridge.bridgedAccessories.map((accessory) => accessory.displayName),
+      ).toEqual([
+        "Mattress A",
+        "Mattress A Preheat",
+        "Mattress B",
+        "Mattress B Preheat",
+      ]);
+      for (const accessory of bridge.bridgedAccessories) {
+        expect(
+          accessory
+            .getService(Service.AccessoryInformation)!
+            .getCharacteristic(Characteristic.Manufacturer).value,
+        ).toBe("Hoboken");
+      }
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("mattress state and confirmed commands update HomeKit and operational status", async () => {
+    const config = { ...metricsConfig(), devices: [], mattresses: MATTRESSES };
+    const { bridge, metricsPort, shutdown } = await startBridge(config);
+    const client = mockClient;
+    const fan = bridge.bridgedAccessories[0]!.getService(Service.Fanv2)!;
+    const active = fan.getCharacteristic(Characteristic.Active);
+    const speed = fan.getCharacteristic(Characteristic.RotationSpeed);
+    const preheat = bridge.bridgedAccessories[1]!.getService(
+      Service.Switch,
+    )!.getCharacteristic(Characteristic.On);
+    const rightSpeed = bridge.bridgedAccessories[2]!.getService(
+      Service.Fanv2,
+    )!.getCharacteristic(Characteristic.RotationSpeed);
+    try {
+      expect(await Promise.allSettled([speed.handleGetRequest()])).toEqual([
+        { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+      ]);
+      const unavailable = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
+      ).text();
+      expect(unavailable).toContain("No Response");
+      readyMattress(client);
+      expect(await speed.handleGetRequest()).toBe(40);
+      expect(await active.handleGetRequest()).toBe(0);
+      const html = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
+      ).text();
+      expect(html).toContain("Mattress A");
+      expect(html).toContain("heat_level");
+      expect(html).not.toContain("No Response");
+      const metrics = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`)
+      ).text();
+      expect(metrics).toContain("hoboken_mqtt_connected 1");
+      expect(metrics).toContain("hoboken_devices_configured 2");
+      expect(metrics).toContain("hoboken_devices_state_unknown 0");
+      const pushed = {
+        ...MATTRESS_STATE,
+        power: true,
+        heat_level: 6,
+        preheat: true,
+      };
+      mattressMessage(client, "tuya/bed/side_a", pushed);
+      expect(speed.value).toBe(60);
+      expect(preheat.value).toBe(true);
+      expect(rightSpeed.value).toBe(40);
+      jest.useFakeTimers();
+      const writes = [speed.handleSetRequest(80), active.handleSetRequest(0)];
+      jest.advanceTimersByTime(50);
+      const publication = client.mattressPublications[0]!;
+      const command = JSON.parse(publication.message) as {
+        request_id: string;
+        power: boolean;
+      };
+      expect(command).toEqual({ request_id: command.request_id, power: false });
+      publication.complete();
+      mattressMessage(client, "tuya/bed/side_a/result", {
+        request_id: command.request_id,
+        outcome: "confirmed",
+      });
+      mattressMessage(client, "tuya/bed/side_a", { ...pushed, power: false });
+      await Promise.all(writes);
+      expect(active.value).toBe(0);
+      expect(speed.value).toBe(60);
+      const preheatWrite = preheat.handleSetRequest(false);
+      const preheatCommand = JSON.parse(
+        client.mattressPublications[1]!.message,
+      ) as { request_id: string };
+      mattressMessage(client, "tuya/bed/side_a/result", {
+        request_id: preheatCommand.request_id,
+        outcome: "confirmed",
+      });
+      expect(preheat.value).toBe(true);
+      mattressMessage(client, "tuya/bed/side_a", {
+        ...pushed,
+        power: false,
+        preheat: false,
+      });
+      await preheatWrite;
+      expect(preheat.value).toBe(false);
+      const cancelled = Promise.allSettled([preheat.handleSetRequest(true)]);
+      client.connected = false;
+      client.emit("close");
+      expect(await cancelled).toEqual([
+        { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+      ]);
+      jest.advanceTimersByTime(1250);
+      const replacement = mockClient;
+      expect(replacement).not.toBe(client);
+      readyMattress(replacement);
+      expect(replacement.published).toHaveLength(0);
+      expect(await speed.handleGetRequest()).toBe(40);
+      const restoredMetrics = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`)
+      ).text();
+      expect(restoredMetrics).toContain(
+        "hoboken_mqtt_messages_published_total 3",
+      );
+      expect(restoredMetrics).toContain("hoboken_mqtt_errors_total 1");
+      expect(restoredMetrics).toContain('device="tuya/bed/side_a"');
+      expect(restoredMetrics).not.toContain(command.request_id);
+    } finally {
+      await shutdown();
+      jest.useRealTimers();
+    }
+  });
+
+  test("mixed bridges keep legacy subscriptions and conversions on their own client", async () => {
+    const count = mockClients.length;
+    const { bridge, shutdown } = await startBridge({
+      ...testConfig(),
+      mattresses: MATTRESSES,
+    });
+    try {
+      const legacy = mockClients[count]!;
+      const mattress = mockClients[count + 1]!;
+      expect(legacy.options).toBeUndefined();
+      expect(mattress.options?.protocolVersion).toBe(5);
+      legacy.connected = true;
+      legacy.emit("connect");
+      expect(legacy.subscriptions).toEqual([
+        ["zigbee2mqtt/living_room", "zigbee2mqtt/bedroom"],
+      ]);
+      expect(bridge.bridgedAccessories).toHaveLength(7);
+      readyMattress(mattress);
+      mattressMessage(mattress, "tuya/bed/side_a", {
+        ...MATTRESS_STATE,
+        heat_level: 10,
+      });
+      legacy.emit(
+        "message",
+        "zigbee2mqtt/living_room",
+        Buffer.from('{"state":"ON","brightness":127}'),
+      );
+      const light = bridge.bridgedAccessories[0]!.getService(
+        Service.Lightbulb,
+      )!;
+      expect(light.getCharacteristic(Characteristic.On).value).toBe(true);
+      expect(light.getCharacteristic(Characteristic.Brightness).value).toBe(50);
+    } finally {
+      await shutdown();
+    }
+  });
+
   test("creates bridge and connects MQTT", async () => {
     const { shutdown } = await startBridge(testConfig());
     expect(mockClient).toBeDefined();
@@ -1869,6 +2184,74 @@ describe("devicesStateUnknown metric", () => {
 });
 
 describe("buildStatusData", () => {
+  test("mattress status contains only live reported values or an unavailable marker", async () => {
+    const config = { ...testConfig(), mattresses: MATTRESSES };
+    const source = new MattressSource(
+      MATTRESSES,
+      (_topic, _payload, complete) => {
+        complete();
+      },
+    );
+    const mqtt = { url: "mqtt://localhost", connected: true };
+    const stateCache = new Map();
+    const withoutSource = buildStatusData(
+      config,
+      stateCache,
+      mqtt,
+      [],
+      "version",
+    );
+    expect(withoutSource.mattresses![0]).toMatchObject({
+      state: null,
+      pending: 0,
+    });
+    const generation = source.connect();
+    try {
+      source.subscriptionsReady(generation);
+      source.handle(generation, "tuya/bridge/availability", "online", true);
+      source.handle(generation, "tuya/bed/availability", "online", true);
+      source.handle(
+        generation,
+        "tuya/bridge/heartbeat",
+        { session_id: "live" },
+        false,
+      );
+      source.handle(generation, "tuya/bed/side_a", MATTRESS_STATE, true);
+      const outcomes = Promise.allSettled([
+        source.writePreheat("tuya/bed/side_a", true),
+      ]);
+      const status = buildStatusData(
+        config,
+        stateCache,
+        mqtt,
+        [],
+        "version",
+        source,
+      );
+      expect(status.mattresses![0]).toMatchObject({
+        name: "Mattress A",
+        state: MATTRESS_STATE,
+        pending: 1,
+      });
+      expect(status.mattresses![1]).toMatchObject({ state: null, pending: 0 });
+      source.disconnect();
+      await outcomes;
+      expect(
+        buildStatusData(config, stateCache, mqtt, [], "version", source)
+          .mattresses![0]!.state,
+      ).toBeNull();
+      const badConfig = {
+        ...config,
+        mattresses: [{ ...MATTRESSES[0]!, zone: "unknown" }],
+      };
+      expect(() =>
+        buildStatusData(badConfig, stateCache, mqtt, [], "version", source),
+      ).toThrow(RangeError);
+    } finally {
+      source.disconnect();
+    }
+  });
+
   test("returns status snapshot with cached state", () => {
     const cfg = testConfig();
     const stateCache = new Map<string, Record<string, unknown>>([

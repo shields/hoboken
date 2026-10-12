@@ -4,6 +4,9 @@ A minimal HomeKit bridge for Zigbee2MQTT and WLED. Exposes Z2M lights, ceiling
 fans, smart plugs, scenes, and WLED LED controllers to Apple Home for HomePod
 and Siri voice commands.
 
+The Tucson mattress-pad MQTT profile exposes each configured zone as a
+ten-level fan and a separate stateful preheat switch.
+
 It also provides an HTTP endpoint with a live-updating dashboard presenting all
 data in both MQTT and HAP forms, as well as Prometheus metrics and health check
 endpoints.
@@ -18,7 +21,7 @@ different project.
 ## Why
 
 Matterbridge and Homebridge are too complex and hard to troubleshoot. Hoboken does one
-thing: bridge Z2M and WLED devices to HomeKit. It's built directly on
+thing: bridge MQTT devices to HomeKit. It's built directly on
 [`hap-nodejs`](https://github.com/homebridge/HAP-NodeJS).
 
 It does not have any device discovery, self-update, or plugins. You get exactly what
@@ -76,6 +79,47 @@ Devices declare capabilities in `config.yaml`:
 Scenes are exposed as momentary switches. "Hey Siri, turn on Movie Mode"
 publishes `{"scene_recall": <id>}` to Z2M. The switch auto-resets to off after
 1 second.
+
+### Mattress Zones
+
+Configure Tucson zones separately from `devices`:
+
+```yaml
+mattresses:
+  - name: "Mattress A"
+    prefix: "tuya"
+    controller: "bed"
+    zone: "side_a"
+  - name: "Mattress B"
+    prefix: "tuya"
+    controller: "bed"
+    zone: "side_b"
+```
+
+Match these logical names to Tucson's configuration. A mattress-only bridge
+can omit `devices` or set it to `[]`. Controller/zone pairs must be unique
+even across prefixes, because they determine accessory identities. Display
+names and prefixes can change without changing those identities. Mattress
+configuration contains only these four fields; Tucson owns controller
+credentials, protocol versions, and device connections.
+
+The fan's Active control changes power. RotationSpeed zero turns power off
+and preserves the selected level; positive values select levels 1–10 in
+10% steps. The reported speed retains that selected level while power is
+off. An explicit off takes precedence over other fan writes arriving in
+the same 50 ms window. Preheat follows its reported Boolean until the
+controller changes it.
+
+Writes wait for both a confirmed command result and matching reported
+state. Failed or expired writes return a HomeKit error and retain reported
+values. MQTT reconnection cancels pending writes and requires current
+subscriptions, a fresh session heartbeat, online availability, and known
+state. Commands are never replayed after reconnection. Existing Zigbee2MQTT
+and WLED devices use their existing MQTT connection and conversion rules.
+
+Physical side mapping and controller compatibility still require hardware
+qualification. Actual Home app and Siri testing remains part of that
+qualification.
 
 ### Failure Handling
 

@@ -30,6 +30,9 @@ interface MqttOptions {
   random?: () => number;
   changed?: () => void;
   logger?: Logger;
+  received?: (topic: string) => void;
+  published?: () => void;
+  failed?: () => void;
 }
 
 const CONNECT_TIMEOUT = 10000;
@@ -43,6 +46,9 @@ export class MattressMqtt {
   #random: () => number;
   #changed: MqttOptions["changed"];
   #logger: Logger;
+  #received: MqttOptions["received"];
+  #published: MqttOptions["published"];
+  #failed: MqttOptions["failed"];
   #routes: Map<string, boolean>;
   #client: MqttClient | undefined;
   #ready = false;
@@ -62,6 +68,9 @@ export class MattressMqtt {
     this.#random = options.random ?? Math.random;
     this.#changed = options.changed;
     this.#logger = options.logger ?? pino({ name: "mattress-mqtt" });
+    this.#received = options.received;
+    this.#published = options.published;
+    this.#failed = options.failed;
     this.source = new MattressSource(
       zones,
       (topic, payload, complete) => {
@@ -99,6 +108,7 @@ export class MattressMqtt {
       { qos: 0, retain: false },
       complete,
     );
+    this.#published?.();
   }
 
   #attempt(): void {
@@ -165,6 +175,7 @@ export class MattressMqtt {
     client.on("message", (topic, payload, packet) => {
       if (client !== this.#client || !this.#routes.has(topic)) return;
       if (this.#routes.get(topic) && packet.retain) return;
+      this.#received?.(topic);
       try {
         if (payload.byteLength > MAX_PAYLOAD)
           throw new RangeError("Mattress MQTT payload exceeds its limit");
@@ -208,6 +219,7 @@ export class MattressMqtt {
     const delay = Math.min(60000, this.#backoff * (1 + 0.25 * this.#random()));
     this.#backoff = Math.min(60000, this.#backoff * 2);
     this.#logger.error({ event, retry_ms: delay }, "Mattress MQTT unavailable");
+    this.#failed?.();
     this.#changed?.();
     if (this.#stopped) return;
     this.#retry = setTimeout(() => {
