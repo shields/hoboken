@@ -301,7 +301,7 @@ function formatHint(
     capabilities.includes("brightness")
   ) {
     return {
-      html: `<span class="hint">\u2192 ${String(z2mBrightnessToHomeKit(value))}%</span>`,
+      html: `<span class="hint">\u{2192} ${String(z2mBrightnessToHomeKit(value))}%</span>`,
       placement: "value",
     };
   }
@@ -311,7 +311,7 @@ function formatHint(
     capabilities.includes("brightness")
   ) {
     return {
-      html: `<span class="hint">\u2192 ${String(wledBrightnessToHomeKit(value))}%</span>`,
+      html: `<span class="hint">\u{2192} ${String(wledBrightnessToHomeKit(value))}%</span>`,
       placement: "value",
     };
   }
@@ -322,7 +322,7 @@ function formatHint(
     const kelvin = Math.round(1_000_000 / value);
     if (!Number.isFinite(kelvin) || kelvin <= 0) return null;
     return {
-      html: `<span class="hint">\u2192 ${String(kelvin)} K</span>`,
+      html: `<span class="hint">\u{2192} ${String(kelvin)} K</span>`,
       placement: "value",
     };
   }
@@ -349,11 +349,7 @@ function formatHint(
     capabilities.includes("color_hs")
   ) {
     const [r, g, b] = value as unknown[];
-    if (
-      typeof r !== "number" ||
-      typeof g !== "number" ||
-      typeof b !== "number"
-    )
+    if (typeof r !== "number" || typeof g !== "number" || typeof b !== "number")
       return null;
     return {
       html: `<span class="swatch" style="background:rgb(${String(r)},${String(g)},${String(b)})"></span>`,
@@ -362,7 +358,7 @@ function formatHint(
   }
   if (key === "fan_state" && typeof value === "string") {
     return {
-      html: `<span class="hint">\u2192 ${value === "ON" ? "active" : "inactive"}</span>`,
+      html: `<span class="hint">\u{2192} ${value === "ON" ? "active" : "inactive"}</span>`,
       placement: "value",
     };
   }
@@ -375,7 +371,7 @@ function formatHint(
     if (parts.length === 0 && value === "on") parts.push("resume");
     if (parts.length > 0) {
       return {
-        html: `<span class="hint">\u2192 ${parts.join(", ")}</span>`,
+        html: `<span class="hint">\u{2192} ${parts.join(", ")}</span>`,
         placement: "value",
       };
     }
@@ -384,7 +380,7 @@ function formatHint(
     const ms = Date.now() - new Date(value).getTime();
     if (!Number.isFinite(ms) || ms < 0) return null;
     return {
-      html: `<span class="hint" data-ts="${escapeHtml(value)}">\u2192 ${formatDuration(ms)} ago</span>`,
+      html: `<span class="hint" data-ts="${escapeHtml(value)}">\u{2192} ${formatDuration(ms)} ago</span>`,
       placement: "value",
     };
   }
@@ -414,8 +410,9 @@ export function msUntilChange(elapsedMs: number): number {
   const seconds = Math.floor(elapsedMs / 1000);
   if (seconds < 60) return 1000 - (elapsedMs % 1000);
   const hours = Math.floor(seconds / 3600);
-  if (hours < 24) return 60000 - (elapsedMs % 60000);
-  return 3_600_000 - (elapsedMs % 3_600_000);
+  return hours < 24
+    ? 60000 - (elapsedMs % 60000)
+    : 3_600_000 - (elapsedMs % 3_600_000);
 }
 
 function formatValue(v: unknown): string {
@@ -423,12 +420,11 @@ function formatValue(v: unknown): string {
   // JSON.stringify(undefined) yields the value `undefined`, not a string, which
   // would make the caller's escapeHtml throw; render it literally instead.
   if (v === undefined) return "undefined";
-  if (typeof v !== "object" || v === null || Array.isArray(v)) {
-    return JSON.stringify(v);
-  }
-  return Object.entries(v as Record<string, unknown>)
-    .map(([k, val]) => `${k}: ${JSON.stringify(val)}`)
-    .join("\n");
+  return typeof v !== "object" || v === null || Array.isArray(v)
+    ? JSON.stringify(v)
+    : Object.entries(v as Record<string, unknown>)
+        .map(([k, val]) => `${k}: ${JSON.stringify(val)}`)
+        .join("\n");
 }
 
 function renderConnectionsList(connections: HapConnection[]): string {
@@ -438,7 +434,7 @@ function renderConnectionsList(connections: HapConnection[]): string {
   const items = connections
     .map((c) => {
       const auth = c.authenticated
-        ? '<span class="check">\u2713</span>'
+        ? '<span class="check">\u{2713}</span>'
         : '<span class="na">pairing</span>';
       return `<li>${escapeHtml(c.remoteAddress)} ${auth}</li>`;
     })
@@ -482,8 +478,7 @@ function computeHomeKitValues(
         rows.push({
           capability: "brightness",
           name: "Brightness",
-          value:
-            typeof b === "number" ? `${String(b)}%` : "\u2014",
+          value: typeof b === "number" ? `${String(b)}%` : "\u{2014}",
         });
         break;
       }
@@ -494,11 +489,11 @@ function computeHomeKitValues(
           capability: "color_temp",
           name: "ColorTemperature",
           value:
-            clamped === undefined ? "\u2014" : `${String(clamped)} mireds`,
+            clamped === undefined ? "\u{2014}" : `${String(clamped)} mireds`,
           hint:
             clamped === undefined
               ? undefined
-              : `<span class="hint">\u2192 ${String(Math.round(1_000_000 / clamped))} K</span>`,
+              : `<span class="hint">\u{2192} ${String(Math.round(1_000_000 / clamped))} K</span>`,
         });
         break;
       }
@@ -509,12 +504,12 @@ function computeHomeKitValues(
           {
             capability: "color_hs",
             name: "Hue",
-            value: typeof h === "number" ? `${String(h)}\u00B0` : "\u2014",
+            value: typeof h === "number" ? `${String(h)}\u{B0}` : "\u{2014}",
           },
           {
             capability: "color_hs",
             name: "Saturation",
-            value: typeof s === "number" ? `${String(s)}%` : "\u2014",
+            value: typeof s === "number" ? `${String(s)}%` : "\u{2014}",
           },
         );
         break;
@@ -524,7 +519,7 @@ function computeHomeKitValues(
           capability: "fan",
           name: "Active",
           value:
-            hk.active === 1 ? "true" : hk.active === 0 ? "false" : "\u2014",
+            hk.active === 1 ? "true" : hk.active === 0 ? "false" : "\u{2014}",
         });
         break;
       case "fan_speed": {
@@ -534,14 +529,12 @@ function computeHomeKitValues(
           {
             capability: "fan_speed",
             name: "RotationSpeed",
-            value:
-              typeof rs === "number" ? `${String(rs)}%` : "\u2014",
+            value: typeof rs === "number" ? `${String(rs)}%` : "\u{2014}",
           },
           {
             capability: "fan_speed",
             name: "TargetFanState",
-            value:
-              tfs === 1 ? "AUTO" : tfs === 0 ? "MANUAL" : "\u2014",
+            value: tfs === 1 ? "AUTO" : tfs === 0 ? "MANUAL" : "\u{2014}",
           },
         );
         break;
@@ -564,7 +557,7 @@ function renderHomeKitSection(
   const rowsHtml = rows
     .map((r) => {
       const vtName = `${vtPrefix}-hk-${r.name}`;
-      const valClass = r.value === "\u2014" ? ' class="na"' : "";
+      const valClass = r.value === "\u{2014}" ? ' class="na"' : "";
       const hint = r.hint ?? "";
       return `<tr><td class="key">${escapeHtml(r.capability)}</td><td>${escapeHtml(r.name)}</td><td${valClass} data-vt="${vtName}">${escapeHtml(r.value)}${hint}</td></tr>`;
     })
@@ -629,7 +622,7 @@ function renderStatusContent(data: StatusData): string {
 <div class="status">
   <div class="status-section">
     <div class="status-label">MQTT</div>
-    <div class="conn-list">${escapeHtml(data.mqtt.url)} ${data.mqtt.connected ? '<span class="check">\u2713</span>' : '<span class="err">disconnected</span>'}</div>
+    <div class="conn-list">${escapeHtml(data.mqtt.url)} ${data.mqtt.connected ? '<span class="check">\u{2713}</span>' : '<span class="err">disconnected</span>'}</div>
   </div>
   <div class="status-section">
     <div class="status-label">HAP</div>
@@ -713,7 +706,7 @@ function scheduleUpdates() {
       var update = function() {
         var elapsed = Date.now() - ts;
         if (elapsed < 0 || !isFinite(elapsed)) return;
-        el.textContent = "\u2192 " + formatDuration(elapsed) + " ago";
+        el.textContent = "\u{2192} " + formatDuration(elapsed) + " ago";
         timers.push(setTimeout(update, msUntilChange(elapsed)));
       };
       var elapsed = Date.now() - ts;
@@ -730,7 +723,7 @@ src.onerror = function() {
   if (hideTimer) clearTimeout(hideTimer);
   wasDisconnected = true;
   var el = document.getElementById("disconnected");
-  el.textContent = "Connection lost. Reconnecting\u2026";
+  el.textContent = "Connection lost. Reconnecting\u{2026}";
   el.className = "";
   el.removeAttribute("hidden");
 };

@@ -59,10 +59,12 @@ function createCoalescingPublish(
     prePublishCheck?.();
 
     pending = { ...pending, ...payload };
-    if (!scheduled) {
-      scheduled = true;
-      process.nextTick(flush);
+    if (scheduled) {
+      return;
     }
+
+    scheduled = true;
+    process.nextTick(flush);
   };
 }
 
@@ -86,33 +88,58 @@ export function createLightAccessory(
   );
 
   addSimpleCharacteristic(
-    service, Characteristic.On, "on", false,
-    setPayload, getState, device.topic,
+    service,
+    Characteristic.On,
+    "on",
+    false,
+    setPayload,
+    getState,
+    device.topic,
   );
 
   if (device.capabilities.includes("brightness")) {
     addSimpleCharacteristic(
-      service, Characteristic.Brightness, "brightness", 0,
-      setPayload, getState, device.topic,
+      service,
+      Characteristic.Brightness,
+      "brightness",
+      0,
+      setPayload,
+      getState,
+      device.topic,
     );
   }
 
   if (device.capabilities.includes("color_temp")) {
     addSimpleCharacteristic(
-      service, Characteristic.ColorTemperature, "color_temp", 140,
-      setPayload, getState, device.topic,
+      service,
+      Characteristic.ColorTemperature,
+      "color_temp",
+      140,
+      setPayload,
+      getState,
+      device.topic,
       (v) => clampColorTemp(Number(v)),
     );
   }
 
   if (device.capabilities.includes("color_hs")) {
     addSimpleCharacteristic(
-      service, Characteristic.Hue, "hue", 0,
-      setPayload, getState, device.topic,
+      service,
+      Characteristic.Hue,
+      "hue",
+      0,
+      setPayload,
+      getState,
+      device.topic,
     );
     addSimpleCharacteristic(
-      service, Characteristic.Saturation, "saturation", 0,
-      setPayload, getState, device.topic,
+      service,
+      Characteristic.Saturation,
+      "saturation",
+      0,
+      setPayload,
+      getState,
+      device.topic,
     );
   }
 
@@ -139,18 +166,33 @@ export function createFanAccessory(
   );
 
   addSimpleCharacteristic(
-    service, Characteristic.Active, "active", 0,
-    setPayload, getState, device.topic,
+    service,
+    Characteristic.Active,
+    "active",
+    0,
+    setPayload,
+    getState,
+    device.topic,
   );
 
   if (device.capabilities.includes("fan_speed")) {
     addSimpleCharacteristic(
-      service, Characteristic.RotationSpeed, "rotation_speed", 0,
-      setPayload, getState, device.topic,
+      service,
+      Characteristic.RotationSpeed,
+      "rotation_speed",
+      0,
+      setPayload,
+      getState,
+      device.topic,
     );
     addSimpleCharacteristic(
-      service, Characteristic.TargetFanState, "target_fan_state", 0,
-      setPayload, getState, device.topic,
+      service,
+      Characteristic.TargetFanState,
+      "target_fan_state",
+      0,
+      setPayload,
+      getState,
+      device.topic,
     );
   }
 
@@ -169,17 +211,19 @@ export function updateFanAccessoryState(
     service.getCharacteristic(Characteristic.Active).updateValue(state.active);
   }
 
-  if (capabilities.includes("fan_speed")) {
-    if (state.rotation_speed !== undefined) {
-      service
-        .getCharacteristic(Characteristic.RotationSpeed)
-        .updateValue(state.rotation_speed);
-    }
-    if (state.target_fan_state !== undefined) {
-      service
-        .getCharacteristic(Characteristic.TargetFanState)
-        .updateValue(state.target_fan_state);
-    }
+  if (!capabilities.includes("fan_speed")) {
+    return;
+  }
+
+  if (state.rotation_speed !== undefined) {
+    service
+      .getCharacteristic(Characteristic.RotationSpeed)
+      .updateValue(state.rotation_speed);
+  }
+  if (state.target_fan_state !== undefined) {
+    service
+      .getCharacteristic(Characteristic.TargetFanState)
+      .updateValue(state.target_fan_state);
   }
 }
 
@@ -202,18 +246,18 @@ export function createSceneAccessory(
   // Momentary switch: each recall publishes, then auto-resets to off after 1s.
   let resetTimer: ReturnType<typeof setTimeout> | undefined;
   on.onSet((value) => {
-    if (value) {
-      publish(device.topic, { scene_recall: scene.id });
-      // Replace any pending reset so a rapid re-tap doesn't leave overlapping
-      // timers, and unref() so a pending reset can't keep the process alive
-      // during shutdown.
-      if (resetTimer !== undefined) clearTimeout(resetTimer);
-      resetTimer = setTimeout(() => {
-        resetTimer = undefined;
-        on.updateValue(false);
-      }, 1000);
-      resetTimer.unref();
+    if (!value) {
+      return;
     }
+
+    publish(device.topic, { scene_recall: scene.id });
+    // A reset cannot keep the process alive or outlive a later scene recall.
+    if (resetTimer !== undefined) clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => {
+      resetTimer = undefined;
+      on.updateValue(false);
+    }, 1000);
+    resetTimer.unref();
   });
 
   return accessory;
@@ -243,15 +287,17 @@ export function updateAccessoryState(
       .updateValue(clampColorTemp(state.color_temp));
   }
 
-  if (capabilities.includes("color_hs")) {
-    if (state.hue !== undefined) {
-      service.getCharacteristic(Characteristic.Hue).updateValue(state.hue);
-    }
-    if (state.saturation !== undefined) {
-      service
-        .getCharacteristic(Characteristic.Saturation)
-        .updateValue(state.saturation);
-    }
+  if (!capabilities.includes("color_hs")) {
+    return;
+  }
+
+  if (state.hue !== undefined) {
+    service.getCharacteristic(Characteristic.Hue).updateValue(state.hue);
+  }
+  if (state.saturation !== undefined) {
+    service
+      .getCharacteristic(Characteristic.Saturation)
+      .updateValue(state.saturation);
   }
 }
 

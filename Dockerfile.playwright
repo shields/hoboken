@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+FROM oven/bun:1.4.3@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS bun
 FROM mcr.microsoft.com/playwright:v1.64.0-noble@sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f
-# Keep this bun version in sync with the main Dockerfile. Renovate tracks it via
-# a customManager and groups it with oven/bun (see .github/renovate.json5).
-RUN npm install -g bun@1.4.3
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app

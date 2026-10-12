@@ -91,11 +91,13 @@ function waitFor<T>(
     }, timeoutMs);
 
     function handler(arg: T): void {
-      if (match(arg)) {
-        clearTimeout(timer);
-        broker.removeListener(event, handler);
-        resolve();
+      if (!match(arg)) {
+        return;
       }
+
+      clearTimeout(timer);
+      broker.removeListener(event, handler);
+      resolve();
     }
 
     broker.on(event, handler);
@@ -139,7 +141,8 @@ describe("WLED integration", { timeout: 30000 }, () => {
       });
     });
     const addr = server.address();
-    if (typeof addr !== "object" || !addr) throw new Error("Failed to bind server");
+    if (typeof addr !== "object" || !addr)
+      throw new Error("Failed to bind server");
     const aedesPort = addr.port;
 
     if (process.env.VERBOSE === "1") {
@@ -150,9 +153,16 @@ describe("WLED integration", { timeout: 30000 }, () => {
     }
 
     const simReadyPromise = waitFor<AedesPublishPacket>(
-      broker, "publish", (p) => p.topic === "wled/test1/g", 5000, "topic wled/test1/g",
+      broker,
+      "publish",
+      (p) => p.topic === "wled/test1/g",
+      5000,
+      "topic wled/test1/g",
     );
-    simulator = new WledSimulator(`mqtt://127.0.0.1:${String(aedesPort)}`, "wled/test1");
+    simulator = new WledSimulator(
+      `mqtt://127.0.0.1:${String(aedesPort)}`,
+      "wled/test1",
+    );
     await simReadyPromise;
 
     tmpDir = mkdtempSync(path.join(tmpdir(), "hoboken-integ-"));
@@ -177,8 +187,11 @@ describe("WLED integration", { timeout: 30000 }, () => {
     };
 
     const bridgeSubPromise = waitFor<Subscription[]>(
-      broker, "subscribe", (subs) => subs.some((s) => s.topic === "wled/test1/g"),
-      5000, "subscribe wled/test1/g",
+      broker,
+      "subscribe",
+      (subs) => subs.some((s) => s.topic === "wled/test1/g"),
+      5000,
+      "subscribe wled/test1/g",
     );
     handle = await startBridge(config);
     await bridgeSubPromise;
@@ -194,21 +207,30 @@ describe("WLED integration", { timeout: 30000 }, () => {
   });
 
   after(async () => {
-    try { await client?.close(); } catch { /* ignore */ }
-    try { if (handle) await handle.shutdown(); } catch { /* ignore */ }
-    try { if (simulator) await simulator.close(); } catch { /* ignore */ }
+    const cleanup = await Promise.allSettled([
+      client?.close(),
+      handle?.shutdown(),
+      simulator?.close(),
+    ]);
     if (broker) {
       await new Promise<void>((resolve) => {
-        broker!.close(() => { resolve(); });
+        broker!.close(() => {
+          resolve();
+        });
       });
     }
     if (server) {
       await new Promise<void>((resolve) => {
-        server!.close(() => { resolve(); });
+        server!.close(() => {
+          resolve();
+        });
       });
     }
     if (tmpDir) {
-      try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+      rmSync(tmpDir, { recursive: true });
+    }
+    for (const result of cleanup) {
+      assert.equal(result.status, "fulfilled");
     }
   });
 
@@ -216,15 +238,29 @@ describe("WLED integration", { timeout: 30000 }, () => {
     // WLED has no side-effect-free state request. The simulator published its
     // state on connect, but the bridge wasn't subscribed yet. Without MQTT
     // retain, the bridge has no cached state — onGet throws HapStatusError.
-    const res = (await client!.getCharacteristics([onKey, briKey, hueKey, satKey])) as {
-      characteristics: { aid: unknown; iid: unknown; value?: unknown; status?: number }[];
+    const res = (await client!.getCharacteristics([
+      onKey,
+      briKey,
+      hueKey,
+      satKey,
+    ])) as {
+      characteristics: {
+        aid: unknown;
+        iid: unknown;
+        value?: unknown;
+        status?: number;
+      }[];
     };
     // Guard against a vacuous pass: every requested characteristic must report
     // the failure status, so the loop below must actually iterate over all four.
     assert.equal(res.characteristics.length, 4);
     for (const ch of res.characteristics) {
       const key = `${String(ch.aid)}.${String(ch.iid)}`;
-      assert.equal(ch.status, -70402, `Expected SERVICE_COMMUNICATION_FAILURE for ${key}`);
+      assert.equal(
+        ch.status,
+        -70402,
+        `Expected SERVICE_COMMUNICATION_FAILURE for ${key}`,
+      );
     }
   });
 
@@ -248,10 +284,14 @@ describe("WLED integration", { timeout: 30000 }, () => {
 
   test("HK→WLED color green", async () => {
     await client!.setCharacteristics({ [hueKey]: 120, [satKey]: 100 });
-    await poll(() => {
-      const { col } = simulator!.state;
-      return col[0] === 0 && col[1] === 255 && col[2] === 0;
-    }, 50, 3000);
+    await poll(
+      () => {
+        const { col } = simulator!.state;
+        return col[0] === 0 && col[1] === 255 && col[2] === 0;
+      },
+      50,
+      3000,
+    );
     assert.deepEqual(simulator!.state.col, [0, 255, 0]);
   });
 
@@ -270,34 +310,50 @@ describe("WLED integration", { timeout: 30000 }, () => {
 
   test("WLED→HK brightness 128→50%", async () => {
     simulator!.setBrightness(128);
-    await poll(async () => {
-      const values = await getCharValues(client!, briKey);
-      return values.get(briKey) === 50;
-    }, 50, 3000);
+    await poll(
+      async () => {
+        const values = await getCharValues(client!, briKey);
+        return values.get(briKey) === 50;
+      },
+      50,
+      3000,
+    );
   });
 
   test("WLED→HK color red→hue 0", async () => {
     simulator!.setColor([255, 0, 0]);
-    await poll(async () => {
-      const values = await getCharValues(client!, hueKey, satKey);
-      return values.get(hueKey) === 0 && values.get(satKey) === 100;
-    }, 50, 3000);
+    await poll(
+      async () => {
+        const values = await getCharValues(client!, hueKey, satKey);
+        return values.get(hueKey) === 0 && values.get(satKey) === 100;
+      },
+      50,
+      3000,
+    );
   });
 
   test("WLED→HK turn off", async () => {
     simulator!.setBrightness(0);
-    await poll(async () => {
-      const values = await getCharValues(client!, onKey);
-      return values.get(onKey) === 0;
-    }, 50, 3000);
+    await poll(
+      async () => {
+        const values = await getCharValues(client!, onKey);
+        return values.get(onKey) === 0;
+      },
+      50,
+      3000,
+    );
   });
 
   test("WLED→HK turn on", async () => {
     simulator!.setBrightness(200);
-    await poll(async () => {
-      const values = await getCharValues(client!, onKey, briKey);
-      return values.get(onKey) === 1 && values.get(briKey) === 78;
-    }, 50, 3000);
+    await poll(
+      async () => {
+        const values = await getCharValues(client!, onKey, briKey);
+        return values.get(onKey) === 1 && values.get(briKey) === 78;
+      },
+      50,
+      3000,
+    );
   });
 
   test("MQTT disconnect → SERVICE_COMMUNICATION_FAILURE", async () => {
@@ -322,10 +378,16 @@ describe("WLED integration", { timeout: 30000 }, () => {
       }
     } catch (e: unknown) {
       const msg = String(e);
-      if (msg.includes("-70402") || msg.includes("SERVICE_COMMUNICATION_FAILURE")) {
+      if (
+        msg.includes("-70402") ||
+        msg.includes("SERVICE_COMMUNICATION_FAILURE")
+      ) {
         gotExpectedError = true;
       }
     }
-    assert.ok(gotExpectedError, "Expected SERVICE_COMMUNICATION_FAILURE (-70402)");
+    assert.ok(
+      gotExpectedError,
+      "Expected SERVICE_COMMUNICATION_FAILURE (-70402)",
+    );
   });
 });

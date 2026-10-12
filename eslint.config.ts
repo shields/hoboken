@@ -13,11 +13,12 @@
 // limitations under the License.
 
 import eslint from "@eslint/js";
+import { defineConfig } from "eslint/config";
+import prettier from "eslint-config-prettier";
 import unicorn from "eslint-plugin-unicorn";
 import tseslint from "typescript-eslint";
 
-// eslint-disable-next-line @typescript-eslint/no-deprecated -- no defineConfig() in ESLint 9
-export default tseslint.config(
+export default defineConfig(
   {
     // .claude holds Claude Code's workspace, including worktree copies of this
     // repo under .claude/worktrees/ that would otherwise be linted as source.
@@ -43,6 +44,30 @@ export default tseslint.config(
     },
   },
   {
+    files: ["eslint.config.ts"],
+    rules: {
+      "unicorn/no-top-level-side-effects": "off",
+    },
+  },
+  {
+    files: ["src/convert.ts", "integration/wled-simulator.ts"],
+    rules: {
+      // WLED text payloads use integer-prefix parsing, including trailing text.
+      "unicorn/prefer-number-coercion": "off",
+    },
+  },
+  {
+    files: [
+      "src/accessories.ts",
+      "test/accessories.test.ts",
+      "test/bridge.test.ts",
+    ],
+    rules: {
+      // Node tick ordering determines which characteristic writes coalesce.
+      "unicorn/prefer-queue-microtask": "off",
+    },
+  },
+  {
     files: ["src/log.ts"],
     rules: {
       "no-console": "off",
@@ -63,4 +88,5 @@ export default tseslint.config(
       "no-console": "off",
     },
   },
+  prettier,
 );

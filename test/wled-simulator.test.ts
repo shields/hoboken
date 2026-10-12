@@ -19,7 +19,8 @@ import { EventEmitter } from "node:events";
 class MockMqttClient extends EventEmitter {
   connected = false;
   subscriptions: string[][] = [];
-  published: { topic: string; message: string; opts?: object | undefined }[] = [];
+  published: { topic: string; message: string; opts?: object | undefined }[] =
+    [];
 
   subscribe(topics: string[]): this {
     this.subscriptions.push(topics);
@@ -544,11 +545,7 @@ describe("WledSimulator", () => {
     test("unrecognized suffix is ignored", () => {
       const sim = createSimulator();
       clearPublished();
-      mockClient.emit(
-        "message",
-        `${TOPIC}/unknown`,
-        Buffer.from("payload"),
-      );
+      mockClient.emit("message", `${TOPIC}/unknown`, Buffer.from("payload"));
       expect(mockClient.published).toEqual([]);
       expect(sim.state.bri).toBe(128);
     });

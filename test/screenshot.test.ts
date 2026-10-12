@@ -22,10 +22,10 @@ import { captureStatusPage } from "../demo/capture.ts";
 const GOLDEN_FILE = "demo/status-page.png";
 
 // Golden file is rendered in Docker for deterministic fonts; skip outside Docker.
-describe.skipIf(!process.env.PLAYWRIGHT_IN_DOCKER)("screenshot golden file", () => {
-  test(
-    "matches demo/status-page.png",
-    async () => {
+describe.skipIf(!process.env.PLAYWRIGHT_IN_DOCKER)(
+  "screenshot golden file",
+  () => {
+    test("matches demo/status-page.png", async () => {
       if (!existsSync(GOLDEN_FILE)) {
         throw new Error(
           `Golden file ${GOLDEN_FILE} not found. Run \`make golden-screenshot\` to generate it.`,
@@ -57,15 +57,16 @@ describe.skipIf(!process.env.PLAYWRIGHT_IN_DOCKER)("screenshot golden file", () 
         { threshold: 0, includeAA: true },
       );
 
-      if (numDiff > 0) {
-        await writeFile("demo/status-page-actual.png", actualPng);
-        await writeFile("demo/status-page-diff.png", PNG.sync.write(diff));
-        throw new Error(
-          `Screenshot differs by ${String(numDiff)} pixels. ` +
-            "Actual and diff saved to demo/. Run `make golden-screenshot` to regenerate.",
-        );
+      if (!(numDiff > 0)) {
+        return;
       }
-    },
-    30000,
-  );
-});
+
+      await writeFile("demo/status-page-actual.png", actualPng);
+      await writeFile("demo/status-page-diff.png", PNG.sync.write(diff));
+      throw new Error(
+        `Screenshot differs by ${String(numDiff)} pixels. ` +
+          "Actual and diff saved to demo/. Run `make golden-screenshot` to regenerate.",
+      );
+    }, 30000);
+  },
+);

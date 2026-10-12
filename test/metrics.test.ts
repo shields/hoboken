@@ -129,15 +129,17 @@ describe("startMetricsServer", () => {
   let ms: MetricsServer | undefined;
 
   afterEach(async () => {
-    if (ms) {
-      await new Promise<void>((resolve, reject) => {
-        ms!.server.close((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-      ms = undefined;
+    if (!ms) {
+      return;
     }
+
+    await new Promise<void>((resolve, reject) => {
+      ms!.server.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    ms = undefined;
   });
 
   test("serves metrics on GET /metrics", async () => {
@@ -290,11 +292,13 @@ describe("SSE (GET /events)", () => {
   let ms: MetricsServer | undefined;
 
   afterEach(async () => {
-    if (ms) {
-      const ref = ms;
-      ms = undefined;
-      await ref.close();
+    if (!ms) {
+      return;
     }
+
+    const ref = ms;
+    ms = undefined;
+    await ref.close();
   });
 
   test("startMetricsServer returns notifyStateChange function", () => {
@@ -454,17 +458,14 @@ describe("SSE (GET /events)", () => {
     // Connect SSE client using raw http to avoid fetch stream errors
     const http = await import("node:http");
     await new Promise<void>((resolve) => {
-      const req = http.get(
-        `http://127.0.0.1:${String(port)}/events`,
-        (res) => {
-          res.once("data", () => {
-            resolve();
-          });
-          res.on("error", () => {
-            // Expected: connection force-closed during close()
-          });
-        },
-      );
+      const req = http.get(`http://127.0.0.1:${String(port)}/events`, (res) => {
+        res.once("data", () => {
+          resolve();
+        });
+        res.on("error", (error) => {
+          expect(error).toBeInstanceOf(Error);
+        });
+      });
       req.on("error", () => {
         // Expected: socket hang up during close()
       });
@@ -526,15 +527,17 @@ describe("status page (GET /)", () => {
   let ms: MetricsServer | undefined;
 
   afterEach(async () => {
-    if (ms) {
-      await new Promise<void>((resolve, reject) => {
-        ms!.server.close((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-      ms = undefined;
+    if (!ms) {
+      return;
     }
+
+    await new Promise<void>((resolve, reject) => {
+      ms!.server.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    ms = undefined;
   });
 
   test("returns HTML status page", async () => {
@@ -553,7 +556,7 @@ describe("status page (GET /)", () => {
     expect(body).toContain("Test Bridge");
     expect(body).toContain("Version 1.0.0");
     expect(body).toContain("mqtt://localhost:1883");
-    expect(body).toContain("\u2713");
+    expect(body).toContain("\u{2713}");
     expect(body).toContain("Desk Lamp");
     expect(body).toContain("desk_lamp");
   });
@@ -728,7 +731,7 @@ describe("status page (GET /)", () => {
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
     // brightness, hue, saturation should all show em-dash
-    const emDashCount = (body.match(/\u2014/g) ?? []).length;
+    const emDashCount = (body.match(/\u{2014}/gu) ?? []).length;
     expect(emDashCount).toBeGreaterThanOrEqual(3);
   });
 
@@ -755,7 +758,7 @@ describe("status page (GET /)", () => {
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
     expect(body).toContain('class="na"');
-    expect(body).toMatch(/class="na"[^>]*>\u2014</);
+    expect(body).toMatch(/class="na"[^>]*>\u{2014}</u);
   });
 
   test("HomeKit Hue and Saturation from color_hs capability", async () => {
@@ -781,7 +784,7 @@ describe("status page (GET /)", () => {
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
     expect(body).toContain("Hue");
-    expect(body).toContain("240\u00B0");
+    expect(body).toContain("240\u{B0}");
     expect(body).toContain("Saturation");
     expect(body).toContain("80%");
   });
@@ -810,7 +813,7 @@ describe("status page (GET /)", () => {
     ).text();
     expect(body).toContain("ColorTemperature");
     expect(body).toContain("370 mireds");
-    expect(body).toContain("\u2192 2703 K");
+    expect(body).toContain("\u{2192} 2703 K");
   });
 
   test("HomeKit ColorTemperature clamps out-of-range values", async () => {
@@ -836,7 +839,7 @@ describe("status page (GET /)", () => {
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
     expect(body).toContain("140 mireds");
-    expect(body).toContain("\u2192 7143 K");
+    expect(body).toContain("\u{2192} 7143 K");
   });
 
   test("HomeKit Brightness shows percentage", async () => {
@@ -1128,7 +1131,7 @@ describe("status page (GET /)", () => {
     ).text();
     expect(body).toContain("192.168.1.10");
     expect(body).toContain("192.168.1.20");
-    expect(body).toContain("\u2713");
+    expect(body).toContain("\u{2713}");
     expect(body).toContain("pairing");
   });
 
@@ -1169,7 +1172,7 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("\u2192 79%");
+    expect(body).toContain("\u{2192} 79%");
   });
 
   test("color_temp annotation shows Kelvin", async () => {
@@ -1194,7 +1197,7 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("\u2192 2703 K");
+    expect(body).toContain("\u{2192} 2703 K");
   });
 
   test("color_temp annotation shows Kelvin even with color_hs capability", async () => {
@@ -1219,7 +1222,7 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("\u2192 2703 K");
+    expect(body).toContain("\u{2192} 2703 K");
   });
 
   test("color_temp annotation is suppressed for non-positive mireds", async () => {
@@ -1298,7 +1301,7 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("\u2192 3m ago");
+    expect(body).toContain("\u{2192} 3m ago");
   });
 
   test("last_seen annotation with hours", async () => {
@@ -1326,7 +1329,7 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("\u2192 2h 15m ago");
+    expect(body).toContain("\u{2192} 2h 15m ago");
   });
 
   test("last_seen annotation with exact hours", async () => {
@@ -1352,7 +1355,7 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("\u2192 5h ago");
+    expect(body).toContain("\u{2192} 5h ago");
     expect(body).not.toContain("5h 0m");
   });
 
@@ -1381,7 +1384,7 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("\u2192 3d 7h ago");
+    expect(body).toContain("\u{2192} 3d 7h ago");
   });
 
   test("last_seen annotation with exact days", async () => {
@@ -1407,7 +1410,7 @@ describe("status page (GET /)", () => {
     const body = await (
       await fetch(`http://127.0.0.1:${String(port)}/`)
     ).text();
-    expect(body).toContain("\u2192 2d ago");
+    expect(body).toContain("\u{2192} 2d ago");
     expect(body).not.toContain("2d 0h");
   });
 
@@ -1441,13 +1444,10 @@ describe("status page (GET /)", () => {
     device: StatusData["devices"][number],
   ): Promise<string> {
     const register = new Registry();
-    const getStatus: GetStatusFn = () =>
-      makeStatus({ devices: [device] });
+    const getStatus: GetStatusFn = () => makeStatus({ devices: [device] });
     ms = startMetricsServer(0, register, undefined, getStatus);
     await listening(ms.server);
-    return (
-      await fetch(`http://127.0.0.1:${String(addr(ms.server))}/`)
-    ).text();
+    return (await fetch(`http://127.0.0.1:${String(addr(ms.server))}/`)).text();
   }
 
   test("renders an undefined state value as a literal without throwing", async () => {
@@ -1470,7 +1470,7 @@ describe("status page (GET /)", () => {
       capabilities: ["on_off", "brightness"],
       state: { on: true, bri: 128 },
     });
-    expect(body).toContain("\u2192 50%");
+    expect(body).toContain("\u{2192} 50%");
   });
 
   test("WLED col annotation shows color swatch", async () => {
@@ -1554,7 +1554,7 @@ describe("status page (GET /)", () => {
       state: { on: true },
     });
     expect(body).toContain("Brightness");
-    expect(body).toContain("\u2014");
+    expect(body).toContain("\u{2014}");
   });
 
   test("WLED color_hs HomeKit shows Hue and Saturation from col", async () => {
@@ -1566,7 +1566,7 @@ describe("status page (GET /)", () => {
       state: { on: true, col: [255, 0, 0] },
     });
     expect(body).toContain("Hue");
-    expect(body).toContain("0\u00B0");
+    expect(body).toContain("0\u{B0}");
     expect(body).toContain("Saturation");
     expect(body).toContain("100%");
   });
@@ -1581,7 +1581,7 @@ describe("status page (GET /)", () => {
     });
     expect(body).toContain("Hue");
     expect(body).toContain("Saturation");
-    const emDashCount = (body.match(/\u2014/g) ?? []).length;
+    const emDashCount = (body.match(/\u{2014}/gu) ?? []).length;
     expect(emDashCount).toBeGreaterThanOrEqual(2);
   });
 
@@ -1643,7 +1643,7 @@ describe("status page (GET /)", () => {
       state: { fan_state: "ON" },
     });
     expect(body).toContain("RotationSpeed");
-    const emDashCount = (body.match(/\u2014/g) ?? []).length;
+    const emDashCount = (body.match(/\u{2014}/gu) ?? []).length;
     expect(emDashCount).toBeGreaterThanOrEqual(2);
   });
 
@@ -1655,7 +1655,7 @@ describe("status page (GET /)", () => {
       capabilities: ["fan"],
       state: { fan_state: "ON" },
     });
-    expect(body).toContain("\u2192 active");
+    expect(body).toContain("\u{2192} active");
   });
 
   test("fan_state OFF annotation shows inactive hint", async () => {
@@ -1666,7 +1666,7 @@ describe("status page (GET /)", () => {
       capabilities: ["fan"],
       state: { fan_state: "OFF" },
     });
-    expect(body).toContain("\u2192 inactive");
+    expect(body).toContain("\u{2192} inactive");
   });
 
   test("fan_mode annotation shows speed percentage", async () => {
@@ -1677,7 +1677,7 @@ describe("status page (GET /)", () => {
       capabilities: ["fan", "fan_speed"],
       state: { fan_mode: "high" },
     });
-    expect(body).toContain("\u2192 100%");
+    expect(body).toContain("\u{2192} 100%");
   });
 
   test("fan_mode smart annotation shows auto", async () => {
@@ -1688,7 +1688,7 @@ describe("status page (GET /)", () => {
       capabilities: ["fan", "fan_speed"],
       state: { fan_mode: "smart" },
     });
-    expect(body).toContain("\u2192 auto");
+    expect(body).toContain("\u{2192} auto");
   });
 
   test("fan_mode on annotation shows resume", async () => {
@@ -1699,7 +1699,7 @@ describe("status page (GET /)", () => {
       capabilities: ["fan"],
       state: { fan_mode: "on" },
     });
-    expect(body).toContain("\u2192 resume");
+    expect(body).toContain("\u{2192} resume");
   });
 
   test("fan_mode unknown value shows no hint", async () => {
@@ -1713,7 +1713,7 @@ describe("status page (GET /)", () => {
     expect(body).toContain("turbo");
     // The fan_mode cell itself should have no hint annotation
     const fanModeCell = /turbo[^<]*/.exec(body)?.[0] ?? "";
-    expect(fanModeCell).not.toContain("\u2192");
+    expect(fanModeCell).not.toContain("\u{2192}");
   });
 
   test("no annotations for unrecognized keys", async () => {

@@ -100,7 +100,11 @@ export class WledSimulator {
   }
 
   private handleBriPayload(payload: string): void {
-    if (payload.includes("ON") || payload.includes("on") || payload.includes("true")) {
+    if (
+      payload.includes("ON") ||
+      payload.includes("on") ||
+      payload.includes("true")
+    ) {
       this.bri = this.briLast;
     } else if (payload.includes("T") || payload.includes("t")) {
       this.toggle();
@@ -126,9 +130,9 @@ export class WledSimulator {
     if (Number.isNaN(num)) return;
 
     // Decompose uint32 into WRGB: bits 23-16=R, 15-8=G, 7-0=B
-    const r = (num >>> 16) & 0xFF;
-    const g = (num >>> 8) & 0xFF;
-    const b = num & 0xFF;
+    const r = (num >>> 16) & 0xff;
+    const g = (num >>> 8) & 0xff;
+    const b = num & 0xff;
     this.col = [r, g, b];
     this.publishState();
   }

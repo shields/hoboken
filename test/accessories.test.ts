@@ -12,7 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  beforeEach,
+  describe,
+  expect,
+  jest,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { Characteristic, HAPStatus, Service } from "@homebridge/hap-nodejs";
 import type { DeviceConfig } from "../src/config.ts";
 import {
@@ -120,7 +128,9 @@ describe("createLightAccessory", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.On);
 
-    await on.handleGetRequest().catch(() => { /* expected */ });
+    expect(await Promise.allSettled([on.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(on.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
@@ -159,7 +169,9 @@ describe("createLightAccessory", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.Brightness);
 
-    await brightness.handleGetRequest().catch(() => { /* expected */ });
+    expect(await Promise.allSettled([brightness.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(brightness.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
@@ -196,7 +208,9 @@ describe("createLightAccessory", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.ColorTemperature);
 
-    await ct.handleGetRequest().catch(() => { /* expected */ });
+    expect(await Promise.allSettled([ct.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(ct.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
@@ -219,7 +233,9 @@ describe("createLightAccessory", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.Hue);
 
-    await hue.handleGetRequest().catch(() => { /* expected */ });
+    expect(await Promise.allSettled([hue.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(hue.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
@@ -242,7 +258,9 @@ describe("createLightAccessory", () => {
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.Saturation);
 
-    await sat.handleGetRequest().catch(() => { /* expected */ });
+    expect(await Promise.allSettled([sat.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(sat.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
@@ -436,6 +454,28 @@ describe("write coalescing", () => {
 });
 
 describe("createSceneAccessory", () => {
+  test("setting false does not recall a scene or schedule a reset", async () => {
+    const publish = mock<PublishFn>();
+    const accessory = createSceneAccessory(
+      makeDevice(),
+      { name: "Movie Mode", id: 1 },
+      publish,
+    );
+    const on = accessory
+      .getService(Service.Switch)!
+      .getCharacteristic(Characteristic.On);
+
+    jest.useFakeTimers();
+    try {
+      await on.handleSetRequest(false);
+      expect(publish).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBe(0);
+      expect(on.value).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   test("publishes scene_recall on set true", () => {
     const publish = mock<PublishFn>();
     const device = makeDevice();
@@ -462,7 +502,7 @@ describe("createSceneAccessory", () => {
     expect(value).toBe(false);
   });
 
-  test("auto-resets to off after timeout and unrefs the timer", () => {
+  test("auto-resets to off after timeout and unrefs the timer", async () => {
     const publish = mock<PublishFn>();
     const device = makeDevice();
     const scene = { name: "Movie Mode", id: 2 };
@@ -471,33 +511,27 @@ describe("createSceneAccessory", () => {
       .getService(Service.Switch)!
       .getCharacteristic(Characteristic.On);
 
-    const origSetTimeout = globalThis.setTimeout;
-    const timeouts: { fn: () => void; delay: number; unrefCalled: boolean }[] =
-      [];
-    globalThis.setTimeout = ((fn: () => void, delay: number) => {
-      const entry = { fn, delay, unrefCalled: false };
-      timeouts.push(entry);
-      return {
-        unref() {
-          entry.unrefCalled = true;
-        },
-      } as unknown as ReturnType<typeof setTimeout>;
-    }) as typeof setTimeout;
-
+    jest.useFakeTimers();
+    const timeouts = spyOn(globalThis, "setTimeout");
     try {
-      on.setValue(true);
-      expect(timeouts).toHaveLength(1);
-      expect(timeouts[0]!.delay).toBe(1000);
-      expect(timeouts[0]!.unrefCalled).toBe(true);
-
-      timeouts[0]!.fn();
+      await on.handleSetRequest(true);
+      expect(jest.getTimerCount()).toBe(1);
+      expect(timeouts.mock.calls[0]![1]).toBe(1000);
+      const timer = timeouts.mock.results[0]!.value as ReturnType<
+        typeof setTimeout
+      >;
+      expect(timer.hasRef()).toBe(false);
+      jest.advanceTimersByTime(999);
+      expect(on.value).toBe(true);
+      jest.advanceTimersByTime(1);
       expect(on.value).toBe(false);
     } finally {
-      globalThis.setTimeout = origSetTimeout;
+      timeouts.mockRestore();
+      jest.useRealTimers();
     }
   });
 
-  test("a rapid re-tap clears the prior reset timer", () => {
+  test("a rapid re-tap clears the prior reset timer", async () => {
     const publish = mock<PublishFn>();
     const device = makeDevice();
     const scene = { name: "Movie Mode", id: 3 };
@@ -506,36 +540,19 @@ describe("createSceneAccessory", () => {
       .getService(Service.Switch)!
       .getCharacteristic(Characteristic.On);
 
-    const origSetTimeout = globalThis.setTimeout;
-    const origClearTimeout = globalThis.clearTimeout;
-    let nextId = 1;
-    const timeouts: { id: number; fn: () => void }[] = [];
-    const cleared: number[] = [];
-    globalThis.setTimeout = ((fn: () => void) => {
-      const id = nextId++;
-      timeouts.push({ id, fn });
-      return { id, unref() { /* no-op */ } } as unknown as ReturnType<
-        typeof setTimeout
-      >;
-    }) as typeof setTimeout;
-    globalThis.clearTimeout = ((handle: { id: number }) => {
-      cleared.push(handle.id);
-    }) as unknown as typeof clearTimeout;
-
+    jest.useFakeTimers();
     try {
-      on.setValue(true);
-      on.setValue(true);
-      // The second tap must clear the first timer before scheduling its own.
-      expect(cleared).toEqual([1]);
-      expect(timeouts).toHaveLength(2);
+      await on.handleSetRequest(true);
+      jest.advanceTimersByTime(500);
+      await on.handleSetRequest(true);
+      expect(jest.getTimerCount()).toBe(1);
       expect(publish).toHaveBeenCalledTimes(2);
-
-      // The surviving timer still resets the switch to off.
-      timeouts[1]!.fn();
+      jest.advanceTimersByTime(500);
+      expect(on.value).toBe(true);
+      jest.advanceTimersByTime(500);
       expect(on.value).toBe(false);
     } finally {
-      globalThis.setTimeout = origSetTimeout;
-      globalThis.clearTimeout = origClearTimeout;
+      jest.useRealTimers();
     }
   });
 });
@@ -642,9 +659,7 @@ describe("updateAccessoryState", () => {
     const accessory = createLightAccessory(device, publish, getState);
 
     // Should not throw even with brightness data when capability not declared
-    updateAccessoryState(accessory, { on: true, brightness: 100 }, [
-      "on_off",
-    ]);
+    updateAccessoryState(accessory, { on: true, brightness: 100 }, ["on_off"]);
     const on = accessory
       .getService(Service.Lightbulb)!
       .getCharacteristic(Characteristic.On);
@@ -733,9 +748,9 @@ describe("createFanAccessory", () => {
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.Active);
 
-    await active.handleGetRequest().catch(() => {
-      /* expected */
-    });
+    expect(await Promise.allSettled([active.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(active.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
@@ -769,9 +784,9 @@ describe("createFanAccessory", () => {
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.RotationSpeed);
 
-    await speed.handleGetRequest().catch(() => {
-      /* expected */
-    });
+    expect(await Promise.allSettled([speed.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(speed.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
@@ -805,9 +820,9 @@ describe("createFanAccessory", () => {
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.TargetFanState);
 
-    await target.handleGetRequest().catch(() => {
-      /* expected */
-    });
+    expect(await Promise.allSettled([target.handleGetRequest()])).toEqual([
+      { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+    ]);
     expect(target.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
@@ -890,11 +905,9 @@ describe("updateFanAccessoryState", () => {
     const device = makeFanDevice({ capabilities: ["fan"] });
     const accessory = createFanAccessory(device, publish, getState);
 
-    updateFanAccessoryState(
-      accessory,
-      { active: 1, rotation_speed: 67 },
-      ["fan"],
-    );
+    updateFanAccessoryState(accessory, { active: 1, rotation_speed: 67 }, [
+      "fan",
+    ]);
     const active = accessory
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.Active);

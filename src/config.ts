@@ -16,12 +16,7 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
 export type Capability =
-  | "on_off"
-  | "brightness"
-  | "color_temp"
-  | "color_hs"
-  | "fan"
-  | "fan_speed";
+  "on_off" | "brightness" | "color_temp" | "color_hs" | "fan" | "fan_speed";
 export type DeviceType = "z2m" | "wled";
 
 const VALID_CAPABILITIES = new Set<Capability>([
@@ -221,9 +216,7 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
   const type: DeviceType =
     d.type === undefined ? "z2m" : (d.type as DeviceType);
   if (!VALID_DEVICE_TYPES.has(type)) {
-    throw new Error(
-      `devices[${String(index)}].type must be "z2m" or "wled"`,
-    );
+    throw new Error(`devices[${String(index)}].type must be "z2m" or "wled"`);
   }
 
   if (typeof d.topic !== "string" || d.topic.length === 0) {
@@ -265,9 +258,7 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
   }
 
   if (capabilities.includes("fan_speed") && !capabilities.includes("fan")) {
-    throw new Error(
-      `devices[${String(index)}]: fan_speed requires fan`,
-    );
+    throw new Error(`devices[${String(index)}]: fan_speed requires fan`);
   }
 
   const hasLight = capabilities.some((c) => LIGHT_CAPABILITIES.has(c));

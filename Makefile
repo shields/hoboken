@@ -12,11 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-.PHONY: lint test test-integration test-screenshot golden-screenshot run demo
+PRETTIER = bunx --no-install prettier --no-error-on-unmatched-pattern
+FORMAT_PATHS = "**/*.ts" "**/*.md" "**/*.json" "**/*.json5" "**/*.yaml" "**/*.yml" "**/*.toml"
+
+.PHONY: setup fmt lint test test-integration test-screenshot golden-screenshot run demo
+
+setup:
+	bun install --frozen-lockfile
+	bunx --no-install lefthook install
+
+fmt:
+	bun run eslint --fix .
+	$(PRETTIER) --write $(FORMAT_PATHS)
 
 lint:
 	bun run tsc
 	bun run eslint .
+	$(PRETTIER) --check $(FORMAT_PATHS)
 
 test:
 	bun test --coverage
@@ -25,7 +37,7 @@ test-integration:
 	node --test integration/wled-roundtrip.ts
 
 test-screenshot:
-	demo/docker-screenshot.sh test test/screenshot.test.ts
+	demo/docker-screenshot.sh test
 
 golden-screenshot:
 	demo/docker-screenshot.sh
