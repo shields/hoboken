@@ -41,6 +41,221 @@ function validConfig() {
 }
 
 describe("validateConfig", () => {
+  const mattress = {
+    name: "Left pad",
+    prefix: "tuya",
+    controller: "bed",
+    zone: "side_a",
+  };
+
+  test("accepts mattress zones alongside existing devices", () => {
+    const data = {
+      ...validConfig(),
+      mattresses: [
+        mattress,
+        { ...mattress, name: "Right pad", zone: "side_b" },
+      ],
+    };
+    const config = validateConfig(data);
+    expect(config.mattresses).toEqual(data.mattresses);
+    expect(config.devices[0]!.type).toBe("z2m");
+  });
+
+  test.each([[undefined], [[]]])(
+    "accepts a mattress-only bridge with devices %j",
+    (devices) => {
+      const config = validateConfig({
+        ...validConfig(),
+        devices,
+        mattresses: [mattress],
+      });
+      expect(config.devices).toEqual([]);
+      expect(config.mattresses).toEqual([mattress]);
+    },
+  );
+
+  test("empty mattress configuration is optional alongside devices", () => {
+    expect(
+      validateConfig({ ...validConfig(), mattresses: [] }).mattresses,
+    ).toEqual([]);
+    expect(validateConfig(validConfig()).mattresses).toBeUndefined();
+    expect(() =>
+      validateConfig({ ...validConfig(), devices: [], mattresses: [] }),
+    ).toThrow("devices must be a non-empty array");
+  });
+
+  test.each([null, false, "pad", {}])(
+    "rejects a non-array mattress list: %j",
+    (mattresses) => {
+      expect(() => validateConfig({ ...validConfig(), mattresses })).toThrow(
+        "mattresses must be an array",
+      );
+    },
+  );
+
+  test.each([[null], [false], ["pad"], [[]], [{}]])(
+    "rejects an invalid mattress entry: %j",
+    (entry) => {
+      expect(() =>
+        validateConfig({ ...validConfig(), mattresses: [entry] }),
+      ).toThrow("mattresses[0]");
+    },
+  );
+
+  test.each(["", " ", "\0", "x".repeat(257), false])(
+    "rejects invalid mattress display names: %j",
+    (name) => {
+      expect(() =>
+        validateConfig({
+          ...validConfig(),
+          mattresses: [{ ...mattress, name }],
+        }),
+      ).toThrow("mattresses[0].name");
+    },
+  );
+
+  test.each([
+    "",
+    "/tuya",
+    "tuya/",
+    "tuya//bed",
+    "tuya/+",
+    "tuya/#",
+    "Tuya",
+    "x".repeat(257),
+    false,
+  ])("rejects invalid mattress prefixes: %j", (prefix) => {
+    expect(() =>
+      validateConfig({
+        ...validConfig(),
+        mattresses: [{ ...mattress, prefix }],
+      }),
+    ).toThrow("mattresses[0].prefix");
+  });
+
+  test.each(["controller", "zone"])(
+    "rejects invalid mattress %s identifiers",
+    (field) => {
+      for (const value of [
+        "",
+        "Uppercase",
+        "with space",
+        "with/slash",
+        "+",
+        "#",
+        "x".repeat(65),
+        false,
+      ]) {
+        expect(() =>
+          validateConfig({
+            ...validConfig(),
+            mattresses: [{ ...mattress, [field]: value }],
+          }),
+        ).toThrow(`mattresses[0].${field}`);
+      }
+    },
+  );
+
+  test.each([
+    { ...mattress, controller: "bridge" },
+    { ...mattress, zone: "availability" },
+  ])("rejects reserved mattress identities: %j", (entry) => {
+    expect(() =>
+      validateConfig({ ...validConfig(), mattresses: [entry] }),
+    ).toThrow("reserved mattress topic");
+  });
+
+  test.each([mattress, { ...mattress, prefix: "another/prefix" }])(
+    "rejects duplicate accessory identities across prefixes: %j",
+    (second) => {
+      expect(() =>
+        validateConfig({ ...validConfig(), mattresses: [mattress, second] }),
+      ).toThrow("duplicate mattress identity");
+    },
+  );
+
+  test.each([
+    "device_id",
+    "local_key",
+    "protocol_version",
+    "capabilities",
+    "topic",
+  ])("rejects unknown mattress field %s without its value", (key) => {
+    try {
+      validateConfig({
+        ...validConfig(),
+        mattresses: [{ ...mattress, [key]: "never-log-key" }],
+      });
+      throw new Error("Unexpected success");
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("unknown mattress field");
+      expect((error as Error).message).not.toContain("never-log-key");
+    }
+  });
+
+  test.each([
+    "tuya/bridge/availability",
+    "tuya/bridge/heartbeat",
+    "tuya/bed/availability",
+    "tuya/bed/side_a",
+    "tuya/bed/side_a/result",
+    "tuya/bed/side_a/set",
+    "tuya/bed/side_a/get",
+  ])("rejects legacy topics colliding with a mattress route: %s", (topic) => {
+    const data = validConfig();
+    data.devices[0]!.topic = topic;
+    expect(() => validateConfig({ ...data, mattresses: [mattress] })).toThrow(
+      "collides with a mattress topic",
+    );
+  });
+
+  test.each([
+    ["wled", "tuya/bed/side_a/g"],
+    ["wled", "tuya/bed/side_a/c"],
+    ["wled", "tuya/bed/side_a/api"],
+    ["z2m", "tuya/bed/side_a/set"],
+    ["z2m", "tuya/bed/side_a/get"],
+  ])("rejects a %s derived topic collision: %s", (type, topic) => {
+    const data = validConfig();
+    data.devices[0]!.topic = "tuya/bed/side_a";
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    (data.devices[0]! as Record<string, unknown>).type = type;
+    const [prefix, controller, zone] = topic.split("/", 3);
+    const alternate = {
+      ...mattress,
+      prefix: `${prefix!}/${controller!}`,
+      controller: zone!,
+      zone: topic.split("/", 4)[3]!,
+    };
+    expect(() => validateConfig({ ...data, mattresses: [alternate] })).toThrow(
+      "collides with a mattress topic",
+    );
+  });
+
+  test.each(["tuya/#", "tuya/+", "#"])(
+    "rejects ambiguous legacy subscription %s alongside mattresses",
+    (topic) => {
+      const data = validConfig();
+      data.devices[0]!.topic = topic;
+      expect(() => validateConfig({ ...data, mattresses: [mattress] })).toThrow(
+        "wildcard device topics cannot accompany mattresses",
+      );
+    },
+  );
+
+  test("accepts nested prefixes and maximum-length identifiers", () => {
+    const entry = {
+      ...mattress,
+      prefix: "home/tuya",
+      controller: "c".repeat(64),
+      zone: "z".repeat(64),
+    };
+    expect(
+      validateConfig({ ...validConfig(), mattresses: [entry] }).mattresses,
+    ).toEqual([entry]);
+  });
+
   test("accepts valid config", () => {
     const config = validateConfig(validConfig());
     expect(config.bridge.name).toBe("Hoboken");

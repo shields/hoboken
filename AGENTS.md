@@ -146,6 +146,15 @@ make lint test
 - `bridge.pincode`: format `XXX-XX-XXX` (digits)
 - `bridge.port`: positive integer
 - `bridge.bind`: optional string (network interface name or IP for mDNS)
-- `devices`: non-empty array
+- `devices`: non-empty array unless `mattresses` configures at least one zone;
+  a mattress-only configuration can omit `devices` or use an empty array
 - Each device: `name`, `topic`, `capabilities` (non-empty, valid values)
 - Scene IDs: positive integers
+- `mattresses`: optional array of `name`, `prefix`, `controller`, and `zone`
+- Mattress topics use Tucson's lowercase controller/zone identifiers and prefix
+  grammar; `bridge` controllers and `availability` zones are reserved
+- Controller/zone pairs are unique across prefixes because they determine HAP
+  accessory identities
+- Mattress routes cannot overlap device routes; wildcard device topics cannot
+  accompany mattresses
+- Mattress entries reject unknown fields and contain only logical MQTT names

@@ -14,6 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
+import type { MattressZoneConfig } from "./mattress-source.ts";
 
 export type Capability =
   "on_off" | "brightness" | "color_temp" | "color_hs" | "fan" | "fan_speed";
@@ -73,6 +74,7 @@ export interface Config {
   bridge: BridgeConfig;
   mqtt: MqttConfig;
   devices: DeviceConfig[];
+  mattresses?: MattressZoneConfig[];
   metrics?: MetricsConfig;
 }
 
@@ -122,13 +124,23 @@ export function validateConfig(data: unknown): Config {
     throw new Error("mqtt.url must be a non-empty string");
   }
 
-  if (!Array.isArray(obj.devices) || obj.devices.length === 0) {
+  const mattresses =
+    obj.mattresses === undefined
+      ? undefined
+      : validateMattresses(obj.mattresses);
+  const rawDevices =
+    obj.devices === undefined && mattresses?.length ? [] : obj.devices;
+  if (
+    !Array.isArray(rawDevices) ||
+    (rawDevices.length === 0 && !mattresses?.length)
+  ) {
     throw new Error("devices must be a non-empty array");
   }
 
-  const devices = obj.devices.map((d: unknown, i: number) =>
+  const devices = rawDevices.map((d: unknown, i: number) =>
     validateDevice(d, i),
   );
+  if (mattresses?.length) validateMattressTopics(devices, mattresses);
 
   const topics = new Set<string>();
   for (const device of devices) {
@@ -197,8 +209,109 @@ export function validateConfig(data: unknown): Config {
       url: mqtt.url,
     },
     devices,
+    ...(mattresses ? { mattresses } : {}),
     ...(metrics ? { metrics } : {}),
   };
+}
+
+function validateMattresses(data: unknown): MattressZoneConfig[] {
+  if (!Array.isArray(data)) throw new TypeError("mattresses must be an array");
+  const identities = new Set<string>();
+  return data.map((entry: unknown, index: number) => {
+    const label = `mattresses[${String(index)}]`;
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new TypeError(`${label} must be an object`);
+    }
+    const value = entry as Record<string, unknown>;
+    if (
+      Object.keys(value).some(
+        (field) => !["name", "prefix", "controller", "zone"].includes(field),
+      )
+    ) {
+      throw new Error(`${label}: unknown mattress field`);
+    }
+    if (
+      typeof value.name !== "string" ||
+      value.name.trim().length === 0 ||
+      value.name.length > 256 ||
+      value.name.includes("\0")
+    ) {
+      throw new Error(
+        `${label}.name must be a non-empty display name of at most 256 characters`,
+      );
+    }
+    if (
+      typeof value.prefix !== "string" ||
+      value.prefix.length > 256 ||
+      !/^[a-z][a-z0-9_]*(\/[a-z][a-z0-9_]*)*$/.test(value.prefix)
+    ) {
+      throw new Error(`${label}.prefix must be a valid Tucson topic prefix`);
+    }
+    if (
+      typeof value.controller !== "string" ||
+      !/^[a-z][a-z0-9_]{0,63}$/.test(value.controller)
+    ) {
+      throw new Error(
+        `${label}.controller must be a valid Tucson controller name`,
+      );
+    }
+    if (
+      typeof value.zone !== "string" ||
+      !/^[a-z][a-z0-9_]{0,63}$/.test(value.zone)
+    ) {
+      throw new Error(`${label}.zone must be a valid Tucson zone name`);
+    }
+    if (value.controller === "bridge" || value.zone === "availability") {
+      throw new Error(`${label}: reserved mattress topic`);
+    }
+    const identity = `${value.controller}/${value.zone}`;
+    if (identities.has(identity))
+      throw new Error(`${label}: duplicate mattress identity`);
+    identities.add(identity);
+    return {
+      name: value.name,
+      prefix: value.prefix,
+      controller: value.controller,
+      zone: value.zone,
+    };
+  });
+}
+
+function validateMattressTopics(
+  devices: DeviceConfig[],
+  mattresses: MattressZoneConfig[],
+): void {
+  const topics = new Set<string>();
+  for (const { prefix, controller, zone } of mattresses) {
+    const topic = `${prefix}/${controller}/${zone}`;
+    for (const route of [
+      `${prefix}/bridge/availability`,
+      `${prefix}/bridge/heartbeat`,
+      `${prefix}/${controller}/availability`,
+      topic,
+      `${topic}/result`,
+      `${topic}/set`,
+      `${topic}/get`,
+    ])
+      topics.add(route);
+  }
+  for (const device of devices) {
+    if (device.topic.includes("+") || device.topic.includes("#")) {
+      throw new Error("wildcard device topics cannot accompany mattresses");
+    }
+    const routes =
+      device.type === "wled"
+        ? [
+            device.topic,
+            `${device.topic}/g`,
+            `${device.topic}/c`,
+            `${device.topic}/api`,
+          ]
+        : [device.topic, `${device.topic}/set`, `${device.topic}/get`];
+    if (routes.some((topic) => topics.has(topic))) {
+      throw new Error("device route collides with a mattress topic");
+    }
+  }
 }
 
 function validateDevice(data: unknown, index: number): DeviceConfig {
