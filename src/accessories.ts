@@ -211,16 +211,19 @@ export function updateFanAccessoryState(
     service.getCharacteristic(Characteristic.Active).updateValue(state.active);
   }
 
-  if (!capabilities.includes("fan_speed")) {
-    return;
-  }
-
-  if (state.rotation_speed !== undefined) {
+  if (
+    capabilities.includes("fan_speed") &&
+    state.rotation_speed !== undefined
+  ) {
     service
       .getCharacteristic(Characteristic.RotationSpeed)
       .updateValue(state.rotation_speed);
   }
-  if (state.target_fan_state !== undefined) {
+
+  if (
+    capabilities.includes("fan_speed") &&
+    state.target_fan_state !== undefined
+  ) {
     service
       .getCharacteristic(Characteristic.TargetFanState)
       .updateValue(state.target_fan_state);
@@ -287,14 +290,11 @@ export function updateAccessoryState(
       .updateValue(clampColorTemp(state.color_temp));
   }
 
-  if (!capabilities.includes("color_hs")) {
-    return;
-  }
-
-  if (state.hue !== undefined) {
+  if (capabilities.includes("color_hs") && state.hue !== undefined) {
     service.getCharacteristic(Characteristic.Hue).updateValue(state.hue);
   }
-  if (state.saturation !== undefined) {
+
+  if (capabilities.includes("color_hs") && state.saturation !== undefined) {
     service
       .getCharacteristic(Characteristic.Saturation)
       .updateValue(state.saturation);

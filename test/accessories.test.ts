@@ -658,12 +658,25 @@ describe("updateAccessoryState", () => {
     const device = makeDevice({ capabilities: ["on_off"] });
     const accessory = createLightAccessory(device, publish, getState);
 
-    // Should not throw even with brightness data when capability not declared
-    updateAccessoryState(accessory, { on: true, brightness: 100 }, ["on_off"]);
-    const on = accessory
-      .getService(Service.Lightbulb)!
-      .getCharacteristic(Characteristic.On);
-    expect(on.value).toBe(true);
+    updateAccessoryState(
+      accessory,
+      {
+        on: true,
+        brightness: 100,
+        color_temp: 350,
+        hue: 200,
+        saturation: 80,
+      },
+      ["on_off"],
+    );
+    const service = accessory.getService(Service.Lightbulb)!;
+    expect(service.getCharacteristic(Characteristic.On).value).toBe(true);
+    expect(service.testCharacteristic(Characteristic.Brightness)).toBe(false);
+    expect(service.testCharacteristic(Characteristic.ColorTemperature)).toBe(
+      false,
+    );
+    expect(service.testCharacteristic(Characteristic.Hue)).toBe(false);
+    expect(service.testCharacteristic(Characteristic.Saturation)).toBe(false);
   });
 
   test("ignores non-lightbulb accessory", () => {
@@ -905,13 +918,19 @@ describe("updateFanAccessoryState", () => {
     const device = makeFanDevice({ capabilities: ["fan"] });
     const accessory = createFanAccessory(device, publish, getState);
 
-    updateFanAccessoryState(accessory, { active: 1, rotation_speed: 67 }, [
-      "fan",
-    ]);
-    const active = accessory
-      .getService(Service.Fanv2)!
-      .getCharacteristic(Characteristic.Active);
-    expect(active.value).toBe(1);
+    updateFanAccessoryState(
+      accessory,
+      { active: 1, rotation_speed: 67, target_fan_state: 1 },
+      ["fan"],
+    );
+    const service = accessory.getService(Service.Fanv2)!;
+    expect(service.getCharacteristic(Characteristic.Active).value).toBe(1);
+    expect(service.testCharacteristic(Characteristic.RotationSpeed)).toBe(
+      false,
+    );
+    expect(service.testCharacteristic(Characteristic.TargetFanState)).toBe(
+      false,
+    );
   });
 
   test("ignores non-Fanv2 accessory", () => {
