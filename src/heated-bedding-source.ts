@@ -101,7 +101,7 @@ type Route =
 interface SourceOptions {
   clock?: () => number;
   identifier?: () => string;
-  changed?: (topic: string) => void;
+  changed?: () => void;
   failed?: () => void;
 }
 
@@ -204,7 +204,7 @@ export class HeatedBeddingSource {
   subscriptionsReady(generation: number): void {
     if (!this.#connected || generation !== this.#generation) return;
     this.#subscribed = true;
-    for (const zone of this.#zones.values()) this.#changed?.(zone.topic);
+    this.#changed?.();
   }
 
   disconnect(): void {
@@ -223,8 +223,8 @@ export class HeatedBeddingSource {
     for (const zone of this.#zones.values()) {
       zone.state = undefined;
       this.#cancel(zone);
-      this.#changed?.(zone.topic);
     }
+    this.#changed?.();
   }
 
   topics(): { topic: string; live: boolean }[] {
@@ -280,17 +280,17 @@ export class HeatedBeddingSource {
           route.prefix.heartbeat = undefined;
           for (const zone of route.prefix.zones) this.#cancel(zone);
         }
-        for (const zone of route.prefix.zones) this.#changed?.(zone.topic);
+        this.#changed?.();
         if (payload !== "online" && payload !== "offline")
           throw new RangeError("Invalid heated bedding bridge availability");
         break;
       }
       case "controller": {
         route.controller.online = payload === "online";
-        for (const zone of route.controller.zones) {
-          if (!route.controller.online) this.#cancel(zone);
-          this.#changed?.(zone.topic);
+        if (!route.controller.online) {
+          for (const zone of route.controller.zones) this.#cancel(zone);
         }
+        this.#changed?.();
         if (payload !== "online" && payload !== "offline")
           throw new RangeError(
             "Invalid heated bedding controller availability",
@@ -308,13 +308,11 @@ export class HeatedBeddingSource {
         clearTimeout(route.prefix.timer);
         route.prefix.timer = setTimeout(() => {
           route.prefix.heartbeat = undefined;
-          for (const zone of route.prefix.zones) {
-            this.#cancel(zone);
-            this.#changed?.(zone.topic);
-          }
+          for (const zone of route.prefix.zones) this.#cancel(zone);
+          this.#changed?.();
         }, HEARTBEAT_TIMEOUT);
         route.prefix.timer.unref();
-        for (const zone of route.prefix.zones) this.#changed?.(zone.topic);
+        this.#changed?.();
         break;
       }
       case "state": {
@@ -323,13 +321,13 @@ export class HeatedBeddingSource {
           route.zone.state = parseHeatedBeddingState(payload);
         } catch (error: unknown) {
           this.#cancel(route.zone);
-          this.#changed?.(route.zone.topic);
+          this.#changed?.();
           throw error;
         }
         for (const [id, pending] of this.#pending) {
           if (pending.zone === route.zone) this.#confirm(id, pending);
         }
-        this.#changed?.(route.zone.topic);
+        this.#changed?.();
         break;
       }
       case "result": {
