@@ -106,6 +106,20 @@ describe("heated bedding source", () => {
     });
   });
 
+  test("usable state is absent until the zone is live and rejects unknown zones", () => {
+    expect(source.usableState(TOPIC)).toBeUndefined();
+    ready();
+    expect(source.usableState(TOPIC)).toEqual({
+      ...BASELINE,
+      auto_off_seconds: null,
+      remaining_seconds: null,
+      preheat_remaining_seconds: null,
+    });
+    advance(45000);
+    expect(source.usableState(TOPIC)).toBeUndefined();
+    expect(() => source.usableState("unknown/zone")).toThrow(RangeError);
+  });
+
   test("waits for both a confirmed result and the reported requested fields", async () => {
     ready();
     const write = source.writeFan(TOPIC, { speed: 65 });

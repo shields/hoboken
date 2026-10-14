@@ -234,7 +234,7 @@ export class HeatedBeddingSource {
     }));
   }
 
-  getState(topic: string): UsableHeatedBeddingState {
+  usableState(topic: string): UsableHeatedBeddingState | undefined {
     const zone = this.#zone(topic);
     const state = zone.state;
     if (
@@ -250,13 +250,20 @@ export class HeatedBeddingSource {
       state.heat_level === null ||
       state.preheat === null
     )
-      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      return undefined;
     return {
       ...state,
       power: state.power,
       heat_level: state.heat_level,
       preheat: state.preheat,
     };
+  }
+
+  getState(topic: string): UsableHeatedBeddingState {
+    const state = this.usableState(topic);
+    if (!state)
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    return state;
   }
 
   pendingCount(topic: string): number {
@@ -438,12 +445,13 @@ export class HeatedBeddingSource {
       );
       return;
     }
-    let state: UsableHeatedBeddingState;
-    try {
-      state = this.getState(zone.topic);
-    } catch (error: unknown) {
-      if (!(error instanceof HapStatusError)) throw error;
-      this.#reject(zone, waiters, error);
+    const state = this.usableState(zone.topic);
+    if (!state) {
+      this.#reject(
+        zone,
+        waiters,
+        new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE),
+      );
       return;
     }
     const id = this.#identifier();
@@ -500,12 +508,13 @@ export class HeatedBeddingSource {
       return;
     }
     if (!pending.confirmed) return;
-    let state: UsableHeatedBeddingState;
-    try {
-      state = this.getState(pending.zone.topic);
-    } catch (error: unknown) {
-      if (!(error instanceof HapStatusError)) throw error;
-      this.#finish(id, pending, error);
+    const state = this.usableState(pending.zone.topic);
+    if (!state) {
+      this.#finish(
+        id,
+        pending,
+        new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE),
+      );
       return;
     }
     // A newer write to this zone, or a firmware side effect of one such as
