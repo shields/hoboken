@@ -15,13 +15,13 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { HAPStatus, HapStatusError } from "@homebridge/hap-nodejs";
 import {
-  MattressSource,
-  type MattressPublication,
-  type MattressZoneConfig,
-} from "../src/mattress-source.ts";
+  HeatedBeddingSource,
+  type HeatedBeddingPublication,
+  type HeatedBeddingZoneConfig,
+} from "../src/heated-bedding-source.ts";
 
-const ZONE: MattressZoneConfig = {
-  name: "Left pad",
+const ZONE: HeatedBeddingZoneConfig = {
+  name: "Bed Side A",
   prefix: "tuya",
   controller: "bed",
   zone: "left",
@@ -34,13 +34,13 @@ const BASELINE = {
   preheat: false,
 };
 
-describe("mattress source", () => {
+describe("heated bedding source", () => {
   let now: number;
-  let source: MattressSource;
+  let source: HeatedBeddingSource;
   let generation: number;
   let sent: {
     topic: string;
-    payload: MattressPublication;
+    payload: HeatedBeddingPublication;
     complete: (error?: Error) => void;
   }[];
   let changed: string[];
@@ -51,7 +51,7 @@ describe("mattress source", () => {
     sent = [];
     changed = [];
     let sequence = 0;
-    source = new MattressSource(
+    source = new HeatedBeddingSource(
       [ZONE],
       (topic, payload, complete) => {
         sent.push({ topic, payload, complete });
@@ -335,7 +335,7 @@ describe("mattress source", () => {
   test("transport publication failure disconnects without replay", async () => {
     let failed = 0;
     source.disconnect();
-    source = new MattressSource(
+    source = new HeatedBeddingSource(
       [ZONE],
       (topic, payload, complete) => {
         sent.push({ topic, payload, complete });
@@ -453,9 +453,12 @@ describe("mattress source", () => {
     const publish = (): void => {
       throw new Error("A duplicate configuration must not publish");
     };
-    expect(() => new MattressSource([ZONE, ZONE], publish)).toThrow(RangeError);
+    expect(() => new HeatedBeddingSource([ZONE, ZONE], publish)).toThrow(
+      RangeError,
+    );
     expect(
-      () => new MattressSource([{ ...ZONE, controller: "bridge" }], publish),
+      () =>
+        new HeatedBeddingSource([{ ...ZONE, controller: "bridge" }], publish),
     ).toThrow(RangeError);
     expect(() => source.getState("unknown/zone")).toThrow(RangeError);
   });
@@ -483,7 +486,7 @@ describe("mattress source", () => {
 
   test("a duplicate generated identifier cannot overwrite another command or leak admission", async () => {
     source.disconnect();
-    source = new MattressSource(
+    source = new HeatedBeddingSource(
       [ZONE],
       (topic, payload, complete) => {
         sent.push({ topic, payload, complete });
@@ -498,7 +501,7 @@ describe("mattress source", () => {
     ).toMatchObject([
       {
         status: "rejected",
-        reason: new Error("Duplicate generated mattress request ID"),
+        reason: new Error("Duplicate generated heated bedding request ID"),
       },
     ]);
     expect(source.pendingCount(TOPIC)).toBe(1);
@@ -511,11 +514,11 @@ describe("mattress source", () => {
     expect(await fanOutcomes).toMatchObject([
       {
         status: "rejected",
-        reason: new Error("Duplicate generated mattress request ID"),
+        reason: new Error("Duplicate generated heated bedding request ID"),
       },
       {
         status: "rejected",
-        reason: new Error("Duplicate generated mattress request ID"),
+        reason: new Error("Duplicate generated heated bedding request ID"),
       },
     ]);
     expect(source.pendingCount(TOPIC)).toBe(1);
@@ -532,7 +535,7 @@ describe("mattress source", () => {
       source.disconnect();
       const failure = new Error("Injected boundary failure");
       let broken = true;
-      source = new MattressSource(
+      source = new HeatedBeddingSource(
         [ZONE],
         (topic, payload, complete) => {
           if (broken && boundary === "publisher") throw failure;
@@ -572,10 +575,10 @@ describe("mattress source", () => {
 
   test("both sides share controller availability while another controller remains usable", async () => {
     source.disconnect();
-    const right: MattressZoneConfig = { ...ZONE, zone: "right" };
-    const other: MattressZoneConfig = { ...ZONE, controller: "other" };
+    const right: HeatedBeddingZoneConfig = { ...ZONE, zone: "right" };
+    const other: HeatedBeddingZoneConfig = { ...ZONE, controller: "other" };
     let sequence = 0;
-    source = new MattressSource(
+    source = new HeatedBeddingSource(
       [ZONE, right, other],
       (topic, payload, complete) => {
         sent.push({ topic, payload, complete });

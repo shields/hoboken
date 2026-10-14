@@ -22,19 +22,23 @@ import {
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
-import type { MattressSource, MattressZoneConfig } from "./mattress-source.ts";
+import type {
+  HeatedBeddingSource,
+  HeatedBeddingZoneConfig,
+} from "./heated-bedding-source.ts";
 
-export interface MattressAccessories {
+export interface HeatedBeddingAccessories {
   fan: Accessory;
   preheat: Accessory;
   update: () => void;
 }
 
-export function createMattressAccessories(
-  config: MattressZoneConfig,
-  source: MattressSource,
-): MattressAccessories {
+export function createHeatedBeddingAccessories(
+  config: HeatedBeddingZoneConfig,
+  source: HeatedBeddingSource,
+): HeatedBeddingAccessories {
   const topic = `${config.prefix}/${config.controller}/${config.zone}`;
+  // Keep the UUID seeds stable so existing HomeKit pairings retain their accessories.
   const fan = new Accessory(
     config.name,
     uuid.generate(

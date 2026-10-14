@@ -4,6 +4,8 @@
 
 Minimal HomeKit bridge for Zigbee2MQTT and WLED. Uses `@homebridge/hap-nodejs`
 directly (no framework). Connects to MQTT, reads device config from YAML.
+Tucson's MQTT profile adds heated mattress pads and heated blankets, referred
+to collectively as heated bedding. Use short zone names such as "Bed Side A".
 
 ## Toolchain
 
@@ -23,7 +25,7 @@ bun install               # Install dependencies
 make lint                 # TypeScript type checking (tsc --noEmit) and ESLint
 make test                 # Unit tests with coverage
 make test-broker-deps     # System packages for the pinned Mosquitto build
-make test-integration     # WLED and mattress round trips (Node.js)
+make test-integration     # WLED and heated bedding round trips (Node.js)
 make test-screenshot      # Compare status page against golden file (Docker)
 make run                  # Run with Node.js
 make demo                 # Serve the status page with sample data
@@ -147,15 +149,15 @@ make lint test
 - `bridge.pincode`: format `XXX-XX-XXX` (digits)
 - `bridge.port`: positive integer
 - `bridge.bind`: optional string (network interface name or IP for mDNS)
-- `devices`: non-empty array unless `mattresses` configures at least one zone;
-  a mattress-only configuration can omit `devices` or use an empty array
+- `devices`: non-empty array unless `heatedBedding` configures at least one zone;
+  a configuration with only heated bedding can omit `devices` or use an empty array
 - Each device: `name`, `topic`, `capabilities` (non-empty, valid values)
 - Scene IDs: positive integers
-- `mattresses`: optional array of `name`, `prefix`, `controller`, and `zone`
-- Mattress topics use Tucson's lowercase controller/zone identifiers and prefix
+- `heatedBedding`: optional array of `name`, `prefix`, `controller`, and `zone`
+- Heated bedding topics use Tucson's lowercase controller/zone identifiers and prefix
   grammar; `bridge` controllers and `availability` zones are reserved
 - Controller/zone pairs are unique across prefixes because they determine HAP
   accessory identities
-- Mattress routes cannot overlap device routes; wildcard device topics cannot
-  accompany mattresses
-- Mattress entries reject unknown fields and contain only logical MQTT names
+- Heated bedding routes cannot overlap device routes; wildcard device topics cannot
+  accompany heated bedding
+- Heated bedding entries reject unknown fields and contain only logical MQTT names

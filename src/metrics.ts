@@ -16,7 +16,7 @@ import { createServer } from "node:http";
 import type { Server, ServerResponse } from "node:http";
 import { Counter, Gauge, Registry, collectDefaultMetrics } from "prom-client";
 import type { Capability, DeviceType } from "./config.ts";
-import type { UsableMattressState } from "./mattress-source.ts";
+import type { UsableHeatedBeddingState } from "./heated-bedding-source.ts";
 import {
   clampColorTemp,
   wledBrightnessToHomeKit,
@@ -136,10 +136,10 @@ export interface StatusData {
   hap: { connections: HapConnection[] };
   bridge: { name: string; version: string };
   devices: DeviceStatus[];
-  mattresses?: {
+  heatedBedding?: {
     name: string;
     topic: string;
-    state: UsableMattressState | null;
+    state: UsableHeatedBeddingState | null;
     pending: number;
   }[];
 }
@@ -624,7 +624,7 @@ function renderStatusContent(data: StatusData): string {
       </div>`;
   }
 
-  for (const zone of data.mattresses ?? []) {
+  for (const zone of data.heatedBedding ?? []) {
     const homeKit =
       zone.state === null
         ? '<span class="na">No Response</span>'
@@ -649,7 +649,7 @@ function renderStatusContent(data: StatusData): string {
                 `<tr><td class="key">${escapeHtml(key)}</td><td>${escapeHtml(formatValue(value))}</td></tr>`,
             )
             .join("")}</tbody></table>`;
-    devicesHtml += `<div class="device"><h2>${escapeHtml(zone.name)} <span class="type-badge">mattress</span></h2><div class="label">HomeKit</div>${homeKit}<div class="label">MQTT state <span class="topic">${escapeHtml(zone.topic)}</span></div>${rows}<div class="label">Pending callers: ${String(zone.pending)}</div></div>`;
+    devicesHtml += `<div class="device"><h2>${escapeHtml(zone.name)} <span class="type-badge">heated bedding</span></h2><div class="label">HomeKit</div>${homeKit}<div class="label">MQTT state <span class="topic">${escapeHtml(zone.topic)}</span></div>${rows}<div class="label">Pending callers: ${String(zone.pending)}</div></div>`;
   }
 
   return `<h1>${escapeHtml(data.bridge.name)}</h1>

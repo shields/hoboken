@@ -29,12 +29,12 @@ import { fileURLToPath } from "node:url";
 import { connect } from "mqtt";
 import { Registry } from "prom-client";
 import type { Config } from "./config.ts";
-import { MattressMqtt } from "./mattress-mqtt.ts";
-import type { MattressSource } from "./mattress-source.ts";
+import { HeatedBeddingMQTT } from "./heated-bedding-mqtt.ts";
+import type { HeatedBeddingSource } from "./heated-bedding-source.ts";
 import {
-  createMattressAccessories,
-  type MattressAccessories,
-} from "./mattress-accessories.ts";
+  createHeatedBeddingAccessories,
+  type HeatedBeddingAccessories,
+} from "./heated-bedding-accessories.ts";
 import * as log from "./log.ts";
 import {
   createFanAccessory,
@@ -71,7 +71,7 @@ export function buildStatusData(
   mqtt: { url: string; connected: boolean },
   hapConnections: HapConnection[],
   version: string,
-  mattress?: MattressSource,
+  heatedBedding?: HeatedBeddingSource,
 ): StatusData {
   return {
     mqtt,
@@ -85,13 +85,13 @@ export function buildStatusData(
       ...(d.scenes ? { scenes: d.scenes } : {}),
       state: stateCache.get(d.topic) ?? null,
     })),
-    ...(config.mattresses?.length
+    ...(config.heatedBedding?.length
       ? {
-          mattresses: config.mattresses.map((zone) => {
+          heatedBedding: config.heatedBedding.map((zone) => {
             const topic = `${zone.prefix}/${zone.controller}/${zone.zone}`;
             let state = null;
             try {
-              state = mattress?.getState(topic) ?? null;
+              state = heatedBedding?.getState(topic) ?? null;
             } catch (error: unknown) {
               if (!(error instanceof HapStatusError)) throw error;
             }
@@ -99,7 +99,7 @@ export function buildStatusData(
               name: zone.name,
               topic,
               state,
-              pending: mattress?.pendingCount(topic) ?? 0,
+              pending: heatedBedding?.pendingCount(topic) ?? 0,
             };
           }),
         }
@@ -118,8 +118,8 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   const stateCache = new Map<string, RawState>();
   const lastColorPublish = new Map<string, number>();
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  let mattress: MattressMqtt | undefined;
-  const mattressAccessories: MattressAccessories[] = [];
+  let heatedBedding: HeatedBeddingMQTT | undefined;
+  const heatedBeddingAccessories: HeatedBeddingAccessories[] = [];
 
   function cancelAllRetries(): void {
     for (const timer of pendingGetTimers.values()) {
@@ -192,7 +192,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   function mqttConnected(): boolean {
     return (
       (config.devices.length === 0 || mqttClient?.connected === true) &&
-      (mattress?.connected ?? (config.mattresses?.length ?? 0) === 0)
+      (heatedBedding?.connected ?? (config.heatedBedding?.length ?? 0) === 0)
     );
   }
 
@@ -201,10 +201,10 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     let unknown = config.devices.filter(
       (device) => !stateCache.has(device.topic),
     ).length;
-    for (const zone of config.mattresses ?? []) {
+    for (const zone of config.heatedBedding ?? []) {
       try {
-        if (mattress) {
-          mattress.source.getState(
+        if (heatedBedding) {
+          heatedBedding.source.getState(
             `${zone.prefix}/${zone.controller}/${zone.zone}`,
           );
         } else {
@@ -318,7 +318,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
         { url: sanitizedUrl, connected: mqttConnected() },
         [...hapConnections.values()],
         version,
-        mattress?.source,
+        heatedBedding?.source,
       );
     metricsServer = startMetricsServer(
       config.metrics.port,
@@ -411,9 +411,9 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     }
   }
 
-  if (config.mattresses?.length) {
+  if (config.heatedBedding?.length) {
     const zoneTopics = new Map(
-      config.mattresses.flatMap((zone) => {
+      config.heatedBedding.flatMap((zone) => {
         const topic = `${zone.prefix}/${zone.controller}/${zone.zone}`;
         return [
           [topic, topic],
@@ -421,27 +421,35 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
         ];
       }),
     );
-    mattress = new MattressMqtt(config.mqtt.url, config.mattresses, {
-      changed: () => {
-        for (const accessories of mattressAccessories) accessories.update();
-        updateMetrics();
+    heatedBedding = new HeatedBeddingMQTT(
+      config.mqtt.url,
+      config.heatedBedding,
+      {
+        changed: () => {
+          for (const accessories of heatedBeddingAccessories)
+            accessories.update();
+          updateMetrics();
+        },
+        received: (topic) => {
+          const zone = zoneTopics.get(topic);
+          if (zone) metrics?.mqttMessagesReceived.labels(zone).inc();
+        },
+        published: () => {
+          metrics?.mqttMessagesPublished.inc();
+        },
+        failed: () => {
+          metrics?.mqttErrors.inc();
+        },
       },
-      received: (topic) => {
-        const zone = zoneTopics.get(topic);
-        if (zone) metrics?.mqttMessagesReceived.labels(zone).inc();
-      },
-      published: () => {
-        metrics?.mqttMessagesPublished.inc();
-      },
-      failed: () => {
-        metrics?.mqttErrors.inc();
-      },
-    });
-    for (const zone of config.mattresses) {
-      const accessories = createMattressAccessories(zone, mattress.source);
+    );
+    for (const zone of config.heatedBedding) {
+      const accessories = createHeatedBeddingAccessories(
+        zone,
+        heatedBedding.source,
+      );
       for (const [accessory, kind] of [
-        [accessories.fan, "Mattress Fan"],
-        [accessories.preheat, "Mattress Preheat"],
+        [accessories.fan, "Heated Bedding Fan"],
+        [accessories.preheat, "Heated Bedding Preheat"],
       ] as const) {
         setAccessoryInfo(
           accessory,
@@ -452,11 +460,11 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
         );
         bridge.addBridgedAccessory(accessory);
       }
-      mattressAccessories.push(accessories);
+      heatedBeddingAccessories.push(accessories);
     }
   }
   metrics?.devicesConfigured.set(
-    config.devices.length + (config.mattresses?.length ?? 0),
+    config.devices.length + (config.heatedBedding?.length ?? 0),
   );
   updateMetrics();
 
@@ -655,7 +663,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     ...(metricsPort === undefined ? {} : { metricsPort }),
     shutdown: async () => {
       cancelAllRetries();
-      await mattress?.stop();
+      await heatedBedding?.stop();
       log.log("Shutting down: unpublishing bridge (sending mDNS goodbye)");
       await bridge.unpublish();
       log.log("Shutting down: closing MQTT connection");

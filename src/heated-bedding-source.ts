@@ -15,33 +15,35 @@
 import { randomUUID } from "node:crypto";
 import { HAPStatus, HapStatusError } from "@homebridge/hap-nodejs";
 import {
-  coalesceMattressFanWrites,
-  normalizeMattressSpeed,
-  parseMattressHeartbeat,
-  parseMattressResult,
-  parseMattressState,
-  type MattressCommand,
-  type MattressFanWrite,
-  type MattressState,
-} from "./mattress-profile.ts";
+  coalesceHeatedBeddingFanWrites,
+  normalizeHeatedBeddingSpeed,
+  parseHeatedBeddingHeartbeat,
+  parseHeatedBeddingResult,
+  parseHeatedBeddingState,
+  type HeatedBeddingCommand,
+  type HeatedBeddingFanWrite,
+  type HeatedBeddingState,
+} from "./heated-bedding-profile.ts";
 
-export interface MattressZoneConfig {
+export interface HeatedBeddingZoneConfig {
   name: string;
   prefix: string;
   controller: string;
   zone: string;
 }
 
-export type UsableMattressState = MattressState & {
+export type UsableHeatedBeddingState = HeatedBeddingState & {
   power: boolean;
   heat_level: number;
   preheat: boolean;
 };
 
-export type MattressPublication = MattressCommand & { request_id: string };
-export type MattressPublish = (
+export type HeatedBeddingPublication = HeatedBeddingCommand & {
+  request_id: string;
+};
+export type HeatedBeddingPublish = (
   topic: string,
-  payload: MattressPublication,
+  payload: HeatedBeddingPublication,
   complete: (error?: Error) => void,
 ) => void;
 
@@ -59,12 +61,12 @@ interface Controller {
 }
 
 interface Waiter {
-  resolve: (state: UsableMattressState) => void;
+  resolve: (state: UsableHeatedBeddingState) => void;
   reject: (error: unknown) => void;
 }
 
 interface FanWindow {
-  writes: MattressFanWrite[];
+  writes: HeatedBeddingFanWrite[];
   waiters: Waiter[];
   deadline: number;
   timer: ReturnType<typeof setTimeout>;
@@ -74,14 +76,14 @@ interface Zone {
   topic: string;
   prefix: Prefix;
   controller: Controller;
-  state: MattressState | undefined;
+  state: HeatedBeddingState | undefined;
   window: FanWindow | undefined;
   callers: number;
 }
 
 interface Pending {
   zone: Zone;
-  command: MattressCommand;
+  command: HeatedBeddingCommand;
   session: string;
   deadline: number;
   confirmed: boolean;
@@ -106,7 +108,7 @@ const WRITE_TIMEOUT = 8500;
 const COALESCE_DELAY = 50;
 const MAX_CALLERS = 32;
 
-export class MattressSource {
+export class HeatedBeddingSource {
   #zones = new Map<string, Zone>();
   #prefixes = new Map<string, Prefix>();
   #controllers = new Map<string, Controller>();
@@ -114,7 +116,7 @@ export class MattressSource {
   #pending = new Map<string, Pending>();
   #clock: () => number;
   #identifier: () => string;
-  #publish: MattressPublish;
+  #publish: HeatedBeddingPublish;
   #changed: SourceOptions["changed"];
   #failed: SourceOptions["failed"];
   #generation = 0;
@@ -122,8 +124,8 @@ export class MattressSource {
   #subscribed = false;
 
   constructor(
-    configs: readonly MattressZoneConfig[],
-    publish: MattressPublish,
+    configs: readonly HeatedBeddingZoneConfig[],
+    publish: HeatedBeddingPublish,
     options: SourceOptions = {},
   ) {
     this.#publish = publish;
@@ -180,13 +182,13 @@ export class MattressSource {
 
   #route(topic: string, route: Route): void {
     if (this.#routes.has(topic))
-      throw new RangeError("Duplicate mattress MQTT topic");
+      throw new RangeError("Duplicate heated bedding MQTT topic");
     this.#routes.set(topic, route);
   }
 
   #zone(topic: string): Zone {
     const zone = this.#zones.get(topic);
-    if (!zone) throw new RangeError("Unknown mattress zone");
+    if (!zone) throw new RangeError("Unknown heated bedding zone");
     return zone;
   }
 
@@ -229,7 +231,7 @@ export class MattressSource {
     }));
   }
 
-  getState(topic: string): UsableMattressState {
+  getState(topic: string): UsableHeatedBeddingState {
     const zone = this.#zone(topic);
     const state = zone.state;
     if (
@@ -277,7 +279,7 @@ export class MattressSource {
         }
         for (const zone of route.prefix.zones) this.#changed?.(zone.topic);
         if (payload !== "online" && payload !== "offline")
-          throw new RangeError("Invalid mattress bridge availability");
+          throw new RangeError("Invalid heated bedding bridge availability");
         break;
       }
       case "controller": {
@@ -287,12 +289,14 @@ export class MattressSource {
           this.#changed?.(zone.topic);
         }
         if (payload !== "online" && payload !== "offline")
-          throw new RangeError("Invalid mattress controller availability");
+          throw new RangeError(
+            "Invalid heated bedding controller availability",
+          );
         break;
       }
       case "heartbeat": {
         if (retained) return;
-        const session = parseMattressHeartbeat(payload);
+        const session = parseHeatedBeddingHeartbeat(payload);
         if (session !== route.prefix.session) {
           for (const zone of route.prefix.zones) this.#cancel(zone);
         }
@@ -313,7 +317,7 @@ export class MattressSource {
       case "state": {
         route.zone.state = undefined;
         try {
-          route.zone.state = parseMattressState(payload);
+          route.zone.state = parseHeatedBeddingState(payload);
         } catch (error: unknown) {
           this.#cancel(route.zone);
           this.#changed?.(route.zone.topic);
@@ -327,7 +331,7 @@ export class MattressSource {
       }
       case "result": {
         if (retained) return;
-        const result = parseMattressResult(payload);
+        const result = parseHeatedBeddingResult(payload);
         const pending = this.#pending.get(result.request_id);
         if (pending?.zone !== route.zone) return;
         if (result.outcome === "confirmed") {
@@ -361,9 +365,9 @@ export class MattressSource {
 
   async writeFan(
     topic: string,
-    write: MattressFanWrite,
-  ): Promise<UsableMattressState> {
-    if ("speed" in write) normalizeMattressSpeed(write.speed);
+    write: HeatedBeddingFanWrite,
+  ): Promise<UsableHeatedBeddingState> {
+    if ("speed" in write) normalizeHeatedBeddingSpeed(write.speed);
     const zone = this.#admit(topic);
     return new Promise((resolve, reject) => {
       const waiter: Waiter = { resolve, reject };
@@ -379,7 +383,7 @@ export class MattressSource {
             zone.window = undefined;
             this.#send(
               zone,
-              coalesceMattressFanWrites(window.writes),
+              coalesceHeatedBeddingFanWrites(window.writes),
               window.waiters,
               window.deadline,
             );
@@ -394,7 +398,7 @@ export class MattressSource {
   async writePreheat(
     topic: string,
     value: boolean,
-  ): Promise<UsableMattressState> {
+  ): Promise<UsableHeatedBeddingState> {
     const zone = this.#admit(topic);
     return new Promise((resolve, reject) => {
       this.#send(
@@ -408,7 +412,7 @@ export class MattressSource {
 
   #send(
     zone: Zone,
-    command: MattressCommand,
+    command: HeatedBeddingCommand,
     waiters: Waiter[],
     deadline: number,
   ): void {
@@ -421,7 +425,7 @@ export class MattressSource {
 
   #dispatch(
     zone: Zone,
-    command: MattressCommand,
+    command: HeatedBeddingCommand,
     waiters: Waiter[],
     deadline: number,
   ): void {
@@ -433,7 +437,7 @@ export class MattressSource {
       );
       return;
     }
-    let state: UsableMattressState;
+    let state: UsableHeatedBeddingState;
     try {
       state = this.getState(zone.topic);
     } catch (error: unknown) {
@@ -443,7 +447,7 @@ export class MattressSource {
     }
     const id = this.#identifier();
     if (this.#pending.has(id)) {
-      throw new Error("Duplicate generated mattress request ID");
+      throw new Error("Duplicate generated heated bedding request ID");
     }
     const pending: Pending = {
       zone,
@@ -493,7 +497,7 @@ export class MattressSource {
       return;
     }
     if (!pending.confirmed) return;
-    let state: UsableMattressState;
+    let state: UsableHeatedBeddingState;
     try {
       state = this.getState(pending.zone.topic);
     } catch (error: unknown) {
@@ -504,7 +508,8 @@ export class MattressSource {
     if (
       state.session_id !== pending.session ||
       Object.entries(pending.command).some(
-        ([field, value]) => state[field as keyof MattressCommand] !== value,
+        ([field, value]) =>
+          state[field as keyof HeatedBeddingCommand] !== value,
       )
     )
       return;
