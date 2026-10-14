@@ -22,6 +22,7 @@ import {
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
+import { heatedBeddingTopic } from "./heated-bedding-profile.ts";
 import type {
   HeatedBeddingSource,
   HeatedBeddingZoneConfig,
@@ -37,7 +38,7 @@ export function createHeatedBeddingAccessories(
   config: HeatedBeddingZoneConfig,
   source: HeatedBeddingSource,
 ): HeatedBeddingAccessories {
-  const topic = `${config.prefix}/${config.controller}/${config.zone}`;
+  const topic = heatedBeddingTopic(config);
   // These seeds define the initial accessory identities for Tucson's heated bedding profile.
   const fan = new Accessory(
     config.name,

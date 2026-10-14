@@ -192,11 +192,24 @@ export class HeatedBeddingMQTT {
       } catch (error: unknown) {
         if (!(error instanceof RangeError || error instanceof SyntaxError))
           throw error;
-        this.#fail(client, "invalid_heated_bedding_message");
+        // SyntaxError text quotes the payload, so only RangeError's fixed text is logged.
+        this.#fail(client, "invalid_heated_bedding_message", {
+          topic,
+          reason:
+            error instanceof RangeError
+              ? error.message
+              : "Heated bedding MQTT payload is not valid JSON",
+        });
       }
     });
-    client.on("error", () => {
-      this.#fail(client, "mqtt_connection_error");
+    client.on("error", (error) => {
+      const { code } = error as { code?: unknown };
+      this.#fail(client, "mqtt_connection_error", {
+        code:
+          typeof code === "string" || typeof code === "number"
+            ? code
+            : undefined,
+      });
     });
     client.on("close", () => {
       this.#fail(client, "mqtt_connection_closed");
@@ -214,7 +227,11 @@ export class HeatedBeddingMQTT {
     client.connect();
   }
 
-  #fail(client: MqttClient, event: string): void {
+  #fail(
+    client: MqttClient,
+    event: string,
+    details: Record<string, unknown> = {},
+  ): void {
     if (client !== this.#client) return;
     this.#client = undefined;
     this.#ready = false;
@@ -225,7 +242,7 @@ export class HeatedBeddingMQTT {
     const delay = Math.min(60000, this.#backoff * (1 + 0.25 * this.#random()));
     this.#backoff = Math.min(60000, this.#backoff * 2);
     this.#logger.error(
-      { event, retry_ms: delay },
+      { event, ...details, retry_ms: delay },
       "Heated bedding MQTT unavailable",
     );
     this.#failed?.();

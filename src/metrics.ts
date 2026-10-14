@@ -246,7 +246,7 @@ export function startMetricsServer(
       ready = true;
     },
     notifyStateChange: () => {
-      if (!getStatus) return;
+      if (!getStatus || sseClients.size === 0) return;
       const content = renderStatusContent(getStatus());
       for (const client of sseClients) {
         sendSseEvent(client, content);

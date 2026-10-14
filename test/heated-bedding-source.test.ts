@@ -454,7 +454,7 @@ describe("heated bedding source", () => {
       throw new Error("A duplicate configuration must not publish");
     };
     expect(() => new HeatedBeddingSource([ZONE, ZONE], publish)).toThrow(
-      RangeError,
+      new RangeError(`Duplicate heated bedding MQTT topic "${TOPIC}"`),
     );
     expect(
       () =>

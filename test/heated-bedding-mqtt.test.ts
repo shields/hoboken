@@ -443,6 +443,35 @@ describe("heated bedding MQTT owner", () => {
     },
   );
 
+  test.each([
+    [{ ...STATE, power: "secret" }, "Invalid heated bedding reported Boolean"],
+    ["secret invalid JSON", "Heated bedding MQTT payload is not valid JSON"],
+    ["secret".repeat(11000), "Heated bedding MQTT payload exceeds its limit"],
+  ])(
+    "an invalid message logs its topic and a fixed reason",
+    (value, reason) => {
+      ready().receive(TOPIC, value);
+      expect(JSON.parse(logs.at(-1)!)).toMatchObject({
+        event: "invalid_heated_bedding_message",
+        topic: TOPIC,
+        reason,
+      });
+      expect(logs.join(" ")).not.toContain("secret");
+    },
+  );
+
+  test.each([
+    ["ECONNREFUSED", "ECONNREFUSED"],
+    [5, 5],
+    [{ secret: true }, undefined],
+  ])("a connection error logs only a scalar code: %j", (code, logged) => {
+    clients.at(-1)!.emit("error", Object.assign(new Error("secret"), { code }));
+    const entry = JSON.parse(logs.at(-1)!) as Record<string, unknown>;
+    expect(entry).toMatchObject({ event: "mqtt_connection_error" });
+    expect(entry.code).toBe(logged);
+    expect(logs.join(" ")).not.toContain("secret");
+  });
+
   test("ignores messages outside configured routes", () => {
     const client = ready();
     client.receive("unconfigured/topic", "invalid-json");

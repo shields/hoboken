@@ -38,6 +38,14 @@ export type HeatedBeddingResult =
       error_code: string;
     };
 
+export function heatedBeddingTopic(zone: {
+  prefix: string;
+  controller: string;
+  zone: string;
+}): string {
+  return `${zone.prefix}/${zone.controller}/${zone.zone}`;
+}
+
 export function normalizeHeatedBeddingSpeed(percent: number): number {
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
     throw new RangeError(

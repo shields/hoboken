@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { describe, expect, test, afterEach } from "bun:test";
+import { describe, expect, mock, test, afterEach } from "bun:test";
 import { Registry } from "prom-client";
 import {
   createMetrics,
@@ -305,6 +305,13 @@ describe("SSE (GET /events)", () => {
     const register = new Registry();
     ms = startMetricsServer(0, register);
     expect(typeof ms.notifyStateChange).toBe("function");
+  });
+
+  test("notifyStateChange skips rendering while no dashboard is connected", () => {
+    const getStatus = mock(() => makeStatus());
+    ms = startMetricsServer(0, new Registry(), undefined, getStatus);
+    ms.notifyStateChange();
+    expect(getStatus).not.toHaveBeenCalled();
   });
 
   test("GET /events returns SSE headers", async () => {
