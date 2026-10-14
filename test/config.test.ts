@@ -241,6 +241,28 @@ describe("validateConfig", () => {
     ).toThrow("collides with a heated bedding topic");
   });
 
+  test.each([
+    ["result", "tuya/bed/side_a/result"],
+    ["set", "tuya/bed/side_a/set"],
+    ["get", "tuya/bed/side_a/get"],
+  ])(
+    "rejects a heated bedding zone whose state topic is another zone's %s route",
+    (zone, topic) => {
+      const nested = {
+        ...heatedBedding,
+        prefix: "tuya/bed",
+        controller: "side_a",
+        zone,
+      };
+      expect(() =>
+        validateConfig({
+          ...validConfig(),
+          heatedBedding: [heatedBedding, nested],
+        }),
+      ).toThrow(`heated bedding topic "${topic}" is used by both`);
+    },
+  );
+
   test.each(["tuya/#", "tuya/+", "#"])(
     "rejects ambiguous legacy subscription %s alongside heated bedding",
     (topic) => {

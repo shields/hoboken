@@ -14,6 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
+import { heatedBeddingTopic } from "./heated-bedding-profile.ts";
 import type { HeatedBeddingZoneConfig } from "./heated-bedding-source.ts";
 
 export type Capability =
@@ -283,19 +284,32 @@ function validateHeatedBeddingTopics(
   devices: DeviceConfig[],
   heatedBedding: HeatedBeddingZoneConfig[],
 ): void {
-  const topics = new Set<string>();
-  for (const { prefix, controller, zone } of heatedBedding) {
-    const topic = `${prefix}/${controller}/${zone}`;
-    for (const route of [
-      `${prefix}/bridge/availability`,
-      `${prefix}/bridge/heartbeat`,
+  const owners = new Map<string, string>();
+  const claim = (route: string, owner: string): void => {
+    const existing = owners.get(route);
+    if (existing !== undefined && existing !== owner) {
+      throw new Error(
+        `heated bedding topic "${route}" is used by both ${existing} and ${owner}`,
+      );
+    }
+    owners.set(route, owner);
+  };
+  for (const zone of heatedBedding) {
+    const { prefix, controller } = zone;
+    const topic = heatedBeddingTopic(zone);
+    claim(`${prefix}/bridge/availability`, `prefix ${prefix}`);
+    claim(`${prefix}/bridge/heartbeat`, `prefix ${prefix}`);
+    claim(
       `${prefix}/${controller}/availability`,
+      `controller ${prefix}/${controller}`,
+    );
+    for (const route of [
       topic,
       `${topic}/result`,
       `${topic}/set`,
       `${topic}/get`,
     ])
-      topics.add(route);
+      claim(route, `zone ${topic}`);
   }
   for (const device of devices) {
     if (device.topic.includes("+") || device.topic.includes("#")) {
@@ -310,7 +324,7 @@ function validateHeatedBeddingTopics(
             `${device.topic}/api`,
           ]
         : [device.topic, `${device.topic}/set`, `${device.topic}/get`];
-    if (routes.some((topic) => topics.has(topic))) {
+    if (routes.some((topic) => owners.has(topic))) {
       throw new Error("device route collides with a heated bedding topic");
     }
   }

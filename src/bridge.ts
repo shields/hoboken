@@ -30,6 +30,7 @@ import { connect } from "mqtt";
 import { Registry } from "prom-client";
 import type { Config } from "./config.ts";
 import { HeatedBeddingMQTT } from "./heated-bedding-mqtt.ts";
+import { heatedBeddingTopic } from "./heated-bedding-profile.ts";
 import type { HeatedBeddingSource } from "./heated-bedding-source.ts";
 import {
   createHeatedBeddingAccessories,
@@ -88,7 +89,7 @@ export function buildStatusData(
     ...(config.heatedBedding?.length
       ? {
           heatedBedding: config.heatedBedding.map((zone) => {
-            const topic = `${zone.prefix}/${zone.controller}/${zone.zone}`;
+            const topic = heatedBeddingTopic(zone);
             let state = null;
             try {
               state = heatedBedding?.getState(topic) ?? null;
@@ -204,9 +205,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     for (const zone of config.heatedBedding ?? []) {
       try {
         if (heatedBedding) {
-          heatedBedding.source.getState(
-            `${zone.prefix}/${zone.controller}/${zone.zone}`,
-          );
+          heatedBedding.source.getState(heatedBeddingTopic(zone));
         } else {
           unknown++;
         }
@@ -414,7 +413,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   if (config.heatedBedding?.length) {
     const zoneTopics = new Map(
       config.heatedBedding.flatMap((zone) => {
-        const topic = `${zone.prefix}/${zone.controller}/${zone.zone}`;
+        const topic = heatedBeddingTopic(zone);
         return [
           [topic, topic],
           [`${topic}/result`, topic],
@@ -663,7 +662,12 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     ...(metricsPort === undefined ? {} : { metricsPort }),
     shutdown: async () => {
       cancelAllRetries();
-      await heatedBedding?.stop();
+      let heatedBeddingFailure: { error: unknown } | undefined;
+      try {
+        await heatedBedding?.stop();
+      } catch (error: unknown) {
+        heatedBeddingFailure = { error };
+      }
       log.log("Shutting down: unpublishing bridge (sending mDNS goodbye)");
       await bridge.unpublish();
       log.log("Shutting down: closing MQTT connection");
@@ -680,6 +684,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
         await ms.close();
       }
       metrics?.dispose();
+      if (heatedBeddingFailure) throw heatedBeddingFailure.error;
       log.log("Shutdown complete");
     },
   };

@@ -46,6 +46,10 @@ Each module is independently testable with dependency injection:
 - `src/convert.ts` — Pure value conversion functions (Z2M ↔ HomeKit)
 - `src/accessories.ts` — HAP accessory/scene creation, takes `PublishFn`/`GetStateFn`
 - `src/bridge.ts` — MQTT client, bridge wiring, state cache, lifecycle
+- `src/heated-bedding-profile.ts` — Pure heated bedding payload parsing, topic naming, and fan write coalescing
+- `src/heated-bedding-source.ts` — Heated bedding availability, session, and confirmed-write state machine, injected publish/clock
+- `src/heated-bedding-mqtt.ts` — Dedicated MQTT 5 connection and reconnect policy for the heated bedding source
+- `src/heated-bedding-accessories.ts` — Fan and preheat accessories backed by the heated bedding source
 - `src/main.ts` — Entry point (~10 lines)
 
 ## Key Design Decisions

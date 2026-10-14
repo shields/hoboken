@@ -182,7 +182,7 @@ export class HeatedBeddingSource {
 
   #route(topic: string, route: Route): void {
     if (this.#routes.has(topic))
-      throw new RangeError("Duplicate heated bedding MQTT topic");
+      throw new RangeError(`Duplicate heated bedding MQTT topic "${topic}"`);
     this.#routes.set(topic, route);
   }
 

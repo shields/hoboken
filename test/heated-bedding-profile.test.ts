@@ -15,11 +15,24 @@
 import { describe, expect, test } from "bun:test";
 import {
   coalesceHeatedBeddingFanWrites,
+  heatedBeddingTopic,
   normalizeHeatedBeddingSpeed,
   parseHeatedBeddingHeartbeat,
   parseHeatedBeddingResult,
   parseHeatedBeddingState,
 } from "../src/heated-bedding-profile.ts";
+
+describe("heated bedding zone topic", () => {
+  test("joins prefix, controller, and zone", () => {
+    expect(
+      heatedBeddingTopic({
+        prefix: "home/tuya",
+        controller: "bed",
+        zone: "side_a",
+      }),
+    ).toBe("home/tuya/bed/side_a");
+  });
+});
 
 describe("heated bedding speed", () => {
   test.each([

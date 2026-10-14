@@ -485,6 +485,41 @@ describe("startBridge", () => {
     }
   });
 
+  test("a heated bedding shutdown failure still unpublishes and closes the legacy client", async () => {
+    const count = mockClients.length;
+    const { bridge, shutdown } = await startBridge({
+      ...testConfig(),
+      heatedBedding: HEATED_BEDDING,
+    });
+    const legacy = mockClients[count]!;
+    const heatedBedding = mockClients[count + 1]!;
+    heatedBedding.end = (_force, complete) => {
+      (complete as ((error: Error) => void) | undefined)?.(
+        new Error("heated bedding close failed"),
+      );
+      return heatedBedding;
+    };
+    let legacyEnded = 0;
+    legacy.end = (_force, complete) => {
+      legacyEnded++;
+      complete?.();
+      return legacy;
+    };
+    const unpublish = jest.spyOn(bridge, "unpublish");
+    try {
+      expect(await Promise.allSettled([shutdown()])).toEqual([
+        {
+          status: "rejected",
+          reason: new Error("heated bedding close failed"),
+        },
+      ]);
+      expect(unpublish).toHaveBeenCalledTimes(1);
+      expect(legacyEnded).toBe(1);
+    } finally {
+      unpublish.mockRestore();
+    }
+  });
+
   test("creates bridge and connects MQTT", async () => {
     const { shutdown } = await startBridge(testConfig());
     expect(mockClient).toBeDefined();
