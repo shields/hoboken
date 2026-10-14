@@ -43,13 +43,13 @@ describe("heated bedding source", () => {
     payload: HeatedBeddingPublication;
     complete: (error?: Error) => void;
   }[];
-  let changed: string[];
+  let changed: number;
 
   beforeEach(() => {
     jest.useFakeTimers();
     now = 0;
     sent = [];
-    changed = [];
+    changed = 0;
     let sequence = 0;
     source = new HeatedBeddingSource(
       [ZONE],
@@ -59,7 +59,9 @@ describe("heated bedding source", () => {
       {
         clock: () => now,
         identifier: () => `request-${String(++sequence)}`,
-        changed: (topic) => changed.push(topic),
+        changed: () => {
+          changed++;
+        },
       },
     );
     generation = source.connect();
@@ -364,12 +366,79 @@ describe("heated bedding source", () => {
 
   test("heartbeat expiry invalidates the zone and notifies its accessories", () => {
     ready();
-    changed = [];
+    changed = 0;
     advance(45000);
     expect(() => source.getState(TOPIC)).toThrow(HapStatusError);
-    expect(changed).toEqual([TOPIC]);
+    expect(changed).toBe(1);
     receive("tuya/bridge/heartbeat", { session_id: "session-a" });
     expect(source.getState(TOPIC).heat_level).toBe(4);
+  });
+
+  test("each event notifies observers once for all the zones it affects", () => {
+    source.disconnect();
+    source = new HeatedBeddingSource(
+      [ZONE, { ...ZONE, name: "Bed Side B", zone: "right" }],
+      (_topic, _payload, complete) => {
+        complete();
+      },
+      {
+        clock: () => now,
+        changed: () => {
+          changed++;
+        },
+      },
+    );
+    generation = source.connect();
+    const steps = [
+      () => {
+        source.subscriptionsReady(generation);
+      },
+      () => {
+        receive("tuya/bridge/availability", "online");
+      },
+      () => {
+        receive("tuya/bed/availability", "online");
+      },
+      () => {
+        receive("tuya/bridge/heartbeat", { session_id: "session-a" });
+      },
+      () => {
+        receive(TOPIC, BASELINE);
+      },
+      () => {
+        receive("tuya/bed/availability", "offline");
+      },
+      () => {
+        receive("tuya/bed/availability", "online");
+      },
+      () => {
+        receive("tuya/bridge/availability", "offline");
+      },
+      () => {
+        receive("tuya/bridge/availability", "online");
+      },
+      () => {
+        receive("tuya/bridge/heartbeat", { session_id: "session-b" });
+      },
+      () => {
+        expect(() => {
+          receive(TOPIC, { ...BASELINE, power: "ON" });
+        }).toThrow(RangeError);
+      },
+      () => {
+        advance(45000);
+      },
+      () => {
+        source.disconnect();
+      },
+    ];
+    expect(
+      steps.map((step) => {
+        changed = 0;
+        step();
+        return changed;
+      }),
+    ).toEqual(steps.map(() => 1));
   });
 
   test("a new session cancels pending work and requires a matching snapshot", async () => {

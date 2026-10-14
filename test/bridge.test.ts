@@ -234,32 +234,37 @@ function collectGetMessages(): { topic: string; message: string }[] {
   return mockClient.published.filter((p) => p.topic.endsWith("/get"));
 }
 
+async function openEvents(
+  port: number,
+  signal: AbortSignal,
+): Promise<() => Promise<string>> {
+  const response = await fetch(`http://127.0.0.1:${String(port)}/events`, {
+    signal,
+  });
+  const reader = response.body!.getReader();
+  let buffered = "";
+  const decoder = new TextDecoder();
+  return async () => {
+    for (;;) {
+      const boundary = buffered.indexOf("\n\n");
+      if (boundary !== -1) {
+        const event = buffered.slice(0, boundary);
+        buffered = buffered.slice(boundary + 2);
+        return event;
+      }
+      const chunk = await reader.read();
+      expect(chunk.done).toBe(false);
+      buffered += decoder.decode(chunk.value, { stream: true });
+    }
+  };
+}
+
 describe("startBridge", () => {
   test("each device state update produces one dashboard SSE event", async () => {
     const { metricsPort, shutdown } = await startBridge(metricsConfig());
     const controller = new AbortController();
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
-      const response = await fetch(
-        `http://127.0.0.1:${String(metricsPort)}/events`,
-        { signal: controller.signal },
-      );
-      reader = response.body!.getReader();
-      let buffered = "";
-      const decoder = new TextDecoder();
-      const nextEvent = async (): Promise<string> => {
-        for (;;) {
-          const boundary = buffered.indexOf("\n\n");
-          if (boundary !== -1) {
-            const event = buffered.slice(0, boundary);
-            buffered = buffered.slice(boundary + 2);
-            return event;
-          }
-          const chunk = await reader!.read();
-          expect(chunk.done).toBe(false);
-          buffered += decoder.decode(chunk.value, { stream: true });
-        }
-      };
+      const nextEvent = await openEvents(metricsPort!, controller.signal);
       await nextEvent();
       mockClient.emit(
         "message",
@@ -273,6 +278,35 @@ describe("startBridge", () => {
         Buffer.from('{"state":"OFF"}'),
       );
       expect(await nextEvent()).toContain("OFF");
+    } finally {
+      controller.abort();
+      await shutdown();
+    }
+  });
+
+  test("each heated bedding message produces one dashboard SSE event", async () => {
+    const { metricsPort, shutdown } = await startBridge({
+      ...metricsConfig(),
+      devices: [],
+      heatedBedding: HEATED_BEDDING,
+    });
+    const client = mockClient;
+    const controller = new AbortController();
+    try {
+      readyHeatedBedding(client);
+      const nextEvent = await openEvents(metricsPort!, controller.signal);
+      await nextEvent();
+      heatedBeddingMessage(client, "tuya/bridge/heartbeat", {
+        session_id: "live",
+      });
+      await nextEvent();
+      heatedBeddingMessage(client, "tuya/bed/side_a", {
+        ...HEATED_BEDDING_STATE,
+        heat_level: 7,
+      });
+      expect(await nextEvent()).toContain(
+        '<td class="key">RotationSpeed</td><td>70</td>',
+      );
     } finally {
       controller.abort();
       await shutdown();
