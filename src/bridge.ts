@@ -90,16 +90,10 @@ export function buildStatusData(
       ? {
           heatedBedding: config.heatedBedding.map((zone) => {
             const topic = heatedBeddingTopic(zone);
-            let state = null;
-            try {
-              state = heatedBedding?.getState(topic) ?? null;
-            } catch (error: unknown) {
-              if (!(error instanceof HapStatusError)) throw error;
-            }
             return {
               name: zone.name,
               topic,
-              state,
+              state: heatedBedding?.usableState(topic) ?? null,
               pending: heatedBedding?.pendingCount(topic) ?? 0,
             };
           }),
@@ -203,16 +197,8 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       (device) => !stateCache.has(device.topic),
     ).length;
     for (const zone of config.heatedBedding ?? []) {
-      try {
-        if (heatedBedding) {
-          heatedBedding.source.getState(heatedBeddingTopic(zone));
-        } else {
-          unknown++;
-        }
-      } catch (error: unknown) {
-        if (!(error instanceof HapStatusError)) throw error;
+      if (!heatedBedding?.source.usableState(heatedBeddingTopic(zone)))
         unknown++;
-      }
     }
     metrics?.devicesStateUnknown.set(unknown);
     metricsServer?.notifyStateChange();

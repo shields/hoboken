@@ -122,20 +122,21 @@ export function createHeatedBeddingAccessories(
   });
 
   const update = (): void => {
-    try {
-      const state = source.getState(topic);
-      active.updateValue(
-        state.power
-          ? Characteristic.Active.ACTIVE
-          : Characteristic.Active.INACTIVE,
-      );
-      speed.updateValue(state.heat_level * 10);
-      on.updateValue(state.preheat);
-    } catch (error: unknown) {
-      if (!(error instanceof HapStatusError)) throw error;
+    const state = source.usableState(topic);
+    if (!state) {
       for (const characteristic of [active, speed, on])
-        characteristic.updateValue(error);
+        characteristic.updateValue(
+          new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE),
+        );
+      return;
     }
+    active.updateValue(
+      state.power
+        ? Characteristic.Active.ACTIVE
+        : Characteristic.Active.INACTIVE,
+    );
+    speed.updateValue(state.heat_level * 10);
+    on.updateValue(state.preheat);
   };
   update();
   return { fan, preheat, update };
