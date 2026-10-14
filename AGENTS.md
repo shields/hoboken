@@ -11,6 +11,8 @@ to collectively as heated bedding. Use short zone names such as "Bed Side A".
 
 - **Runtime**: Node.js 24 LTS with unflagged TypeScript type stripping
 - **Package manager**: Bun (`bun install`, `bun.lock`)
+- **Bun version**: `packageManager` in package.json, which CI installs; both
+  Dockerfiles' `oven/bun` tags must match (`test/toolchain.test.ts`)
 - **Test runner**: Bun test (`bun test`, `bun test --coverage`)
 - **TypeScript 6.0**: type checking only (`noEmit`), `erasableSyntaxOnly`
 - **ESLint 10**: `typescript-eslint` with `strictTypeChecked` + `stylisticTypeChecked`
