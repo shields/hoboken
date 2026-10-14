@@ -131,6 +131,149 @@ describe("heated bedding source", () => {
     expect(source.pendingCount(TOPIC)).toBe(0);
   });
 
+  test("a confirmed write resolves with reported state once a newer write to the zone was published", async () => {
+    ready();
+    const first = source.writeFan(TOPIC, { speed: 50 });
+    advance(100);
+    const second = source.writeFan(TOPIC, { speed: 80 });
+    advance(50);
+    expect(sent.map(({ payload }) => payload)).toEqual([
+      { request_id: "request-1", power: true, heat_level: 5 },
+      { request_id: "request-2", power: true, heat_level: 8 },
+    ]);
+    receive(TOPIC, { ...BASELINE, power: true, heat_level: 8 });
+    receive(`${TOPIC}/result`, {
+      request_id: "request-1",
+      outcome: "confirmed",
+    });
+    expect(source.pendingCount(TOPIC)).toBe(1);
+    expect((await first).heat_level).toBe(8);
+    receive(`${TOPIC}/result`, {
+      request_id: "request-2",
+      outcome: "confirmed",
+    });
+    expect(source.pendingCount(TOPIC)).toBe(0);
+    expect((await second).heat_level).toBe(8);
+  });
+
+  test("preheat and fan writes from one request both resolve when the fan write replaced preheat", async () => {
+    ready();
+    const preheat = source.writePreheat(TOPIC, true);
+    const fan = source.writeFan(TOPIC, { speed: 50 });
+    advance(50);
+    expect(sent.map(({ payload }) => payload)).toEqual([
+      { request_id: "request-1", preheat: true },
+      { request_id: "request-2", power: true, heat_level: 5 },
+    ]);
+    receive(TOPIC, { ...BASELINE, power: true, heat_level: 5 });
+    receive(`${TOPIC}/result`, {
+      request_id: "request-2",
+      outcome: "confirmed",
+    });
+    receive(`${TOPIC}/result`, {
+      request_id: "request-1",
+      outcome: "confirmed",
+    });
+    expect(source.pendingCount(TOPIC)).toBe(0);
+    expect(await preheat).toMatchObject({ heat_level: 5, preheat: false });
+    expect((await fan).heat_level).toBe(5);
+  });
+
+  test("a newer preheat write supersedes a fan write whose level preheat replaced", async () => {
+    ready();
+    const fan = source.writeFan(TOPIC, { speed: 50 });
+    advance(50);
+    const preheat = source.writePreheat(TOPIC, true);
+    receive(TOPIC, { ...BASELINE, power: true, heat_level: 10, preheat: true });
+    receive(`${TOPIC}/result`, {
+      request_id: "request-1",
+      outcome: "confirmed",
+    });
+    receive(`${TOPIC}/result`, {
+      request_id: "request-2",
+      outcome: "confirmed",
+    });
+    expect(source.pendingCount(TOPIC)).toBe(0);
+    expect((await fan).heat_level).toBe(10);
+    expect((await preheat).preheat).toBe(true);
+  });
+
+  test.each([
+    [
+      "a rejected result",
+      HAPStatus.RESOURCE_BUSY,
+      () => {
+        receive(`${TOPIC}/result`, {
+          request_id: "request-1",
+          outcome: "unconfirmed",
+          error_code: "queue_full",
+        });
+      },
+    ],
+    [
+      "no result",
+      HAPStatus.OPERATION_TIMED_OUT,
+      () => {
+        advance(8350);
+      },
+    ],
+  ])(
+    "a superseded write with %s still fails",
+    async (_case, status, settle) => {
+      ready();
+      const outcome = Promise.allSettled([
+        source.writeFan(TOPIC, { speed: 50 }),
+      ]);
+      advance(100);
+      const newer = source.writeFan(TOPIC, { speed: 80 });
+      advance(50);
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 8 });
+      receive(`${TOPIC}/result`, {
+        request_id: "request-2",
+        outcome: "confirmed",
+      });
+      expect((await newer).heat_level).toBe(8);
+      settle();
+      expect(await outcome).toMatchObject([
+        { status: "rejected", reason: { hapStatus: status } },
+      ]);
+    },
+  );
+
+  test("a newer write that failed to publish does not supersede", async () => {
+    source.disconnect();
+    const failure = new Error("Injected publish failure");
+    let sequence = 0;
+    source = new HeatedBeddingSource(
+      [ZONE],
+      (topic, payload, complete) => {
+        if (payload.heat_level === 8) throw failure;
+        sent.push({ topic, payload, complete });
+      },
+      { clock: () => now, identifier: () => `request-${String(++sequence)}` },
+    );
+    generation = source.connect();
+    ready();
+    const outcome = Promise.allSettled([source.writeFan(TOPIC, { speed: 50 })]);
+    advance(100);
+    const failed = Promise.allSettled([source.writeFan(TOPIC, { speed: 80 })]);
+    advance(50);
+    expect(await failed).toEqual([{ status: "rejected", reason: failure }]);
+    receive(TOPIC, { ...BASELINE, power: true, heat_level: 8 });
+    receive(`${TOPIC}/result`, {
+      request_id: "request-1",
+      outcome: "confirmed",
+    });
+    expect(source.pendingCount(TOPIC)).toBe(1);
+    advance(8350);
+    expect(await outcome).toMatchObject([
+      {
+        status: "rejected",
+        reason: { hapStatus: HAPStatus.OPERATION_TIMED_OUT },
+      },
+    ]);
+  });
+
   test("off takes precedence and both callers receive the preserved reported level", async () => {
     ready();
     const writes = [
