@@ -20,6 +20,11 @@ const repoFile = (path: string) =>
 const dockerBunTag = async (dockerfile: string) =>
   /^FROM oven\/bun:(\S+)@sha256:/m.exec(await repoFile(dockerfile).text())?.[1];
 
+const dockerPlaywrightVersion = async () =>
+  /^FROM mcr\.microsoft\.com\/playwright:v(\d+\.\d+\.\d+)(?:-[^\s@]+)?@sha256:/m.exec(
+    await repoFile("Dockerfile.playwright").text(),
+  )?.[1];
+
 test("package.json and both Dockerfiles pin the same Bun release", async () => {
   const { packageManager } = (await repoFile("package.json").json()) as {
     packageManager?: unknown;
@@ -30,4 +35,13 @@ test("package.json and both Dockerfiles pin the same Bun release", async () => {
     Dockerfile: await dockerBunTag("Dockerfile"),
     "Dockerfile.playwright": await dockerBunTag("Dockerfile.playwright"),
   }).toEqual({ Dockerfile: version, "Dockerfile.playwright": version });
+});
+
+test("package.json and Dockerfile.playwright pin the same Playwright release", async () => {
+  const { devDependencies } = (await repoFile("package.json").json()) as {
+    devDependencies?: Record<string, string>;
+  };
+  const version = devDependencies?.playwright;
+  expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(await dockerPlaywrightVersion()).toBe(version);
 });

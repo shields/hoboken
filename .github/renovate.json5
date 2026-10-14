@@ -49,6 +49,11 @@
       description: "Group Playwright npm package and Docker image together",
       matchPackageNames: ["playwright", "mcr.microsoft.com/playwright"],
       groupName: "playwright",
+      // config:best-practices holds the npm release for 3 days, and Renovate
+      // leaves a held update out of the group's branch, so the image arrives
+      // alone first. MCR reports no release times, so a matching hold on the
+      // image would never expire. test/toolchain.test.ts keeps the partial
+      // branch from merging until the npm release joins it.
     },
     {
       description: "Group packageManager's Bun with the Bun images in both Dockerfiles",

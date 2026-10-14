@@ -13,6 +13,11 @@ to collectively as heated bedding. Use short zone names such as "Bed Side A".
 - **Package manager**: Bun (`bun install`, `bun.lock`)
 - **Bun version**: `packageManager` in package.json, which CI installs; both
   Dockerfiles' `oven/bun` tags must match (`test/toolchain.test.ts`)
+- **Playwright version**: `playwright` in package.json; the
+  `mcr.microsoft.com/playwright` tag in `Dockerfile.playwright` must match
+  (`test/toolchain.test.ts`), because the image bundles the browser revision
+  that npm release launches. Renovate holds the npm release for 3 days but not
+  the image, so the image's PR is red until the npm release joins its branch.
 - **Test runner**: Bun test (`bun test`, `bun test --coverage`)
 - **TypeScript 6.0**: type checking only (`noEmit`), `erasableSyntaxOnly`
 - **ESLint 10**: `typescript-eslint` with `strictTypeChecked` + `stylisticTypeChecked`
