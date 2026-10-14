@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export interface MattressState {
+export interface HeatedBeddingState {
   session_id: string;
   power: boolean | null;
   heat_level: number | null;
@@ -22,15 +22,15 @@ export interface MattressState {
   preheat_remaining_seconds: number | null;
 }
 
-export interface MattressCommand {
+export interface HeatedBeddingCommand {
   power?: boolean;
   heat_level?: number;
   preheat?: boolean;
 }
 
-export type MattressFanWrite = { active: boolean } | { speed: number };
+export type HeatedBeddingFanWrite = { active: boolean } | { speed: number };
 
-export type MattressResult =
+export type HeatedBeddingResult =
   | { request_id: string; outcome: "confirmed" }
   | {
       request_id: string;
@@ -38,20 +38,22 @@ export type MattressResult =
       error_code: string;
     };
 
-export function normalizeMattressSpeed(percent: number): number {
+export function normalizeHeatedBeddingSpeed(percent: number): number {
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
-    throw new RangeError("Mattress speed must be finite and between 0 and 100");
+    throw new RangeError(
+      "Heated bedding speed must be finite and between 0 and 100",
+    );
   }
   return percent === 0
     ? 0
     : 10 * Math.min(10, Math.max(1, Math.floor(percent / 10 + 0.5)));
 }
 
-export function coalesceMattressFanWrites(
-  writes: readonly MattressFanWrite[],
-): MattressCommand {
+export function coalesceHeatedBeddingFanWrites(
+  writes: readonly HeatedBeddingFanWrite[],
+): HeatedBeddingCommand {
   if (writes.length === 0) {
-    throw new RangeError("Mattress fan commands require a write");
+    throw new RangeError("Heated bedding fan commands require a write");
   }
   let off = false;
   let heatLevel: number | undefined;
@@ -60,7 +62,7 @@ export function coalesceMattressFanWrites(
       off ||= !write.active;
     }
     if ("speed" in write) {
-      const speed = normalizeMattressSpeed(write.speed);
+      const speed = normalizeHeatedBeddingSpeed(write.speed);
       if (speed === 0) {
         off = true;
       } else {
@@ -78,7 +80,7 @@ export function coalesceMattressFanWrites(
 
 function object(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new RangeError("Mattress MQTT payload must be an object");
+    throw new RangeError("Heated bedding MQTT payload must be an object");
   }
   return value as Record<string, unknown>;
 }
@@ -90,7 +92,7 @@ function identifier(value: unknown, field: string, maxLength = 128): string {
     value !== value.trim() ||
     value.length > maxLength
   ) {
-    throw new RangeError(`Invalid mattress ${field}`);
+    throw new RangeError(`Invalid heated bedding ${field}`);
   }
   return value;
 }
@@ -100,7 +102,7 @@ function boolean(value: unknown): boolean | null {
     return null;
   }
   if (typeof value !== "boolean") {
-    throw new RangeError("Invalid mattress reported Boolean");
+    throw new RangeError("Invalid heated bedding reported Boolean");
   }
   return value;
 }
@@ -119,16 +121,16 @@ function integer(
     value < min ||
     value > max
   ) {
-    throw new RangeError("Invalid mattress reported integer");
+    throw new RangeError("Invalid heated bedding reported integer");
   }
   return value;
 }
 
-export function parseMattressHeartbeat(value: unknown): string {
+export function parseHeatedBeddingHeartbeat(value: unknown): string {
   return identifier(object(value).session_id, "session_id");
 }
 
-export function parseMattressState(value: unknown): MattressState {
+export function parseHeatedBeddingState(value: unknown): HeatedBeddingState {
   const data = object(value);
   return {
     session_id: identifier(data.session_id, "session_id"),
@@ -141,17 +143,19 @@ export function parseMattressState(value: unknown): MattressState {
   };
 }
 
-export function parseMattressResult(value: unknown): MattressResult {
+export function parseHeatedBeddingResult(value: unknown): HeatedBeddingResult {
   const data = object(value);
   const requestId = identifier(data.request_id, "request_id");
   if (data.outcome === "confirmed") {
     if (data.error_code !== undefined && data.error_code !== null) {
-      throw new RangeError("Confirmed mattress result cannot include an error");
+      throw new RangeError(
+        "Confirmed heated bedding result cannot include an error",
+      );
     }
     return { request_id: requestId, outcome: data.outcome };
   }
   if (data.outcome !== "rejected" && data.outcome !== "unconfirmed") {
-    throw new RangeError("Invalid mattress result outcome");
+    throw new RangeError("Invalid heated bedding result outcome");
   }
   return {
     request_id: requestId,

@@ -30,14 +30,14 @@ import { HttpClient } from "hap-controller";
 import { connectAsync, type MqttClient } from "mqtt";
 import { startBridge } from "../src/bridge.ts";
 import type {
-  MattressCommand,
-  MattressState,
-} from "../src/mattress-profile.ts";
+  HeatedBeddingCommand,
+  HeatedBeddingState,
+} from "../src/heated-bedding-profile.ts";
 
-const PREFIX = "mattress_test";
+const PREFIX = "heated_bedding_test";
 const TOPIC = `${PREFIX}/bed/side_a`;
 const ZONES = ["side_a", "side_b"].map((zone) => ({
-  name: `Mattress ${zone}`,
+  name: `Bed Side ${zone === "side_a" ? "A" : "B"}`,
   prefix: PREFIX,
   controller: "bed",
   zone,
@@ -52,7 +52,7 @@ async function poll(
     if (await predicate()) return;
     await delay(20);
   }
-  throw new Error("Timed out waiting for mattress integration state");
+  throw new Error("Timed out waiting for heated bedding integration state");
 }
 
 async function freePort(): Promise<number> {
@@ -169,10 +169,10 @@ interface WireCharacteristic {
 interface WireResponse {
   characteristics: WireCharacteristic[];
 }
-type Command = MattressCommand & { request_id: string };
+type Command = HeatedBeddingCommand & { request_id: string };
 
 describe(
-  "mattress MQTT and paired HomeKit integration",
+  "heated bedding MQTT and paired HomeKit integration",
   { timeout: 180000 },
   () => {
     let directory: string | undefined;
@@ -187,7 +187,7 @@ describe(
     let mode: "confirm" | "drop" | "reject" = "confirm";
     let session = "session-one";
     const commands: { topic: string; command: Command }[] = [];
-    const states = new Map<string, MattressState>();
+    const states = new Map<string, HeatedBeddingState>();
     const warnings: string[] = [];
 
     async function publish(
@@ -282,7 +282,7 @@ describe(
       await publish(`${PREFIX}/bed/availability`, "online", true);
       for (const zone of ZONES) {
         const topic = `${PREFIX}/bed/${zone.zone}`;
-        const state: MattressState = {
+        const state: HeatedBeddingState = {
           session_id: session,
           power: false,
           heat_level: 4,
@@ -302,7 +302,7 @@ describe(
         binary,
         "HOBOKEN_TEST_BROKER must name the pinned Mosquitto executable",
       );
-      directory = mkdtempSync(path.join(tmpdir(), "hoboken-mattress-"));
+      directory = mkdtempSync(path.join(tmpdir(), "hoboken-heated-bedding-"));
       broker = new TestBroker(binary, directory, await freePort());
       await broker.start();
       await connectBackend();
@@ -315,21 +315,21 @@ describe(
       HAPStorage.setCustomStoragePath(path.join(directory, "hap"));
       handle = await startBridge({
         bridge: {
-          name: "Mattress integration",
+          name: "Heated bedding integration",
           mac: "0E:36:29:42:81:12",
           pincode: "031-45-154",
           port: 0,
         },
         mqtt: { url: broker.url },
         devices: [],
-        mattresses: ZONES,
+        heatedBedding: ZONES,
         metrics: { port: 0, bind: "127.0.0.1" },
       });
       handle.bridge.on("characteristic-warning", (warning) => {
         warnings.push(warning.type);
       });
       client = new HttpClient(
-        "mattress-test-controller",
+        "heated-bedding-test-controller",
         "127.0.0.1",
         handle.hapPort,
       );

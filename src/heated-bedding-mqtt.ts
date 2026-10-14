@@ -20,10 +20,10 @@ import {
 } from "mqtt";
 import pino, { type Logger } from "pino";
 import {
-  MattressSource,
-  type MattressPublication,
-  type MattressZoneConfig,
-} from "./mattress-source.ts";
+  HeatedBeddingSource,
+  type HeatedBeddingPublication,
+  type HeatedBeddingZoneConfig,
+} from "./heated-bedding-source.ts";
 
 interface MqttOptions {
   connect?: (url: string, options: IClientOptions) => MqttClient;
@@ -39,8 +39,8 @@ const CONNECT_TIMEOUT = 10000;
 const CLOSE_TIMEOUT = 2000;
 const MAX_PAYLOAD = 65536;
 
-export class MattressMqtt {
-  readonly source: MattressSource;
+export class HeatedBeddingMQTT {
+  readonly source: HeatedBeddingSource;
   #url: string;
   #connect: (url: string, options: IClientOptions) => MqttClient;
   #random: () => number;
@@ -60,18 +60,18 @@ export class MattressMqtt {
 
   constructor(
     url: string,
-    zones: readonly MattressZoneConfig[],
+    zones: readonly HeatedBeddingZoneConfig[],
     options: MqttOptions = {},
   ) {
     this.#url = url;
     this.#connect = options.connect ?? connect;
     this.#random = options.random ?? Math.random;
     this.#changed = options.changed;
-    this.#logger = options.logger ?? pino({ name: "mattress-mqtt" });
+    this.#logger = options.logger ?? pino({ name: "heated-bedding-mqtt" });
     this.#received = options.received;
     this.#published = options.published;
     this.#failed = options.failed;
-    this.source = new MattressSource(
+    this.source = new HeatedBeddingSource(
       zones,
       (topic, payload, complete) => {
         this.#publish(topic, payload, complete);
@@ -95,11 +95,11 @@ export class MattressMqtt {
 
   #publish(
     topic: string,
-    payload: MattressPublication,
+    payload: HeatedBeddingPublication,
     complete: (error?: Error) => void,
   ): void {
     if (!this.connected || !this.#client) {
-      complete(new Error("Mattress MQTT is unavailable"));
+      complete(new Error("Heated bedding MQTT is unavailable"));
       return;
     }
     this.#client.publish(
@@ -130,7 +130,10 @@ export class MattressMqtt {
       manualConnect: true,
     });
     this.#client = client;
-    this.#logger.info({ event: "mqtt_connecting" }, "Connecting mattress MQTT");
+    this.#logger.info(
+      { event: "mqtt_connecting" },
+      "Connecting heated bedding MQTT",
+    );
     client.on("connect", (packet) => {
       if (client !== this.#client) return;
       if (
@@ -169,7 +172,10 @@ export class MattressMqtt {
         this.#backoff = 1000;
         this.source.subscriptionsReady(generation);
         this.#changed?.();
-        this.#logger.info({ event: "mqtt_ready" }, "Mattress MQTT subscribed");
+        this.#logger.info(
+          { event: "mqtt_ready" },
+          "Heated bedding MQTT subscribed",
+        );
       });
     });
     client.on("message", (topic, payload, packet) => {
@@ -178,7 +184,7 @@ export class MattressMqtt {
       this.#received?.(topic);
       try {
         if (payload.byteLength > MAX_PAYLOAD)
-          throw new RangeError("Mattress MQTT payload exceeds its limit");
+          throw new RangeError("Heated bedding MQTT payload exceeds its limit");
         const value: unknown = topic.endsWith("/availability")
           ? payload.toString("utf8")
           : JSON.parse(payload.toString("utf8"));
@@ -186,7 +192,7 @@ export class MattressMqtt {
       } catch (error: unknown) {
         if (!(error instanceof RangeError || error instanceof SyntaxError))
           throw error;
-        this.#fail(client, "invalid_mattress_message");
+        this.#fail(client, "invalid_heated_bedding_message");
       }
     });
     client.on("error", () => {
@@ -218,7 +224,10 @@ export class MattressMqtt {
     client.end(true);
     const delay = Math.min(60000, this.#backoff * (1 + 0.25 * this.#random()));
     this.#backoff = Math.min(60000, this.#backoff * 2);
-    this.#logger.error({ event, retry_ms: delay }, "Mattress MQTT unavailable");
+    this.#logger.error(
+      { event, retry_ms: delay },
+      "Heated bedding MQTT unavailable",
+    );
     this.#failed?.();
     this.#changed?.();
     if (this.#stopped) return;
@@ -242,7 +251,7 @@ export class MattressMqtt {
     if (!client) return;
     this.#stopPromise = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new Error("Mattress MQTT shutdown timed out"));
+        reject(new Error("Heated bedding MQTT shutdown timed out"));
       }, CLOSE_TIMEOUT);
       timer.unref();
       client.end(true, (error) => {

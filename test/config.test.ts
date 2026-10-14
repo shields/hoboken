@@ -41,76 +41,76 @@ function validConfig() {
 }
 
 describe("validateConfig", () => {
-  const mattress = {
-    name: "Left pad",
+  const heatedBedding = {
+    name: "Bed Side A",
     prefix: "tuya",
     controller: "bed",
     zone: "side_a",
   };
 
-  test("accepts mattress zones alongside existing devices", () => {
+  test("accepts heated bedding zones alongside existing devices", () => {
     const data = {
       ...validConfig(),
-      mattresses: [
-        mattress,
-        { ...mattress, name: "Right pad", zone: "side_b" },
+      heatedBedding: [
+        heatedBedding,
+        { ...heatedBedding, name: "Bed Side B", zone: "side_b" },
       ],
     };
     const config = validateConfig(data);
-    expect(config.mattresses).toEqual(data.mattresses);
+    expect(config.heatedBedding).toEqual(data.heatedBedding);
     expect(config.devices[0]!.type).toBe("z2m");
   });
 
   test.each([[undefined], [[]]])(
-    "accepts a mattress-only bridge with devices %j",
+    "accepts a bridge with only heated bedding with devices %j",
     (devices) => {
       const config = validateConfig({
         ...validConfig(),
         devices,
-        mattresses: [mattress],
+        heatedBedding: [heatedBedding],
       });
       expect(config.devices).toEqual([]);
-      expect(config.mattresses).toEqual([mattress]);
+      expect(config.heatedBedding).toEqual([heatedBedding]);
     },
   );
 
-  test("empty mattress configuration is optional alongside devices", () => {
+  test("empty heated bedding configuration is optional alongside devices", () => {
     expect(
-      validateConfig({ ...validConfig(), mattresses: [] }).mattresses,
+      validateConfig({ ...validConfig(), heatedBedding: [] }).heatedBedding,
     ).toEqual([]);
-    expect(validateConfig(validConfig()).mattresses).toBeUndefined();
+    expect(validateConfig(validConfig()).heatedBedding).toBeUndefined();
     expect(() =>
-      validateConfig({ ...validConfig(), devices: [], mattresses: [] }),
+      validateConfig({ ...validConfig(), devices: [], heatedBedding: [] }),
     ).toThrow("devices must be a non-empty array");
   });
 
   test.each([null, false, "pad", {}])(
-    "rejects a non-array mattress list: %j",
-    (mattresses) => {
-      expect(() => validateConfig({ ...validConfig(), mattresses })).toThrow(
-        "mattresses must be an array",
+    "rejects a non-array heated bedding list: %j",
+    (heatedBedding) => {
+      expect(() => validateConfig({ ...validConfig(), heatedBedding })).toThrow(
+        "heatedBedding must be an array",
       );
     },
   );
 
   test.each([[null], [false], ["pad"], [[]], [{}]])(
-    "rejects an invalid mattress entry: %j",
+    "rejects an invalid heated bedding entry: %j",
     (entry) => {
       expect(() =>
-        validateConfig({ ...validConfig(), mattresses: [entry] }),
-      ).toThrow("mattresses[0]");
+        validateConfig({ ...validConfig(), heatedBedding: [entry] }),
+      ).toThrow("heatedBedding[0]");
     },
   );
 
   test.each(["", " ", "\0", "x".repeat(257), false])(
-    "rejects invalid mattress display names: %j",
+    "rejects invalid heated bedding display names: %j",
     (name) => {
       expect(() =>
         validateConfig({
           ...validConfig(),
-          mattresses: [{ ...mattress, name }],
+          heatedBedding: [{ ...heatedBedding, name }],
         }),
-      ).toThrow("mattresses[0].name");
+      ).toThrow("heatedBedding[0].name");
     },
   );
 
@@ -124,17 +124,17 @@ describe("validateConfig", () => {
     "Tuya",
     "x".repeat(257),
     false,
-  ])("rejects invalid mattress prefixes: %j", (prefix) => {
+  ])("rejects invalid heated bedding prefixes: %j", (prefix) => {
     expect(() =>
       validateConfig({
         ...validConfig(),
-        mattresses: [{ ...mattress, prefix }],
+        heatedBedding: [{ ...heatedBedding, prefix }],
       }),
-    ).toThrow("mattresses[0].prefix");
+    ).toThrow("heatedBedding[0].prefix");
   });
 
   test.each(["controller", "zone"])(
-    "rejects invalid mattress %s identifiers",
+    "rejects invalid heated bedding %s identifiers",
     (field) => {
       for (const value of [
         "",
@@ -149,28 +149,31 @@ describe("validateConfig", () => {
         expect(() =>
           validateConfig({
             ...validConfig(),
-            mattresses: [{ ...mattress, [field]: value }],
+            heatedBedding: [{ ...heatedBedding, [field]: value }],
           }),
-        ).toThrow(`mattresses[0].${field}`);
+        ).toThrow(`heatedBedding[0].${field}`);
       }
     },
   );
 
   test.each([
-    { ...mattress, controller: "bridge" },
-    { ...mattress, zone: "availability" },
-  ])("rejects reserved mattress identities: %j", (entry) => {
+    { ...heatedBedding, controller: "bridge" },
+    { ...heatedBedding, zone: "availability" },
+  ])("rejects reserved heated bedding identities: %j", (entry) => {
     expect(() =>
-      validateConfig({ ...validConfig(), mattresses: [entry] }),
-    ).toThrow("reserved mattress topic");
+      validateConfig({ ...validConfig(), heatedBedding: [entry] }),
+    ).toThrow("reserved heated bedding topic");
   });
 
-  test.each([mattress, { ...mattress, prefix: "another/prefix" }])(
+  test.each([heatedBedding, { ...heatedBedding, prefix: "another/prefix" }])(
     "rejects duplicate accessory identities across prefixes: %j",
     (second) => {
       expect(() =>
-        validateConfig({ ...validConfig(), mattresses: [mattress, second] }),
-      ).toThrow("duplicate mattress identity");
+        validateConfig({
+          ...validConfig(),
+          heatedBedding: [heatedBedding, second],
+        }),
+      ).toThrow("duplicate heated bedding identity");
     },
   );
 
@@ -180,16 +183,18 @@ describe("validateConfig", () => {
     "protocol_version",
     "capabilities",
     "topic",
-  ])("rejects unknown mattress field %s without its value", (key) => {
+  ])("rejects unknown heated bedding field %s without its value", (key) => {
     try {
       validateConfig({
         ...validConfig(),
-        mattresses: [{ ...mattress, [key]: "never-log-key" }],
+        heatedBedding: [{ ...heatedBedding, [key]: "never-log-key" }],
       });
       throw new Error("Unexpected success");
     } catch (error: unknown) {
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("unknown mattress field");
+      expect((error as Error).message).toContain(
+        "unknown heated bedding field",
+      );
       expect((error as Error).message).not.toContain("never-log-key");
     }
   });
@@ -202,13 +207,16 @@ describe("validateConfig", () => {
     "tuya/bed/side_a/result",
     "tuya/bed/side_a/set",
     "tuya/bed/side_a/get",
-  ])("rejects legacy topics colliding with a mattress route: %s", (topic) => {
-    const data = validConfig();
-    data.devices[0]!.topic = topic;
-    expect(() => validateConfig({ ...data, mattresses: [mattress] })).toThrow(
-      "collides with a mattress topic",
-    );
-  });
+  ])(
+    "rejects legacy topics colliding with a heated bedding route: %s",
+    (topic) => {
+      const data = validConfig();
+      data.devices[0]!.topic = topic;
+      expect(() =>
+        validateConfig({ ...data, heatedBedding: [heatedBedding] }),
+      ).toThrow("collides with a heated bedding topic");
+    },
+  );
 
   test.each([
     ["wled", "tuya/bed/side_a/g"],
@@ -223,36 +231,37 @@ describe("validateConfig", () => {
     (data.devices[0]! as Record<string, unknown>).type = type;
     const [prefix, controller, zone] = topic.split("/", 3);
     const alternate = {
-      ...mattress,
+      ...heatedBedding,
       prefix: `${prefix!}/${controller!}`,
       controller: zone!,
       zone: topic.split("/", 4)[3]!,
     };
-    expect(() => validateConfig({ ...data, mattresses: [alternate] })).toThrow(
-      "collides with a mattress topic",
-    );
+    expect(() =>
+      validateConfig({ ...data, heatedBedding: [alternate] }),
+    ).toThrow("collides with a heated bedding topic");
   });
 
   test.each(["tuya/#", "tuya/+", "#"])(
-    "rejects ambiguous legacy subscription %s alongside mattresses",
+    "rejects ambiguous legacy subscription %s alongside heated bedding",
     (topic) => {
       const data = validConfig();
       data.devices[0]!.topic = topic;
-      expect(() => validateConfig({ ...data, mattresses: [mattress] })).toThrow(
-        "wildcard device topics cannot accompany mattresses",
-      );
+      expect(() =>
+        validateConfig({ ...data, heatedBedding: [heatedBedding] }),
+      ).toThrow("wildcard device topics cannot accompany heated bedding");
     },
   );
 
   test("accepts nested prefixes and maximum-length identifiers", () => {
     const entry = {
-      ...mattress,
+      ...heatedBedding,
       prefix: "home/tuya",
       controller: "c".repeat(64),
       zone: "z".repeat(64),
     };
     expect(
-      validateConfig({ ...validConfig(), mattresses: [entry] }).mattresses,
+      validateConfig({ ...validConfig(), heatedBedding: [entry] })
+        .heatedBedding,
     ).toEqual([entry]);
   });
 

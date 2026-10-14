@@ -14,14 +14,14 @@
 
 import { describe, expect, test } from "bun:test";
 import {
-  coalesceMattressFanWrites,
-  normalizeMattressSpeed,
-  parseMattressHeartbeat,
-  parseMattressResult,
-  parseMattressState,
-} from "../src/mattress-profile.ts";
+  coalesceHeatedBeddingFanWrites,
+  normalizeHeatedBeddingSpeed,
+  parseHeatedBeddingHeartbeat,
+  parseHeatedBeddingResult,
+  parseHeatedBeddingState,
+} from "../src/heated-bedding-profile.ts";
 
-describe("mattress speed", () => {
+describe("heated bedding speed", () => {
   test.each([
     [0, 0],
     [0.1, 10],
@@ -34,32 +34,32 @@ describe("mattress speed", () => {
     [95, 100],
     [100, 100],
   ])("normalizes %s to %s", (input, expected) => {
-    expect(normalizeMattressSpeed(input)).toBe(expected);
+    expect(normalizeHeatedBeddingSpeed(input)).toBe(expected);
   });
 
   test("preserves each supported level", () => {
     for (let level = 1; level <= 10; level++) {
-      expect(normalizeMattressSpeed(level * 10)).toBe(level * 10);
+      expect(normalizeHeatedBeddingSpeed(level * 10)).toBe(level * 10);
     }
   });
 
   test.each([-0.1, 100.1, NaN, Infinity, -Infinity])(
     "rejects invalid speed %s",
     (value) => {
-      expect(() => normalizeMattressSpeed(value)).toThrow(RangeError);
+      expect(() => normalizeHeatedBeddingSpeed(value)).toThrow(RangeError);
     },
   );
 });
 
-describe("mattress fan command", () => {
+describe("heated bedding fan command", () => {
   test("Active-on preserves the selected level", () => {
-    expect(coalesceMattressFanWrites([{ active: true }])).toEqual({
+    expect(coalesceHeatedBeddingFanWrites([{ active: true }])).toEqual({
       power: true,
     });
   });
 
   test("a positive speed sends power and normalized level together", () => {
-    expect(coalesceMattressFanWrites([{ speed: 65 }])).toEqual({
+    expect(coalesceHeatedBeddingFanWrites([{ speed: 65 }])).toEqual({
       power: true,
       heat_level: 7,
     });
@@ -67,7 +67,7 @@ describe("mattress fan command", () => {
 
   test("the last positive speed wins in a window", () => {
     expect(
-      coalesceMattressFanWrites([
+      coalesceHeatedBeddingFanWrites([
         { speed: 20 },
         { active: true },
         { speed: 85 },
@@ -79,14 +79,20 @@ describe("mattress fan command", () => {
   });
 
   test("a combined active and speed write applies both fields", () => {
-    expect(coalesceMattressFanWrites([{ active: true, speed: 50 }])).toEqual({
+    expect(
+      coalesceHeatedBeddingFanWrites([{ active: true, speed: 50 }]),
+    ).toEqual({
       power: true,
       heat_level: 5,
     });
-    expect(coalesceMattressFanWrites([{ active: true, speed: 0 }])).toEqual({
+    expect(
+      coalesceHeatedBeddingFanWrites([{ active: true, speed: 0 }]),
+    ).toEqual({
       power: false,
     });
-    expect(coalesceMattressFanWrites([{ active: false, speed: 50 }])).toEqual({
+    expect(
+      coalesceHeatedBeddingFanWrites([{ active: false, speed: 50 }]),
+    ).toEqual({
       power: false,
     });
   });
@@ -101,24 +107,24 @@ describe("mattress fan command", () => {
       [{ speed: 0 }, { speed: 90 }],
     ].map((writes) => [writes] as const),
   )("an explicit off preserves level regardless of ordering: %j", (writes) => {
-    expect(coalesceMattressFanWrites(writes)).toEqual({ power: false });
+    expect(coalesceHeatedBeddingFanWrites(writes)).toEqual({ power: false });
   });
 
   test("an empty window cannot produce a command", () => {
-    expect(() => coalesceMattressFanWrites([])).toThrow(RangeError);
+    expect(() => coalesceHeatedBeddingFanWrites([])).toThrow(RangeError);
   });
 
   test("an off does not hide another invalid write", () => {
     expect(() =>
-      coalesceMattressFanWrites([{ active: false }, { speed: NaN }]),
+      coalesceHeatedBeddingFanWrites([{ active: false }, { speed: NaN }]),
     ).toThrow(RangeError);
   });
 });
 
-describe("mattress reported state", () => {
+describe("heated bedding reported state", () => {
   test("keeps only the MQTT contract fields", () => {
     expect(
-      parseMattressState({
+      parseHeatedBeddingState({
         session_id: "session-a",
         power: false,
         heat_level: 4,
@@ -141,7 +147,7 @@ describe("mattress reported state", () => {
 
   test.each([undefined, null])("missing fields remain unknown: %s", (value) => {
     expect(
-      parseMattressState({
+      parseHeatedBeddingState({
         session_id: "session-a",
         power: value,
         heat_level: value,
@@ -171,15 +177,15 @@ describe("mattress reported state", () => {
     { preheat_remaining_seconds: Number.MAX_SAFE_INTEGER + 1 },
   ])("rejects invalid mapped state %j", (fields) => {
     expect(() =>
-      parseMattressState({ session_id: "session-a", ...fields }),
+      parseHeatedBeddingState({ session_id: "session-a", ...fields }),
     ).toThrow(RangeError);
   });
 });
 
-describe("mattress session and command result", () => {
+describe("heated bedding session and command result", () => {
   test("extracts the heartbeat session without copying other fields", () => {
     expect(
-      parseMattressHeartbeat({ session_id: "session-a", unrelated: true }),
+      parseHeatedBeddingHeartbeat({ session_id: "session-a", unrelated: true }),
     ).toBe("session-a");
   });
 
@@ -197,12 +203,12 @@ describe("mattress session and command result", () => {
       { session_id: "a".repeat(129) },
     ].map((value) => [value] as const),
   )("rejects malformed heartbeat %j", (value) => {
-    expect(() => parseMattressHeartbeat(value)).toThrow(RangeError);
+    expect(() => parseHeatedBeddingHeartbeat(value)).toThrow(RangeError);
   });
 
   test("parses a confirmed result", () => {
     expect(
-      parseMattressResult({
+      parseHeatedBeddingResult({
         request_id: "write-1",
         outcome: "confirmed",
         unrelated: true,
@@ -212,7 +218,7 @@ describe("mattress session and command result", () => {
 
   test("accepts an explicit null error on a confirmed result", () => {
     expect(
-      parseMattressResult({
+      parseHeatedBeddingResult({
         request_id: "write-1",
         outcome: "confirmed",
         error_code: null,
@@ -222,7 +228,7 @@ describe("mattress session and command result", () => {
 
   test.each(["rejected", "unconfirmed"])("parses %s results", (outcome) => {
     expect(
-      parseMattressResult({
+      parseHeatedBeddingResult({
         request_id: "write-1",
         outcome,
         error_code: "unavailable",
@@ -244,6 +250,6 @@ describe("mattress session and command result", () => {
     },
     { request_id: "write-1", outcome: "confirmed", error_code: "unavailable" },
   ])("rejects malformed result %j", (value) => {
-    expect(() => parseMattressResult(value)).toThrow(RangeError);
+    expect(() => parseHeatedBeddingResult(value)).toThrow(RangeError);
   });
 });

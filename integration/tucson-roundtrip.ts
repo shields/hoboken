@@ -81,9 +81,9 @@ try {
     },
     mqtt: { url },
     devices: [],
-    mattresses: [
-      { name: "Mattress A", prefix: "tuya", controller: "bed", zone: "side_a" },
-      { name: "Mattress B", prefix: "tuya", controller: "bed", zone: "side_b" },
+    heatedBedding: [
+      { name: "Bed Side A", prefix: "tuya", controller: "bed", zone: "side_a" },
+      { name: "Bed Side B", prefix: "tuya", controller: "bed", zone: "side_b" },
     ],
   });
   client = new HttpClient(

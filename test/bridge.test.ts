@@ -34,7 +34,7 @@ import {
   Service,
 } from "@homebridge/hap-nodejs";
 import type { Config } from "../src/config.ts";
-import { MattressSource } from "../src/mattress-source.ts";
+import { HeatedBeddingSource } from "../src/heated-bedding-source.ts";
 import type {
   IClientOptions,
   IClientPublishOptions,
@@ -82,10 +82,11 @@ class MockMqttClient extends EventEmitter {
   subscriptions: string[][] = [];
   published: { topic: string; message: string }[] = [];
   options: IClientOptions | undefined;
-  mattressSubscriptions: Record<string, IClientSubscribeOptions> | undefined;
+  heatedBeddingSubscriptions:
+    Record<string, IClientSubscribeOptions> | undefined;
   acknowledged:
     ((error: Error | null, grants?: ISubscriptionGrant[]) => void) | undefined;
-  mattressPublications: {
+  heatedBeddingPublications: {
     topic: string;
     message: string;
     complete: (error?: Error) => void;
@@ -106,7 +107,7 @@ class MockMqttClient extends EventEmitter {
   ): this {
     if (Array.isArray(topics)) this.subscriptions.push(topics);
     else {
-      this.mattressSubscriptions = topics;
+      this.heatedBeddingSubscriptions = topics;
       this.acknowledged = complete;
     }
     return this;
@@ -120,7 +121,7 @@ class MockMqttClient extends EventEmitter {
   ): this {
     this.published.push({ topic, message });
     if (options && complete)
-      this.mattressPublications.push({ topic, message, complete });
+      this.heatedBeddingPublications.push({ topic, message, complete });
     return this;
   }
 
@@ -145,18 +146,18 @@ mock.module("mqtt", () => ({
 
 const { startBridge, buildStatusData } = await import("../src/bridge.ts");
 
-const MATTRESSES = [
-  { name: "Mattress A", prefix: "tuya", controller: "bed", zone: "side_a" },
-  { name: "Mattress B", prefix: "tuya", controller: "bed", zone: "side_b" },
+const HEATED_BEDDING = [
+  { name: "Bed Side A", prefix: "tuya", controller: "bed", zone: "side_a" },
+  { name: "Bed Side B", prefix: "tuya", controller: "bed", zone: "side_b" },
 ];
-const MATTRESS_STATE = {
+const HEATED_BEDDING_STATE = {
   session_id: "live",
   power: false,
   heat_level: 4,
   preheat: false,
 };
 
-function mattressMessage(
+function heatedBeddingMessage(
   client: MockMqttClient,
   topic: string,
   value: unknown,
@@ -169,21 +170,23 @@ function mattressMessage(
   );
 }
 
-function readyMattress(client: MockMqttClient): void {
+function readyHeatedBedding(client: MockMqttClient): void {
   client.connected = true;
   client.emit("connect", { sessionPresent: false });
   client.acknowledged!(
     null,
-    Object.entries(client.mattressSubscriptions!).map(([topic, options]) => ({
-      topic,
-      ...options,
-    })),
+    Object.entries(client.heatedBeddingSubscriptions!).map(
+      ([topic, options]) => ({
+        topic,
+        ...options,
+      }),
+    ),
   );
-  mattressMessage(client, "tuya/bridge/availability", "online");
-  mattressMessage(client, "tuya/bed/availability", "online");
-  mattressMessage(client, "tuya/bridge/heartbeat", { session_id: "live" });
-  for (const zone of MATTRESSES)
-    mattressMessage(client, `tuya/bed/${zone.zone}`, MATTRESS_STATE);
+  heatedBeddingMessage(client, "tuya/bridge/availability", "online");
+  heatedBeddingMessage(client, "tuya/bed/availability", "online");
+  heatedBeddingMessage(client, "tuya/bridge/heartbeat", { session_id: "live" });
+  for (const zone of HEATED_BEDDING)
+    heatedBeddingMessage(client, `tuya/bed/${zone.zone}`, HEATED_BEDDING_STATE);
 }
 
 function testConfig(): Config {
@@ -276,19 +279,19 @@ describe("startBridge", () => {
     }
   });
 
-  test("a mattress-only bridge creates stable fans and preheat switches on one MQTT 5 connection", async () => {
+  test("a bridge with only heated bedding creates stable fans and preheat switches on one MQTT 5 connection", async () => {
     const config = {
       ...testConfig(),
       devices: [],
-      mattresses: [
+      heatedBedding: [
         {
-          name: "Mattress A",
+          name: "Bed Side A",
           prefix: "tuya",
           controller: "bed",
           zone: "side_a",
         },
         {
-          name: "Mattress B",
+          name: "Bed Side B",
           prefix: "tuya",
           controller: "bed",
           zone: "side_b",
@@ -304,10 +307,10 @@ describe("startBridge", () => {
       expect(
         bridge.bridgedAccessories.map((accessory) => accessory.displayName),
       ).toEqual([
-        "Mattress A",
-        "Mattress A Preheat",
-        "Mattress B",
-        "Mattress B Preheat",
+        "Bed Side A",
+        "Bed Side A Preheat",
+        "Bed Side B",
+        "Bed Side B Preheat",
       ]);
       for (const accessory of bridge.bridgedAccessories) {
         expect(
@@ -315,14 +318,27 @@ describe("startBridge", () => {
             .getService(Service.AccessoryInformation)!
             .getCharacteristic(Characteristic.Manufacturer).value,
         ).toBe("Hoboken");
+        expect(
+          accessory
+            .getService(Service.AccessoryInformation)!
+            .getCharacteristic(Characteristic.Model).value,
+        ).toBe(
+          accessory.getService(Service.Fanv2)
+            ? "Heated Bedding Fan"
+            : "Heated Bedding Preheat",
+        );
       }
     } finally {
       await shutdown();
     }
   });
 
-  test("mattress state and confirmed commands update HomeKit and operational status", async () => {
-    const config = { ...metricsConfig(), devices: [], mattresses: MATTRESSES };
+  test("heated bedding state and confirmed commands update HomeKit and operational status", async () => {
+    const config = {
+      ...metricsConfig(),
+      devices: [],
+      heatedBedding: HEATED_BEDDING,
+    };
     const { bridge, metricsPort, shutdown } = await startBridge(config);
     const client = mockClient;
     const fan = bridge.bridgedAccessories[0]!.getService(Service.Fanv2)!;
@@ -342,13 +358,14 @@ describe("startBridge", () => {
         await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
       ).text();
       expect(unavailable).toContain("No Response");
-      readyMattress(client);
+      readyHeatedBedding(client);
       expect(await speed.handleGetRequest()).toBe(40);
       expect(await active.handleGetRequest()).toBe(0);
       const html = await (
         await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
       ).text();
-      expect(html).toContain("Mattress A");
+      expect(html).toContain("Bed Side A");
+      expect(html).toContain('<span class="type-badge">heated bedding</span>');
       expect(html).toContain("heat_level");
       expect(html).not.toContain("No Response");
       const metrics = await (
@@ -358,43 +375,46 @@ describe("startBridge", () => {
       expect(metrics).toContain("hoboken_devices_configured 2");
       expect(metrics).toContain("hoboken_devices_state_unknown 0");
       const pushed = {
-        ...MATTRESS_STATE,
+        ...HEATED_BEDDING_STATE,
         power: true,
         heat_level: 6,
         preheat: true,
       };
-      mattressMessage(client, "tuya/bed/side_a", pushed);
+      heatedBeddingMessage(client, "tuya/bed/side_a", pushed);
       expect(speed.value).toBe(60);
       expect(preheat.value).toBe(true);
       expect(rightSpeed.value).toBe(40);
       jest.useFakeTimers();
       const writes = [speed.handleSetRequest(80), active.handleSetRequest(0)];
       jest.advanceTimersByTime(50);
-      const publication = client.mattressPublications[0]!;
+      const publication = client.heatedBeddingPublications[0]!;
       const command = JSON.parse(publication.message) as {
         request_id: string;
         power: boolean;
       };
       expect(command).toEqual({ request_id: command.request_id, power: false });
       publication.complete();
-      mattressMessage(client, "tuya/bed/side_a/result", {
+      heatedBeddingMessage(client, "tuya/bed/side_a/result", {
         request_id: command.request_id,
         outcome: "confirmed",
       });
-      mattressMessage(client, "tuya/bed/side_a", { ...pushed, power: false });
+      heatedBeddingMessage(client, "tuya/bed/side_a", {
+        ...pushed,
+        power: false,
+      });
       await Promise.all(writes);
       expect(active.value).toBe(0);
       expect(speed.value).toBe(60);
       const preheatWrite = preheat.handleSetRequest(false);
       const preheatCommand = JSON.parse(
-        client.mattressPublications[1]!.message,
+        client.heatedBeddingPublications[1]!.message,
       ) as { request_id: string };
-      mattressMessage(client, "tuya/bed/side_a/result", {
+      heatedBeddingMessage(client, "tuya/bed/side_a/result", {
         request_id: preheatCommand.request_id,
         outcome: "confirmed",
       });
       expect(preheat.value).toBe(true);
-      mattressMessage(client, "tuya/bed/side_a", {
+      heatedBeddingMessage(client, "tuya/bed/side_a", {
         ...pushed,
         power: false,
         preheat: false,
@@ -410,7 +430,7 @@ describe("startBridge", () => {
       jest.advanceTimersByTime(1250);
       const replacement = mockClient;
       expect(replacement).not.toBe(client);
-      readyMattress(replacement);
+      readyHeatedBedding(replacement);
       expect(replacement.published).toHaveLength(0);
       expect(await speed.handleGetRequest()).toBe(40);
       const restoredMetrics = await (
@@ -432,22 +452,22 @@ describe("startBridge", () => {
     const count = mockClients.length;
     const { bridge, shutdown } = await startBridge({
       ...testConfig(),
-      mattresses: MATTRESSES,
+      heatedBedding: HEATED_BEDDING,
     });
     try {
       const legacy = mockClients[count]!;
-      const mattress = mockClients[count + 1]!;
+      const heatedBedding = mockClients[count + 1]!;
       expect(legacy.options).toBeUndefined();
-      expect(mattress.options?.protocolVersion).toBe(5);
+      expect(heatedBedding.options?.protocolVersion).toBe(5);
       legacy.connected = true;
       legacy.emit("connect");
       expect(legacy.subscriptions).toEqual([
         ["zigbee2mqtt/living_room", "zigbee2mqtt/bedroom"],
       ]);
       expect(bridge.bridgedAccessories).toHaveLength(7);
-      readyMattress(mattress);
-      mattressMessage(mattress, "tuya/bed/side_a", {
-        ...MATTRESS_STATE,
+      readyHeatedBedding(heatedBedding);
+      heatedBeddingMessage(heatedBedding, "tuya/bed/side_a", {
+        ...HEATED_BEDDING_STATE,
         heat_level: 10,
       });
       legacy.emit(
@@ -2184,10 +2204,10 @@ describe("devicesStateUnknown metric", () => {
 });
 
 describe("buildStatusData", () => {
-  test("mattress status contains only live reported values or an unavailable marker", async () => {
-    const config = { ...testConfig(), mattresses: MATTRESSES };
-    const source = new MattressSource(
-      MATTRESSES,
+  test("heated bedding status contains only live reported values or an unavailable marker", async () => {
+    const config = { ...testConfig(), heatedBedding: HEATED_BEDDING };
+    const source = new HeatedBeddingSource(
+      HEATED_BEDDING,
       (_topic, _payload, complete) => {
         complete();
       },
@@ -2201,7 +2221,7 @@ describe("buildStatusData", () => {
       [],
       "version",
     );
-    expect(withoutSource.mattresses![0]).toMatchObject({
+    expect(withoutSource.heatedBedding![0]).toMatchObject({
       state: null,
       pending: 0,
     });
@@ -2216,7 +2236,7 @@ describe("buildStatusData", () => {
         { session_id: "live" },
         false,
       );
-      source.handle(generation, "tuya/bed/side_a", MATTRESS_STATE, true);
+      source.handle(generation, "tuya/bed/side_a", HEATED_BEDDING_STATE, true);
       const outcomes = Promise.allSettled([
         source.writePreheat("tuya/bed/side_a", true),
       ]);
@@ -2228,21 +2248,24 @@ describe("buildStatusData", () => {
         "version",
         source,
       );
-      expect(status.mattresses![0]).toMatchObject({
-        name: "Mattress A",
-        state: MATTRESS_STATE,
+      expect(status.heatedBedding![0]).toMatchObject({
+        name: "Bed Side A",
+        state: HEATED_BEDDING_STATE,
         pending: 1,
       });
-      expect(status.mattresses![1]).toMatchObject({ state: null, pending: 0 });
+      expect(status.heatedBedding![1]).toMatchObject({
+        state: null,
+        pending: 0,
+      });
       source.disconnect();
       await outcomes;
       expect(
         buildStatusData(config, stateCache, mqtt, [], "version", source)
-          .mattresses![0]!.state,
+          .heatedBedding![0]!.state,
       ).toBeNull();
       const badConfig = {
         ...config,
-        mattresses: [{ ...MATTRESSES[0]!, zone: "unknown" }],
+        heatedBedding: [{ ...HEATED_BEDDING[0]!, zone: "unknown" }],
       };
       expect(() =>
         buildStatusData(badConfig, stateCache, mqtt, [], "version", source),

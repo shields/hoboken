@@ -80,9 +80,9 @@ export const fixtureData: StatusData = {
       state: { fan_state: "ON", fan_mode: "medium" },
     },
   ],
-  mattresses: [
+  heatedBedding: [
     {
-      name: "Mattress A",
+      name: "Bed Side A",
       topic: "tuya/bed/side_a",
       state: {
         session_id: "demo-session",
@@ -95,6 +95,6 @@ export const fixtureData: StatusData = {
       },
       pending: 1,
     },
-    { name: "Mattress B", topic: "tuya/bed/side_b", state: null, pending: 0 },
+    { name: "Bed Side B", topic: "tuya/bed/side_b", state: null, pending: 0 },
   ],
 };

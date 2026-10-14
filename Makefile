@@ -40,7 +40,7 @@ test:
 	bun test --coverage
 
 test-integration: test-broker
-	HOBOKEN_TEST_BROKER="$(TEST_BROKER_BIN)" "$(NODE)" --test integration/wled-roundtrip.ts integration/mattress-roundtrip.ts
+	HOBOKEN_TEST_BROKER="$(TEST_BROKER_BIN)" "$(NODE)" --test integration/wled-roundtrip.ts integration/heated-bedding-roundtrip.ts
 
 test-broker-deps:
 	sudo apt-get update

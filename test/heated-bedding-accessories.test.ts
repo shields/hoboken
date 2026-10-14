@@ -18,19 +18,20 @@ import {
   HAPStatus,
   Perms,
   Service,
+  uuid,
 } from "@homebridge/hap-nodejs";
 import {
-  createMattressAccessories,
-  type MattressAccessories,
-} from "../src/mattress-accessories.ts";
+  createHeatedBeddingAccessories,
+  type HeatedBeddingAccessories,
+} from "../src/heated-bedding-accessories.ts";
 import {
-  MattressSource,
-  type MattressPublication,
-  type MattressZoneConfig,
-} from "../src/mattress-source.ts";
+  HeatedBeddingSource,
+  type HeatedBeddingPublication,
+  type HeatedBeddingZoneConfig,
+} from "../src/heated-bedding-source.ts";
 
-const CONFIG: MattressZoneConfig = {
-  name: "Left pad",
+const CONFIG: HeatedBeddingZoneConfig = {
+  name: "Bed Side A",
   prefix: "tuya",
   controller: "bed",
   zone: "left",
@@ -43,19 +44,19 @@ const BASELINE = {
   preheat: false,
 };
 
-describe("mattress HomeKit accessories", () => {
-  let source: MattressSource;
-  let controls: MattressAccessories;
+describe("heated bedding HomeKit accessories", () => {
+  let source: HeatedBeddingSource;
+  let controls: HeatedBeddingAccessories;
   let generation: number;
   let now: number;
-  let sent: MattressPublication[];
+  let sent: HeatedBeddingPublication[];
 
   beforeEach(() => {
     jest.useFakeTimers();
     now = 0;
     sent = [];
     let sequence = 0;
-    source = new MattressSource(
+    source = new HeatedBeddingSource(
       [CONFIG],
       (_topic, payload) => {
         sent.push(payload);
@@ -68,7 +69,7 @@ describe("mattress HomeKit accessories", () => {
         },
       },
     );
-    controls = createMattressAccessories(CONFIG, source);
+    controls = createHeatedBeddingAccessories(CONFIG, source);
     generation = source.connect();
   });
 
@@ -114,6 +115,14 @@ describe("mattress HomeKit accessories", () => {
   }
 
   test("creates separate fan and stateful preheat identities with no AUTO or temperature", () => {
+    expect(controls.fan.UUID).toBe(
+      uuid.generate(JSON.stringify(["hoboken:mattress:fan", "bed", "left"])),
+    );
+    expect(controls.preheat.UUID).toBe(
+      uuid.generate(
+        JSON.stringify(["hoboken:mattress:preheat", "bed", "left"]),
+      ),
+    );
     expect(controls.fan.UUID).not.toBe(controls.preheat.UUID);
     expect(
       controls.fan
@@ -132,18 +141,18 @@ describe("mattress HomeKit accessories", () => {
         HAPStatus.SERVICE_COMMUNICATION_FAILURE,
       );
     }
-    const renamed = createMattressAccessories(
+    const renamed = createHeatedBeddingAccessories(
       { ...CONFIG, name: "Renamed", prefix: "other" },
-      new MattressSource([{ ...CONFIG, prefix: "other" }], () => {
+      new HeatedBeddingSource([{ ...CONFIG, prefix: "other" }], () => {
         throw new Error("No writes expected");
       }),
     );
     expect(renamed.fan.UUID).toBe(controls.fan.UUID);
     expect(renamed.preheat.UUID).toBe(controls.preheat.UUID);
     const rightConfig = { ...CONFIG, zone: "right" };
-    const right = createMattressAccessories(
+    const right = createHeatedBeddingAccessories(
       rightConfig,
-      new MattressSource([rightConfig], () => {
+      new HeatedBeddingSource([rightConfig], () => {
         throw new Error("No writes expected");
       }),
     );

@@ -23,10 +23,10 @@ import type {
   IClientPublishOptions,
 } from "mqtt";
 import pino from "pino";
-import { MattressMqtt } from "../src/mattress-mqtt.ts";
+import { HeatedBeddingMQTT } from "../src/heated-bedding-mqtt.ts";
 
 const ZONE = {
-  name: "Left pad",
+  name: "Bed Side A",
   prefix: "tuya",
   controller: "bed",
   zone: "left",
@@ -113,9 +113,9 @@ class TestMqttClient extends EventEmitter {
   }
 }
 
-describe("mattress MQTT owner", () => {
+describe("heated bedding MQTT owner", () => {
   let clients: TestMqttClient[];
-  let owner: MattressMqtt;
+  let owner: HeatedBeddingMQTT;
   let logs: string[];
   let changed: number;
   let shutdownError: Error | undefined;
@@ -128,7 +128,7 @@ describe("mattress MQTT owner", () => {
     changed = 0;
     shutdownError = undefined;
     onChange = undefined;
-    owner = new MattressMqtt("mqtt://user:secret@localhost", [ZONE], {
+    owner = new HeatedBeddingMQTT("mqtt://user:secret@localhost", [ZONE], {
       connect: (_url, options) => {
         const client = new TestMqttClient(options);
         clients.push(client);
@@ -439,7 +439,7 @@ describe("mattress MQTT owner", () => {
       expect(owner.connected).toBe(false);
       expect(() => owner.source.getState(TOPIC)).toThrow(HapStatusError);
       expect(logs.join(" ")).not.toContain("secret");
-      expect(logs.join(" ")).toContain("invalid_mattress_message");
+      expect(logs.join(" ")).toContain("invalid_heated_bedding_message");
     },
   );
 
@@ -501,7 +501,7 @@ describe("mattress MQTT owner", () => {
   });
 
   test("shutdown has a finite deadline", async () => {
-    shutdownError = new Error("Mattress MQTT shutdown timed out");
+    shutdownError = new Error("Heated bedding MQTT shutdown timed out");
     clients[0]!.finishEnd = false;
     const outcome = Promise.allSettled([owner.stop()]);
     jest.advanceTimersByTime(2000);
@@ -514,7 +514,7 @@ describe("mattress MQTT owner", () => {
     await owner.stop();
     let explode = false;
     const error = new Error("Unexpected observer failure");
-    owner = new MattressMqtt("mqtt://localhost", [ZONE], {
+    owner = new HeatedBeddingMQTT("mqtt://localhost", [ZONE], {
       connect: (_url, options) => {
         const client = new TestMqttClient(options);
         clients.push(client);

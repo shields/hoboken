@@ -14,7 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
-import type { MattressZoneConfig } from "./mattress-source.ts";
+import type { HeatedBeddingZoneConfig } from "./heated-bedding-source.ts";
 
 export type Capability =
   "on_off" | "brightness" | "color_temp" | "color_hs" | "fan" | "fan_speed";
@@ -74,7 +74,7 @@ export interface Config {
   bridge: BridgeConfig;
   mqtt: MqttConfig;
   devices: DeviceConfig[];
-  mattresses?: MattressZoneConfig[];
+  heatedBedding?: HeatedBeddingZoneConfig[];
   metrics?: MetricsConfig;
 }
 
@@ -124,15 +124,15 @@ export function validateConfig(data: unknown): Config {
     throw new Error("mqtt.url must be a non-empty string");
   }
 
-  const mattresses =
-    obj.mattresses === undefined
+  const heatedBedding =
+    obj.heatedBedding === undefined
       ? undefined
-      : validateMattresses(obj.mattresses);
+      : validateHeatedBedding(obj.heatedBedding);
   const rawDevices =
-    obj.devices === undefined && mattresses?.length ? [] : obj.devices;
+    obj.devices === undefined && heatedBedding?.length ? [] : obj.devices;
   if (
     !Array.isArray(rawDevices) ||
-    (rawDevices.length === 0 && !mattresses?.length)
+    (rawDevices.length === 0 && !heatedBedding?.length)
   ) {
     throw new Error("devices must be a non-empty array");
   }
@@ -140,7 +140,8 @@ export function validateConfig(data: unknown): Config {
   const devices = rawDevices.map((d: unknown, i: number) =>
     validateDevice(d, i),
   );
-  if (mattresses?.length) validateMattressTopics(devices, mattresses);
+  if (heatedBedding?.length)
+    validateHeatedBeddingTopics(devices, heatedBedding);
 
   const topics = new Set<string>();
   for (const device of devices) {
@@ -209,16 +210,17 @@ export function validateConfig(data: unknown): Config {
       url: mqtt.url,
     },
     devices,
-    ...(mattresses ? { mattresses } : {}),
+    ...(heatedBedding ? { heatedBedding } : {}),
     ...(metrics ? { metrics } : {}),
   };
 }
 
-function validateMattresses(data: unknown): MattressZoneConfig[] {
-  if (!Array.isArray(data)) throw new TypeError("mattresses must be an array");
+function validateHeatedBedding(data: unknown): HeatedBeddingZoneConfig[] {
+  if (!Array.isArray(data))
+    throw new TypeError("heatedBedding must be an array");
   const identities = new Set<string>();
   return data.map((entry: unknown, index: number) => {
-    const label = `mattresses[${String(index)}]`;
+    const label = `heatedBedding[${String(index)}]`;
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       throw new TypeError(`${label} must be an object`);
     }
@@ -228,7 +230,7 @@ function validateMattresses(data: unknown): MattressZoneConfig[] {
         (field) => !["name", "prefix", "controller", "zone"].includes(field),
       )
     ) {
-      throw new Error(`${label}: unknown mattress field`);
+      throw new Error(`${label}: unknown heated bedding field`);
     }
     if (
       typeof value.name !== "string" ||
@@ -262,11 +264,11 @@ function validateMattresses(data: unknown): MattressZoneConfig[] {
       throw new Error(`${label}.zone must be a valid Tucson zone name`);
     }
     if (value.controller === "bridge" || value.zone === "availability") {
-      throw new Error(`${label}: reserved mattress topic`);
+      throw new Error(`${label}: reserved heated bedding topic`);
     }
     const identity = `${value.controller}/${value.zone}`;
     if (identities.has(identity))
-      throw new Error(`${label}: duplicate mattress identity`);
+      throw new Error(`${label}: duplicate heated bedding identity`);
     identities.add(identity);
     return {
       name: value.name,
@@ -277,12 +279,12 @@ function validateMattresses(data: unknown): MattressZoneConfig[] {
   });
 }
 
-function validateMattressTopics(
+function validateHeatedBeddingTopics(
   devices: DeviceConfig[],
-  mattresses: MattressZoneConfig[],
+  heatedBedding: HeatedBeddingZoneConfig[],
 ): void {
   const topics = new Set<string>();
-  for (const { prefix, controller, zone } of mattresses) {
+  for (const { prefix, controller, zone } of heatedBedding) {
     const topic = `${prefix}/${controller}/${zone}`;
     for (const route of [
       `${prefix}/bridge/availability`,
@@ -297,7 +299,7 @@ function validateMattressTopics(
   }
   for (const device of devices) {
     if (device.topic.includes("+") || device.topic.includes("#")) {
-      throw new Error("wildcard device topics cannot accompany mattresses");
+      throw new Error("wildcard device topics cannot accompany heated bedding");
     }
     const routes =
       device.type === "wled"
@@ -309,7 +311,7 @@ function validateMattressTopics(
           ]
         : [device.topic, `${device.topic}/set`, `${device.topic}/get`];
     if (routes.some((topic) => topics.has(topic))) {
-      throw new Error("device route collides with a mattress topic");
+      throw new Error("device route collides with a heated bedding topic");
     }
   }
 }

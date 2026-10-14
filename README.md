@@ -4,8 +4,10 @@ A minimal HomeKit bridge for Zigbee2MQTT and WLED. Exposes Z2M lights, ceiling
 fans, smart plugs, scenes, and WLED LED controllers to Apple Home for HomePod
 and Siri voice commands.
 
-The Tucson mattress-pad MQTT profile exposes each configured zone as a
-ten-level fan and a separate stateful preheat switch.
+Tucson's MQTT profile adds support for heated mattress pads and heated blankets
+(heated bedding). Each configured zone appears as a ten-level fan and a
+separate stateful preheat switch, with short display names such as "Bed Side A"
+and "Bed Side A Preheat".
 
 It also provides an HTTP endpoint with a live-updating dashboard presenting all
 data in both MQTT and HAP forms, as well as Prometheus metrics and health check
@@ -80,26 +82,26 @@ Scenes are exposed as momentary switches. "Hey Siri, turn on Movie Mode"
 publishes `{"scene_recall": <id>}` to Z2M. The switch auto-resets to off after
 1 second.
 
-### Mattress Zones
+### Heated Bedding Zones
 
-Configure Tucson zones separately from `devices`:
+Configure heated mattress pad or heated blanket zones separately from `devices`:
 
 ```yaml
-mattresses:
-  - name: "Mattress A"
+heatedBedding:
+  - name: "Bed Side A"
     prefix: "tuya"
     controller: "bed"
     zone: "side_a"
-  - name: "Mattress B"
+  - name: "Bed Side B"
     prefix: "tuya"
     controller: "bed"
     zone: "side_b"
 ```
 
-Match these logical names to Tucson's configuration. A mattress-only bridge
+Match these logical names to Tucson's configuration. A bridge with only heated bedding
 can omit `devices` or set it to `[]`. Controller/zone pairs must be unique
 even across prefixes, because they determine accessory identities. Display
-names and prefixes can change without changing those identities. Mattress
+names and prefixes can change without changing those identities. Heated bedding
 configuration contains only these four fields; Tucson owns controller
 credentials, protocol versions, and device connections.
 
@@ -266,10 +268,10 @@ make run     # Run with Node.js
 On Debian or Ubuntu, install the broker build packages with
 `make test-broker-deps`. Then run `make test-integration` on Node.js 24.
 The target builds the pinned Mosquitto release and runs the existing WLED
-tests plus mattress tests over paired HAP HTTP and MQTT 5 connections.
+tests plus heated bedding tests over paired HAP HTTP and MQTT 5 connections.
 Use `NODE=/path/to/node make test-integration` to select the runtime.
 
-Mattress integration covers reported state on both zones, fan-write
+Heated bedding integration covers reported state on both zones, fan-write
 ordering, stateful preheat, rejected and retained results, session changes,
 the full HAP write deadline, and broker restart without command replay.
 The simulated MQTT controller exercises the contract; actual Sunbeam, Home
