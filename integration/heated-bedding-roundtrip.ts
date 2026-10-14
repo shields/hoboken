@@ -185,7 +185,8 @@ describe(
     let preheat: string;
     let rightSpeed: string;
     let mode: "confirm" | "drop" | "reject" = "confirm";
-    let session = "session-one";
+    let session = "session-0";
+    let sessions = 0;
     const commands: { topic: string; command: Command }[] = [];
     const states = new Map<string, HeatedBeddingState>();
     const warnings: string[] = [];
@@ -277,6 +278,13 @@ describe(
         assert.equal(characteristic.status ?? 0, expectedStatus);
     }
 
+    async function unavailable(): Promise<boolean> {
+      return (await get(speed, rightSpeed)).every(
+        (characteristic) =>
+          characteristic.status === HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    }
+
     async function seed(): Promise<void> {
       await publish(`${PREFIX}/bridge/availability`, "online", true);
       await publish(`${PREFIX}/bed/availability`, "online", true);
@@ -294,6 +302,29 @@ describe(
         states.set(topic, state);
         await publish(topic, state, true);
       }
+    }
+
+    async function baseline(): Promise<void> {
+      mode = "confirm";
+      warnings.length = 0;
+      sessions++;
+      session = `session-${String(sessions)}`;
+      await seed();
+      await poll(unavailable);
+      await publish(`${PREFIX}/bridge/heartbeat`, { session_id: session });
+      await poll(async () => {
+        const values = new Map(
+          (await get(active, speed, preheat, rightSpeed)).map(
+            ({ aid, iid, value }) => [`${String(aid)}.${String(iid)}`, value],
+          ),
+        );
+        return (
+          values.get(active) === 0 &&
+          values.get(speed) === 40 &&
+          values.get(preheat) === 0 &&
+          values.get(rightSpeed) === 40
+        );
+      });
     }
 
     before(async () => {
@@ -349,11 +380,6 @@ describe(
       preheat = `${String(switchAccessory.aid)}.${String(preheatSwitch.getCharacteristic(Characteristic.On).iid)}`;
     });
 
-    beforeEach(() => {
-      mode = "confirm";
-      warnings.length = 0;
-    });
-
     after(async () => {
       const cleanup = await Promise.allSettled([
         client?.close(),
@@ -366,158 +392,157 @@ describe(
     });
 
     test("retained snapshots and heartbeats cannot establish initial liveness", async () => {
-      assert(
-        (await get(speed, rightSpeed)).every(
-          (characteristic) =>
-            characteristic.status === HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-        ),
-      );
+      assert(await unavailable());
       await publish(`${PREFIX}/bridge/heartbeat`, { session_id: session });
       await poll(async () => (await value(speed)) === 40);
       assert.equal(await value(active), 0);
     });
 
-    test("fan off wins over a positive speed in either HTTP write order", async () => {
-      for (const input of [
-        { [speed]: 80, [active]: 0 },
-        { [active]: 0, [speed]: 80 },
-      ]) {
+    describe("with a fresh controller session", () => {
+      beforeEach(baseline);
+
+      test("fan off wins over a positive speed in either HTTP write order", async () => {
+        for (const input of [
+          { [speed]: 80, [active]: 0 },
+          { [active]: 0, [speed]: 80 },
+        ]) {
+          const count = commands.length;
+          await write(input);
+          assert.equal(commands.length, count + 1);
+          const command = commands.at(-1)?.command;
+          assert(command);
+          assert.deepEqual(command, {
+            request_id: command.request_id,
+            power: false,
+          });
+          assert.equal(await value(speed), 40);
+          assert.equal(await value(active), 0);
+        }
+      });
+
+      test("both zones have independent reported speeds", async () => {
+        await write({ [rightSpeed]: 95 });
+        assert.equal(await value(rightSpeed), 100);
+        assert.equal(await value(speed), 40);
+        const state = states.get(TOPIC);
+        assert(state);
+        state.heat_level = 6;
+        await publish(TOPIC, state, true);
+        await poll(async () => (await value(speed)) === 60);
+        assert.equal(await value(rightSpeed), 100);
+      });
+
+      test("preheat stays on until a controller-style state push ends it", async () => {
+        await write({ [preheat]: true });
+        await delay(1200);
+        assert.equal(await value(preheat), 1);
+        const state = states.get(TOPIC);
+        assert(state);
+        state.preheat = false;
+        await publish(TOPIC, state, true);
+        await poll(async () => (await value(preheat)) === 0);
+      });
+
+      test("rejected writes preserve reported values", async () => {
+        mode = "reject";
+        await write({ [speed]: 80 }, HAPStatus.INVALID_VALUE_IN_REQUEST);
+        assert.equal(await value(speed), 40);
+      });
+
+      test("retained results cannot confirm a matching reported state", async () => {
+        mode = "drop";
         const count = commands.length;
-        await write(input);
-        assert.equal(commands.length, count + 1);
+        let settled = false;
+        const pending = (async (): Promise<void> => {
+          await write({ [speed]: 80 });
+          settled = true;
+        })();
+        await poll(() => commands.length > count);
         const command = commands.at(-1)?.command;
         assert(command);
-        assert.deepEqual(command, {
-          request_id: command.request_id,
-          power: false,
-        });
+        const result = { request_id: command.request_id, outcome: "confirmed" };
+        await publish(`${TOPIC}/result`, result, true);
+        const state = states.get(TOPIC);
+        assert(state);
+        Object.assign(state, { power: true, heat_level: 8 });
+        await publish(TOPIC, state, true);
+        await delay(150);
+        assert.equal(settled, false);
+        await publish(`${TOPIC}/result`, result);
+        await pending;
+        assert.equal(await value(speed), 80);
+      });
+
+      test("a new bridge session cancels pending work and requires matching snapshots", async () => {
+        mode = "drop";
+        const count = commands.length;
+        const cancelled = write(
+          { [preheat]: true },
+          HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+        );
+        await poll(() => commands.length > count);
+        session = `${session}-replacement`;
+        await publish(`${PREFIX}/bridge/heartbeat`, { session_id: session });
+        await cancelled;
+        assert.equal(
+          (await get(speed))[0]?.status,
+          HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+        );
+        for (const [topic, state] of states) {
+          state.session_id = session;
+          await publish(topic, state, true);
+        }
+        await poll(async () => (await value(speed)) === 40);
+        assert.equal(commands.length, count + 1);
+      });
+
+      test("the full HTTP write fails before HAP emits its own timeout", async () => {
+        mode = "drop";
+        await write({ [speed]: 20 }, HAPStatus.OPERATION_TIMED_OUT);
+        assert(!warnings.includes("timeout-write"));
         assert.equal(await value(speed), 40);
-        assert.equal(await value(active), 0);
-      }
-    });
+      });
 
-    test("both zones have independent reported speeds", async () => {
-      await write({ [rightSpeed]: 95 });
-      assert.equal(await value(rightSpeed), 100);
-      assert.equal(await value(speed), 40);
-      const state = states.get(TOPIC);
-      assert(state);
-      state.heat_level = 6;
-      await publish(TOPIC, state, true);
-      await poll(async () => (await value(speed)) === 60);
-      assert.equal(await value(rightSpeed), 100);
-    });
-
-    test("preheat stays on until a controller-style state push ends it", async () => {
-      await write({ [preheat]: true });
-      await delay(1200);
-      assert.equal(await value(preheat), 1);
-      const state = states.get(TOPIC);
-      assert(state);
-      state.preheat = false;
-      await publish(TOPIC, state, true);
-      await poll(async () => (await value(preheat)) === 0);
-    });
-
-    test("rejected writes preserve reported values", async () => {
-      mode = "reject";
-      await write({ [speed]: 80 }, HAPStatus.INVALID_VALUE_IN_REQUEST);
-      assert.equal(await value(speed), 60);
-    });
-
-    test("retained results cannot confirm a matching reported state", async () => {
-      mode = "drop";
-      const count = commands.length;
-      let settled = false;
-      const pending = (async (): Promise<void> => {
-        await write({ [speed]: 80 });
-        settled = true;
-      })();
-      await poll(() => commands.length > count);
-      const command = commands.at(-1)?.command;
-      assert(command);
-      const result = { request_id: command.request_id, outcome: "confirmed" };
-      await publish(`${TOPIC}/result`, result, true);
-      const state = states.get(TOPIC);
-      assert(state);
-      Object.assign(state, { power: true, heat_level: 8 });
-      await publish(TOPIC, state, true);
-      await delay(150);
-      assert.equal(settled, false);
-      await publish(`${TOPIC}/result`, result);
-      await pending;
-      assert.equal(await value(speed), 80);
-    });
-
-    test("a new bridge session cancels pending work and requires matching snapshots", async () => {
-      mode = "drop";
-      const count = commands.length;
-      const cancelled = write(
-        { [preheat]: true },
-        HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-      await poll(() => commands.length > count);
-      session = "session-two";
-      await publish(`${PREFIX}/bridge/heartbeat`, { session_id: session });
-      await cancelled;
-      assert.equal(
-        (await get(speed))[0]?.status,
-        HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-      for (const [topic, state] of states) {
-        state.session_id = session;
-        await publish(topic, state, true);
-      }
-      await poll(async () => (await value(speed)) === 80);
-      assert.equal(commands.length, count + 1);
-    });
-
-    test("the full HTTP write fails before HAP emits its own timeout", async () => {
-      mode = "drop";
-      await write({ [speed]: 20 }, HAPStatus.OPERATION_TIMED_OUT);
-      assert(!warnings.includes("timeout-write"));
-      assert.equal(await value(speed), 80);
-    });
-
-    test("broker restart invalidates state and never replays a pending command", async () => {
-      assert(broker);
-      mode = "drop";
-      const count = commands.length;
-      const cancelled = write(
-        { [preheat]: true },
-        HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-      await poll(() => commands.length > count);
-      await backend?.endAsync(true);
-      backend = undefined;
-      await broker.stop();
-      await cancelled;
-      assert.equal(
-        (await get(speed))[0]?.status,
-        HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-      await broker.start();
-      await connectBackend();
-      assert(handle?.metricsPort);
-      await poll(async () =>
-        (
-          await (
-            await fetch(
-              `http://127.0.0.1:${String(handle?.metricsPort)}/metrics`,
-            )
-          ).text()
-        ).includes("hoboken_mqtt_connected 1"),
-      );
-      assert.equal(
-        (await get(speed))[0]?.status,
-        HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-      );
-      session = "session-after-restart";
-      await seed();
-      await publish(`${PREFIX}/bridge/heartbeat`, { session_id: session });
-      await poll(async () => (await value(speed)) === 40);
-      await delay(100);
-      assert.equal(commands.length, count + 1);
+      test("broker restart invalidates state and never replays a pending command", async () => {
+        assert(broker);
+        mode = "drop";
+        const count = commands.length;
+        const cancelled = write(
+          { [preheat]: true },
+          HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+        );
+        await poll(() => commands.length > count);
+        await backend?.endAsync(true);
+        backend = undefined;
+        await broker.stop();
+        await cancelled;
+        assert.equal(
+          (await get(speed))[0]?.status,
+          HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+        );
+        await broker.start();
+        await connectBackend();
+        assert(handle?.metricsPort);
+        await poll(async () =>
+          (
+            await (
+              await fetch(
+                `http://127.0.0.1:${String(handle?.metricsPort)}/metrics`,
+              )
+            ).text()
+          ).includes("hoboken_mqtt_connected 1"),
+        );
+        assert.equal(
+          (await get(speed))[0]?.status,
+          HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+        );
+        session = `${session}-after-restart`;
+        await seed();
+        await publish(`${PREFIX}/bridge/heartbeat`, { session_id: session });
+        await poll(async () => (await value(speed)) === 40);
+        await delay(100);
+        assert.equal(commands.length, count + 1);
+      });
     });
   },
 );
