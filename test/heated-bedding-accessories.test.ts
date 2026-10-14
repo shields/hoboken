@@ -18,7 +18,6 @@ import {
   HAPStatus,
   Perms,
   Service,
-  uuid,
 } from "@homebridge/hap-nodejs";
 import {
   createHeatedBeddingAccessories,
@@ -115,14 +114,8 @@ describe("heated bedding HomeKit accessories", () => {
   }
 
   test("creates separate fan and stateful preheat identities with no AUTO or temperature", () => {
-    expect(controls.fan.UUID).toBe(
-      uuid.generate(JSON.stringify(["hoboken:mattress:fan", "bed", "left"])),
-    );
-    expect(controls.preheat.UUID).toBe(
-      uuid.generate(
-        JSON.stringify(["hoboken:mattress:preheat", "bed", "left"]),
-      ),
-    );
+    expect(controls.fan.UUID).toBe("412452c9-f814-4f5c-bdda-a8a83ed59c1d");
+    expect(controls.preheat.UUID).toBe("d941c243-80be-4f40-ac7f-941d2f7c6d49");
     expect(controls.fan.UUID).not.toBe(controls.preheat.UUID);
     expect(
       controls.fan
