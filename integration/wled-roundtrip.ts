@@ -17,7 +17,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { after, before, describe, test } from "node:test";
+import { after, before, beforeEach, describe, test } from "node:test";
 
 import { Aedes, type AedesPublishPacket, type Subscription } from "aedes";
 import { HAPStorage } from "@homebridge/hap-nodejs";
@@ -119,6 +119,14 @@ async function poll(
 
 // --- Tests ---
 
+// The baseline differs from every brightness and color the tests set, so a test
+// that fails to change anything cannot pass.
+const BASELINE_BRI = 255;
+const BASELINE_HOMEKIT_BRIGHTNESS = 100;
+const BASELINE_COL: [number, number, number] = [0, 0, 255];
+const BASELINE_HUE = 240;
+const BASELINE_SATURATION = 100;
+
 describe("WLED integration", { timeout: 30000 }, () => {
   let simulator: WledSimulator | undefined;
   let handle: Awaited<ReturnType<typeof startBridge>> | undefined;
@@ -131,6 +139,44 @@ describe("WLED integration", { timeout: 30000 }, () => {
   let briKey: string;
   let hueKey: string;
   let satKey: string;
+
+  async function waitForValues(
+    expected: Record<string, unknown>,
+  ): Promise<void> {
+    await poll(
+      async () => {
+        const values = await getCharValues(client!, ...Object.keys(expected));
+        return Object.entries(expected).every(
+          ([key, value]) => values.get(key) === value,
+        );
+      },
+      50,
+      3000,
+    );
+  }
+
+  async function baseline(): Promise<void> {
+    simulator!.setBrightness(BASELINE_BRI);
+    simulator!.setColor(BASELINE_COL);
+    await waitForValues({
+      [onKey]: 1,
+      [briKey]: BASELINE_HOMEKIT_BRIGHTNESS,
+      [hueKey]: BASELINE_HUE,
+      [satKey]: BASELINE_SATURATION,
+    });
+  }
+
+  async function writeGreen(): Promise<void> {
+    await client!.setCharacteristics({ [hueKey]: 120, [satKey]: 100 });
+    await poll(
+      () => {
+        const { col } = simulator!.state;
+        return col[0] === 0 && col[1] === 255 && col[2] === 0;
+      },
+      50,
+      3000,
+    );
+  }
 
   before(async () => {
     broker = await Aedes.createBroker();
@@ -264,96 +310,69 @@ describe("WLED integration", { timeout: 30000 }, () => {
     }
   });
 
-  test("HK→WLED turn off", async () => {
-    await client!.setCharacteristics({ [onKey]: false });
-    await poll(() => simulator!.state.bri === 0, 50, 3000);
-    assert.equal(simulator!.state.bri, 0);
-  });
+  describe("from a known baseline", () => {
+    beforeEach(baseline);
 
-  test("HK→WLED turn on", async () => {
-    await client!.setCharacteristics({ [onKey]: true });
-    await poll(() => simulator!.state.bri > 0, 50, 3000);
-    assert.ok(simulator!.state.bri > 0);
-  });
+    test("HK→WLED turn off", async () => {
+      await client!.setCharacteristics({ [onKey]: false });
+      await poll(() => simulator!.state.bri === 0, 50, 3000);
+      assert.equal(simulator!.state.bri, 0);
+    });
 
-  test("HK→WLED brightness 75%", async () => {
-    await client!.setCharacteristics({ [briKey]: 75 });
-    await poll(() => simulator!.state.bri === 191, 50, 3000);
-    assert.equal(simulator!.state.bri, 191);
-  });
+    test("HK→WLED turn on", async () => {
+      simulator!.setBrightness(0);
+      await waitForValues({ [onKey]: 0 });
+      await client!.setCharacteristics({ [onKey]: true });
+      await poll(() => simulator!.state.bri > 0, 50, 3000);
+      assert.ok(simulator!.state.bri > 0);
+    });
 
-  test("HK→WLED color green", async () => {
-    await client!.setCharacteristics({ [hueKey]: 120, [satKey]: 100 });
-    await poll(
-      () => {
-        const { col } = simulator!.state;
-        return col[0] === 0 && col[1] === 255 && col[2] === 0;
-      },
-      50,
-      3000,
-    );
-    assert.deepEqual(simulator!.state.col, [0, 255, 0]);
-  });
+    test("HK→WLED brightness 75%", async () => {
+      await client!.setCharacteristics({ [briKey]: 75 });
+      await poll(() => simulator!.state.bri === 191, 50, 3000);
+      assert.equal(simulator!.state.bri, 191);
+    });
 
-  test("color round-trip read-back", async () => {
-    // The green write above (H=120, S=100) set HomeKit's local hue/sat. WLED
-    // echoes the color back almost immediately, but that echo lands inside the
-    // bridge's 500ms color write-back suppression window and is dropped, so
-    // this does not exercise the echo path. After waiting that window out, we
-    // confirm HomeKit still reports the locally-written values (they were not
-    // clobbered or reset).
-    await new Promise<void>((r) => setTimeout(r, 600));
-    const values = await getCharValues(client!, hueKey, satKey);
-    assert.equal(values.get(hueKey), 120);
-    assert.equal(values.get(satKey), 100);
-  });
+    test("HK→WLED color green", async () => {
+      await writeGreen();
+      assert.deepEqual(simulator!.state.col, [0, 255, 0]);
+    });
 
-  test("WLED→HK brightness 128→50%", async () => {
-    simulator!.setBrightness(128);
-    await poll(
-      async () => {
-        const values = await getCharValues(client!, briKey);
-        return values.get(briKey) === 50;
-      },
-      50,
-      3000,
-    );
-  });
+    test("color round-trip read-back", async () => {
+      // Writing green (H=120, S=100) sets HomeKit's local hue/sat. WLED echoes
+      // the color back almost immediately, but that echo lands inside the
+      // bridge's 500ms color write-back suppression window and is dropped, so
+      // this does not exercise the echo path. After waiting that window out, we
+      // confirm HomeKit still reports the locally-written values (they were not
+      // clobbered or reset).
+      await writeGreen();
+      await new Promise<void>((r) => setTimeout(r, 600));
+      const values = await getCharValues(client!, hueKey, satKey);
+      assert.equal(values.get(hueKey), 120);
+      assert.equal(values.get(satKey), 100);
+    });
 
-  test("WLED→HK color red→hue 0", async () => {
-    simulator!.setColor([255, 0, 0]);
-    await poll(
-      async () => {
-        const values = await getCharValues(client!, hueKey, satKey);
-        return values.get(hueKey) === 0 && values.get(satKey) === 100;
-      },
-      50,
-      3000,
-    );
-  });
+    test("WLED→HK brightness 128→50%", async () => {
+      simulator!.setBrightness(128);
+      await waitForValues({ [briKey]: 50 });
+    });
 
-  test("WLED→HK turn off", async () => {
-    simulator!.setBrightness(0);
-    await poll(
-      async () => {
-        const values = await getCharValues(client!, onKey);
-        return values.get(onKey) === 0;
-      },
-      50,
-      3000,
-    );
-  });
+    test("WLED→HK color red→hue 0", async () => {
+      simulator!.setColor([255, 0, 0]);
+      await waitForValues({ [hueKey]: 0, [satKey]: 100 });
+    });
 
-  test("WLED→HK turn on", async () => {
-    simulator!.setBrightness(200);
-    await poll(
-      async () => {
-        const values = await getCharValues(client!, onKey, briKey);
-        return values.get(onKey) === 1 && values.get(briKey) === 78;
-      },
-      50,
-      3000,
-    );
+    test("WLED→HK turn off", async () => {
+      simulator!.setBrightness(0);
+      await waitForValues({ [onKey]: 0 });
+    });
+
+    test("WLED→HK turn on", async () => {
+      simulator!.setBrightness(0);
+      await waitForValues({ [onKey]: 0 });
+      simulator!.setBrightness(200);
+      await waitForValues({ [onKey]: 1, [briKey]: 78 });
+    });
   });
 
   test("MQTT disconnect → SERVICE_COMMUNICATION_FAILURE", async () => {
