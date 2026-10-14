@@ -38,6 +38,8 @@ interface MqttOptions {
 const CONNECT_TIMEOUT = 10000;
 const CLOSE_TIMEOUT = 2000;
 const MAX_PAYLOAD = 65536;
+const MIN_BACKOFF = 1000;
+const MAX_BACKOFF = 60000;
 
 export class HeatedBeddingMQTT {
   readonly source: HeatedBeddingSource;
@@ -53,8 +55,9 @@ export class HeatedBeddingMQTT {
   #client: MqttClient | undefined;
   #ready = false;
   #stopped = false;
-  #backoff = 1000;
+  #backoff = MIN_BACKOFF;
   #deadline: ReturnType<typeof setTimeout> | undefined;
+  #stable: ReturnType<typeof setTimeout> | undefined;
   #retry: ReturnType<typeof setTimeout> | undefined;
   #stopPromise: Promise<void> | undefined;
 
@@ -169,7 +172,13 @@ export class HeatedBeddingMQTT {
         clearTimeout(this.#deadline);
         this.#deadline = undefined;
         this.#ready = true;
-        this.#backoff = 1000;
+        // A fault that recurs after each subscription, such as an invalid
+        // retained snapshot, keeps backing off unless the connection
+        // outlasts the longest delay.
+        this.#stable = setTimeout(() => {
+          this.#backoff = MIN_BACKOFF;
+        }, MAX_BACKOFF);
+        this.#stable.unref();
         this.source.subscriptionsReady(generation);
         this.#changed?.();
         this.#logger.info(
@@ -237,10 +246,14 @@ export class HeatedBeddingMQTT {
     this.#ready = false;
     clearTimeout(this.#deadline);
     this.#deadline = undefined;
+    clearTimeout(this.#stable);
     this.source.disconnect();
     client.end(true);
-    const delay = Math.min(60000, this.#backoff * (1 + 0.25 * this.#random()));
-    this.#backoff = Math.min(60000, this.#backoff * 2);
+    const delay = Math.min(
+      MAX_BACKOFF,
+      this.#backoff * (1 + 0.25 * this.#random()),
+    );
+    this.#backoff = Math.min(MAX_BACKOFF, this.#backoff * 2);
     this.#logger.error(
       { event, ...details, retry_ms: delay },
       "Heated bedding MQTT unavailable",
@@ -259,6 +272,7 @@ export class HeatedBeddingMQTT {
     if (this.#stopped) return this.#stopPromise;
     this.#stopped = true;
     clearTimeout(this.#deadline);
+    clearTimeout(this.#stable);
     clearTimeout(this.#retry);
     const client = this.#client;
     this.#client = undefined;
