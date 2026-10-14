@@ -51,9 +51,15 @@
       groupName: "playwright",
     },
     {
-      description: "Group the Bun images in both Dockerfiles",
-      matchPackageNames: ["oven/bun"],
+      description: "Group packageManager's Bun with the Bun images in both Dockerfiles",
+      matchPackageNames: ["bun", "oven/bun"],
       groupName: "bun",
+      // config:best-practices holds npm releases for 3 days, and Renovate
+      // leaves held updates out of a group's branch, so the images need the
+      // same hold to avoid landing ahead of packageManager. Only Docker Hub
+      // reports release times, so this hold on MCR or gcr.io images would
+      // never expire.
+      minimumReleaseAge: "3 days",
     },
   ],
 }
