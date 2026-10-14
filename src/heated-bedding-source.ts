@@ -79,11 +79,13 @@ interface Zone {
   state: HeatedBeddingState | undefined;
   window: FanWindow | undefined;
   callers: number;
+  published: number;
 }
 
 interface Pending {
   zone: Zone;
   command: HeatedBeddingCommand;
+  sequence: number;
   session: string;
   deadline: number;
   confirmed: boolean;
@@ -171,6 +173,7 @@ export class HeatedBeddingSource {
         state: undefined,
         window: undefined,
         callers: 0,
+        published: 0,
       };
       this.#route(topic, { kind: "state", zone });
       this.#route(`${topic}/result`, { kind: "result", zone });
@@ -452,6 +455,7 @@ export class HeatedBeddingSource {
     const pending: Pending = {
       zone,
       command,
+      sequence: zone.published + 1,
       waiters,
       deadline,
       session: state.session_id,
@@ -485,6 +489,7 @@ export class HeatedBeddingSource {
       clearTimeout(pending.timer);
       throw error;
     }
+    zone.published = pending.sequence;
   }
 
   #confirm(id: string, pending: Pending): void {
@@ -505,12 +510,16 @@ export class HeatedBeddingSource {
       this.#finish(id, pending, error);
       return;
     }
+    // A newer write to this zone, or a firmware side effect of one such as
+    // preheat's level 10, can replace this write's values before its
+    // confirmed result arrives.
     if (
       state.session_id !== pending.session ||
-      Object.entries(pending.command).some(
-        ([field, value]) =>
-          state[field as keyof HeatedBeddingCommand] !== value,
-      )
+      (pending.sequence === pending.zone.published &&
+        Object.entries(pending.command).some(
+          ([field, value]) =>
+            state[field as keyof HeatedBeddingCommand] !== value,
+        ))
     )
       return;
     this.#pending.delete(id);

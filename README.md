@@ -112,8 +112,10 @@ off. An explicit off takes precedence over other fan writes arriving in
 the same 50 ms window. Preheat follows its reported Boolean until the
 controller changes it.
 
-Writes wait for both a confirmed command result and matching reported
-state. Failed or expired writes return a HomeKit error and retain reported
+Writes wait for a confirmed command result and reported state that matches
+it. Once a newer write to the same zone has been sent, the confirmed result
+alone suffices, and the write returns the current reported state. Failed or
+expired writes return a HomeKit error and retain reported
 values. MQTT reconnection cancels pending writes and requires current
 subscriptions, a fresh session heartbeat, online availability, and known
 state. Commands are never replayed after reconnection. Existing Zigbee2MQTT
