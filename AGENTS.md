@@ -64,6 +64,10 @@ Each module is independently testable with dependency injection:
   then auto-resets to off after 1 second.
 - **MQTT disconnect handling**: `onSet` throws
   `HapStatusError(SERVICE_COMMUNICATION_FAILURE)` when MQTT is disconnected.
+- **Invalid heated bedding messages**: An invalid heated bedding MQTT message
+  tears down the whole heated bedding connection, which reconnects with backoff,
+  instead of invalidating only the affected zone. Partially invalid state isn't
+  trusted, so every zone starts over from a clean MQTT session.
 - **No config reload**: restart the container for config changes.
 - **State cache**: `Map<string, Z2MState>` in bridge.ts, keyed by device topic.
 - **Dashboard browser support**: The status page targets modern browsers

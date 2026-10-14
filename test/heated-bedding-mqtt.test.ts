@@ -360,18 +360,40 @@ describe("heated bedding MQTT owner", () => {
     },
   );
 
-  test("bounds exponential backoff and resets it only after subscription readiness", () => {
+  function expectRetry(delay: number): void {
+    const attempts = clients.length;
+    jest.advanceTimersByTime(delay - 1);
+    expect(clients).toHaveLength(attempts);
+    jest.advanceTimersByTime(1);
+    expect(clients).toHaveLength(attempts + 1);
+  }
+
+  test("bounds exponential backoff and resets it only after a minute of readiness", () => {
     for (const delay of [1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000]) {
       clients.at(-1)!.emit("error", new Error("network"));
-      const attempts = clients.length;
-      jest.advanceTimersByTime(delay - 1);
-      expect(clients).toHaveLength(attempts);
-      jest.advanceTimersByTime(1);
-      expect(clients).toHaveLength(attempts + 1);
+      expectRetry(delay);
     }
-    ready().emit("close");
-    jest.advanceTimersByTime(1000);
-    expect(clients).toHaveLength(10);
+    ready();
+    jest.advanceTimersByTime(59999);
+    clients.at(-1)!.emit("close");
+    expectRetry(60000);
+    clients.at(-1)!.emit("error", new Error("network"));
+    expectRetry(60000);
+    ready();
+    jest.advanceTimersByTime(60000);
+    clients.at(-1)!.emit("close");
+    expectRetry(1000);
+  });
+
+  test("an invalid retained snapshot after subscription readiness keeps backing off", () => {
+    for (const delay of [1000, 2000, 4000, 8000]) {
+      const client = clients.at(-1)!;
+      client.connected = true;
+      client.emit("connect", { sessionPresent: false });
+      client.acknowledge();
+      client.receive(TOPIC, { ...STATE, power: "invalid" }, true);
+      expectRetry(delay);
+    }
   });
 
   test("retained results cannot confirm an outstanding command", async () => {
