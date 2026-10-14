@@ -38,11 +38,15 @@ export function createHeatedBeddingAccessories(
   source: HeatedBeddingSource,
 ): HeatedBeddingAccessories {
   const topic = `${config.prefix}/${config.controller}/${config.zone}`;
-  // Keep the UUID seeds stable so existing HomeKit pairings retain their accessories.
+  // These seeds define the initial accessory identities for Tucson's heated bedding profile.
   const fan = new Accessory(
     config.name,
     uuid.generate(
-      JSON.stringify(["hoboken:mattress:fan", config.controller, config.zone]),
+      JSON.stringify([
+        "hoboken:heated-bedding:fan",
+        config.controller,
+        config.zone,
+      ]),
     ),
   );
   fan.category = Categories.FAN;
@@ -55,7 +59,7 @@ export function createHeatedBeddingAccessories(
     `${config.name} Preheat`,
     uuid.generate(
       JSON.stringify([
-        "hoboken:mattress:preheat",
+        "hoboken:heated-bedding:preheat",
         config.controller,
         config.zone,
       ]),
