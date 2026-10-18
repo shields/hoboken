@@ -72,7 +72,14 @@ class TestMqttClient extends EventEmitter {
     complete: (error: Error | null, grants?: ISubscriptionGrant[]) => void,
   ): this {
     this.subscriptions = topics;
-    this.subscribed = complete;
+    // mqtt.js calls the callback again with whatever its first call threw.
+    this.subscribed = (error, grants) => {
+      try {
+        complete(error, grants);
+      } catch (thrown: unknown) {
+        complete(thrown as Error, grants);
+      }
+    };
     return this;
   }
 
@@ -141,6 +148,7 @@ describe("heated bedding MQTT owner", () => {
   let random: number;
   let shutdownError: Error | undefined;
   let onChange: (() => void) | undefined;
+  let onPublish: (() => void) | undefined;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -150,6 +158,7 @@ describe("heated bedding MQTT owner", () => {
     random = 0;
     shutdownError = undefined;
     onChange = undefined;
+    onPublish = undefined;
     owner = new HeatedBeddingMQTT("mqtt://user:secret@localhost", [ZONE], {
       connect: (_url, options) => {
         const client = new TestMqttClient(options);
@@ -160,6 +169,9 @@ describe("heated bedding MQTT owner", () => {
       changed: () => {
         changed++;
         onChange?.();
+      },
+      published: () => {
+        onPublish?.();
       },
       logger: pino(
         { base: null },
@@ -438,6 +450,17 @@ describe("heated bedding MQTT owner", () => {
     }
   });
 
+  test("a publication observer that stops the owner fails the write as unavailable", async () => {
+    ready();
+    onPublish = () => {
+      onPublish = undefined;
+      void owner.stop();
+    };
+    expect(
+      await rejectionOf(owner.source.writePreheat(TOPIC, true)),
+    ).toMatchObject({ hapStatus: HAPStatus.SERVICE_COMMUNICATION_FAILURE });
+  });
+
   test("retained results cannot confirm an outstanding command", async () => {
     const client = ready();
     const write = owner.source.writePreheat(TOPIC, true);
@@ -686,6 +709,8 @@ describe("heated bedding MQTT change notifications", () => {
   let errors: number;
   let failure: Error | undefined;
   let observerFailure: Error | undefined;
+  let publishFailure: Error | undefined;
+  let tasks: (() => void)[];
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -694,6 +719,8 @@ describe("heated bedding MQTT change notifications", () => {
     errors = 0;
     failure = undefined;
     observerFailure = undefined;
+    publishFailure = undefined;
+    tasks = [];
     owner = new HeatedBeddingMQTT("mqtt://localhost", [ZONE], {
       connect: (_url, options) => {
         const client = new TestMqttClient(options);
@@ -702,6 +729,12 @@ describe("heated bedding MQTT change notifications", () => {
       },
       random: () => 0,
       logger: pino({ level: "silent" }),
+      defer: (task) => {
+        tasks.push(task);
+      },
+      published: () => {
+        if (publishFailure) throw publishFailure;
+      },
       failed: () => {
         errors++;
         if (failure) throw failure;
@@ -721,9 +754,14 @@ describe("heated bedding MQTT change notifications", () => {
   afterEach(async () => {
     failure = undefined;
     observerFailure = undefined;
+    publishFailure = undefined;
     await owner.stop();
     jest.useRealTimers();
   });
+
+  function flush(): void {
+    while (tasks.length > 0) tasks.shift()!();
+  }
 
   function subscribe(): TestMqttClient {
     const client = clients.at(-1)!;
@@ -786,6 +824,7 @@ describe("heated bedding MQTT change notifications", () => {
     ]);
     seen.length = 0;
     client.publications[0]!.complete(new Error("write failed"));
+    flush();
     expect(seen).toEqual([DOWN]);
     expect((await outcome)[0].status).toBe("rejected");
   });
@@ -795,7 +834,22 @@ describe("heated bedding MQTT change notifications", () => {
     void Promise.allSettled([owner.source.writePreheat(TOPIC, true)]);
     seen.length = 0;
     client.publications[0]!.complete();
+    flush();
     expect(seen).toEqual([]);
+  });
+
+  test("a throwing publication observer surfaces without affecting the sent write", async () => {
+    const client = ready();
+    publishFailure = new Error("Unexpected metrics failure");
+    const write = owner.source.writePreheat(TOPIC, true);
+    expect(client.publications).toHaveLength(1);
+    expect(thrownBy(flush)).toBe(publishFailure);
+    const { request_id } = JSON.parse(client.publications[0]!.message) as {
+      request_id: string;
+    };
+    client.receive(TOPIC, { ...STATE, preheat: true });
+    client.receive(`${TOPIC}/result`, { request_id, outcome: "confirmed" });
+    expect(await write).toMatchObject({ preheat: true });
   });
 
   test.each([
@@ -864,11 +918,12 @@ describe("heated bedding MQTT change notifications", () => {
     const client = ready();
     client.connected = false;
     seen.length = 0;
-    const outcome = await Promise.allSettled([
+    const outcome = Promise.allSettled([
       owner.source.writePreheat(TOPIC, true),
     ]);
+    flush();
     expect(seen).toEqual([DOWN]);
-    expect(outcome[0].status).toBe("rejected");
+    expect((await outcome)[0].status).toBe("rejected");
   });
 
   test("a failure still notifies once when the failure callback throws", () => {
@@ -904,5 +959,54 @@ describe("heated bedding MQTT change notifications", () => {
     expect((error as AggregateError).errors[0]).toBe(failure);
     expect((error as AggregateError).errors[1]).toBe(observerFailure);
     expect((error as AggregateError).errors).toHaveLength(2);
+  });
+
+  test("an observer error on subscription readiness propagates without failing the connection", () => {
+    const client = subscribe();
+    snapshot(client);
+    observerFailure = new Error("Unexpected observer failure");
+    expect(
+      thrownBy(() => {
+        client.acknowledge();
+      }),
+    ).toBe(observerFailure);
+    observerFailure = undefined;
+    expect(owner.connected).toBe(true);
+    expect(errors).toBe(0);
+  });
+
+  test("an observer error while failing a subscription propagates", () => {
+    const client = subscribe();
+    failure = new Error("Unexpected metrics failure");
+    expect(
+      thrownBy(() => {
+        client.subscribed!(new Error("denied"));
+      }),
+    ).toBe(failure);
+  });
+
+  test("a preheat write on a socket that is down fails as unavailable and surfaces a throwing failure callback", async () => {
+    const client = ready();
+    client.connected = false;
+    failure = new Error("Unexpected metrics failure");
+    const outcome = rejectionOf(owner.source.writePreheat(TOPIC, true));
+    expect(thrownBy(flush)).toBe(failure);
+    expect(await outcome).toMatchObject({
+      hapStatus: HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+    });
+    expect(owner.source.pendingCount(TOPIC)).toBe(0);
+  });
+
+  test("a fan write on a socket that is down fails as unavailable and surfaces a throwing failure callback", async () => {
+    const client = ready();
+    const outcome = rejectionOf(owner.source.writeFan(TOPIC, { speed: 50 }));
+    client.connected = false;
+    failure = new Error("Unexpected metrics failure");
+    jest.advanceTimersByTime(50);
+    expect(thrownBy(flush)).toBe(failure);
+    expect(await outcome).toMatchObject({
+      hapStatus: HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+    });
+    expect(owner.source.pendingCount(TOPIC)).toBe(0);
   });
 });

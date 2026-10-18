@@ -33,6 +33,7 @@ interface MqttOptions {
   received?: (topic: string) => void;
   published?: () => void;
   failed?: () => void;
+  defer?: (task: () => void) => void;
 }
 
 const CONNECT_TIMEOUT = 10000;
@@ -51,6 +52,7 @@ export class HeatedBeddingMQTT {
   #logger: Logger;
   #received: MqttOptions["received"];
   #published: MqttOptions["published"];
+  #defer: (task: () => void) => void;
   #failed: MqttOptions["failed"];
   #routes: Map<string, boolean>;
   #client: MqttClient | undefined;
@@ -76,6 +78,7 @@ export class HeatedBeddingMQTT {
     this.#logger = options.logger ?? pino({ name: "heated-bedding-mqtt" });
     this.#received = options.received;
     this.#published = options.published;
+    this.#defer = options.defer ?? queueMicrotask;
     this.#failed = options.failed;
     this.source = new HeatedBeddingSource(
       zones,
@@ -139,9 +142,14 @@ export class HeatedBeddingMQTT {
     payload: HeatedBeddingPublication,
     complete: (error?: Error) => void,
   ): void {
+    // The outcome and the publication observer run after the source's
+    // dispatch returns, so a throwing observer surfaces on its own and cannot
+    // unwind into a write that the source has already settled or sent.
     const finish = (error?: Error): void => {
-      this.#batch(() => {
-        complete(error);
+      this.#defer(() => {
+        this.#batch(() => {
+          complete(error);
+        });
       });
     };
     if (!this.connected || !this.#client) {
@@ -154,7 +162,9 @@ export class HeatedBeddingMQTT {
       { qos: 0, retain: false },
       finish,
     );
-    this.#published?.();
+    this.#defer(() => {
+      this.#published?.();
+    });
   }
 
   #attempt(): void {
@@ -195,7 +205,12 @@ export class HeatedBeddingMQTT {
           { qos: live ? 0 : 1, rh: live ? 2 : 0, rap: true },
         ]),
       );
+      let answered = false;
       client.subscribe(subscriptions, (error, granted) => {
+        // mqtt.js calls this again with whatever its first call threw, which
+        // came from #fail or an observer and propagates.
+        if (answered && error) throw error;
+        answered = true;
         if (client !== this.#client) return;
         const topics = new Set(granted?.map(({ topic }) => topic));
         if (
