@@ -25,7 +25,7 @@ import {
   INVALID_MQTT_URL,
   MALFORMED_MQTT_URLS,
   SECRET,
-  type UrlReport,
+  type URLReport,
 } from "../test/mqtt-urls.ts";
 
 const MAIN = fileURLToPath(new URL("../src/main.ts", import.meta.url));
@@ -119,6 +119,7 @@ describe("an mqtt.url that is not well formed", () => {
       assert.notEqual(code, null);
       assert(output.includes(INVALID_MQTT_URL), output);
       assert(!output.includes(SECRET), "the output quotes the URL");
+      assert(!output.includes(url), "the output quotes the URL");
       assert(!/warning/i.test(output), "the output has a process warning");
     });
   }
@@ -155,14 +156,28 @@ describe("an mqtt.url that is not well formed", () => {
     const result = spawnSync(process.execPath, [REPORT], {
       encoding: "utf8",
       env: childEnvironment(),
+      timeout: 60000,
     });
     assert.equal(result.status, 0, result.stderr);
-    const report = JSON.parse(result.stdout) as UrlReport;
+    const report = JSON.parse(result.stdout) as URLReport;
     assert.deepEqual(report.rejectedValid, []);
     assert.deepEqual(report.acceptedMalformed, []);
-    assert.deepEqual(report.mqttJsRejectedValid, []);
-    assert.equal(report.mqttJsBareHostname, "Missing protocol");
+    assert.deepEqual(report.mqttJSRejectedValid, []);
+    assert.equal(report.mqttJSBareHostname, "Missing protocol");
     assert.deepEqual(report.warnings, []);
+    assert.equal(result.stderr, "");
+  });
+
+  test("a fresh process started with --no-deprecation validates every URL too", () => {
+    const result = spawnSync(process.execPath, ["--no-deprecation", REPORT], {
+      encoding: "utf8",
+      env: childEnvironment(),
+      timeout: 60000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout) as URLReport;
+    assert.deepEqual(report.rejectedValid, []);
+    assert.deepEqual(report.acceptedMalformed, []);
     assert.equal(result.stderr, "");
   });
 });

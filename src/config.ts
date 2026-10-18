@@ -14,7 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { parse as parseLegacyURL } from "node:url";
-import { parse } from "yaml";
+import { parseDocument } from "yaml";
 import { tucsonTopic } from "./tucson-profile.ts";
 import type { CurtainConfig } from "./curtain-source.ts";
 import type { HeatedBeddingZoneConfig } from "./heated-bedding-source.ts";
@@ -92,45 +92,49 @@ export interface Config {
 // An MQTT string, such as the username or password in a CONNECT packet, carries
 // a two-byte length.
 const MQTT_STRING_MAX_BYTES = 65535;
-type Fields<T> = readonly (keyof T)[];
-const CONFIG_FIELDS: Fields<Config> = [
-  "bridge",
-  "mqtt",
-  "devices",
-  "heatedBedding",
-  "curtains",
-  "metrics",
-];
-const BRIDGE_FIELDS: Fields<BridgeConfig> = [
-  "name",
-  "mac",
-  "pincode",
-  "port",
-  "bind",
-];
-const MQTT_FIELDS: Fields<MqttConfig> = ["url", "username", "passwordFile"];
-const METRICS_FIELDS: Fields<MetricsConfig> = ["port", "bind"];
-const DEVICE_FIELDS: Fields<DeviceConfig> = [
-  "name",
-  "type",
-  "topic",
-  "capabilities",
-  "scenes",
-];
-const SCENE_FIELDS: Fields<SceneConfig> = ["name", "id"];
-const TUCSON_ENDPOINT_FIELDS: Fields<HeatedBeddingZoneConfig> = [
-  "name",
-  "prefix",
-  "controller",
-  "zone",
-];
-const FIELD_LIST = new Intl.ListFormat("en-US");
+// A key missing from its allowlist is rejected as unknown, so the type demands
+// every key of the interface.
+type Fields<T> = Record<keyof T, true>;
+const CONFIG_FIELDS: Fields<Config> = {
+  bridge: true,
+  mqtt: true,
+  devices: true,
+  heatedBedding: true,
+  curtains: true,
+  metrics: true,
+};
+const BRIDGE_FIELDS: Fields<BridgeConfig> = {
+  name: true,
+  mac: true,
+  pincode: true,
+  port: true,
+  bind: true,
+};
+const MQTT_FIELDS: Fields<MqttConfig> = {
+  url: true,
+  username: true,
+  passwordFile: true,
+};
+const METRICS_FIELDS: Fields<MetricsConfig> = { port: true, bind: true };
+const DEVICE_FIELDS: Fields<DeviceConfig> = {
+  name: true,
+  type: true,
+  topic: true,
+  capabilities: true,
+  scenes: true,
+};
+const SCENE_FIELDS: Fields<SceneConfig> = { name: true, id: true };
+const TUCSON_ENDPOINT_FIELDS: Fields<HeatedBeddingZoneConfig> = {
+  name: true,
+  prefix: true,
+  controller: true,
+  zone: true,
+};
 const MAC_RE = /^[\dA-Fa-f]{2}(:[\dA-Fa-f]{2}){5}$/;
 const PIN_RE = /^\d{3}-\d{2}-\d{3}$/;
 // Userinfo as url.parse, which mqtt.js uses, finds it: after a scheme or
-// leading slashes, with backslashes as slashes and the "//" optional. The
-// capture group is the text before the userinfo.
-const MQTT_URL_USERINFO_RE = /^((?:[^/\\?#:]+:[/\\]{0,2}|[/\\]{2}))[^/\\?#]+@/;
+// leading slashes, with backslashes as slashes and the "//" optional.
+const MQTT_URL_USERINFO_RE = /^(?:[^/\\?#:]+:[/\\]{0,2}|[/\\]{2})[^/\\?#]+@/;
 // The schemes for which mqtt.js builds a Node.js stream. It connects over mqtt
 // or mqtts for any other scheme, and rejects a URL without one.
 const MQTT_URL_PROTOCOLS = new Set([
@@ -142,6 +146,9 @@ const MQTT_URL_PROTOCOLS = new Set([
   "ws:",
   "wss:",
 ]);
+// mqtt.js writes the host of a ws or wss URL without its brackets, which no
+// WebSocket accepts for an IPv6 address.
+const WEBSOCKET_PROTOCOLS = new Set(["ws:", "wss:"]);
 
 // The message omits values, which can be secrets. Callers run this before a
 // section's required-field checks so that a misspelled required field is named
@@ -149,12 +156,13 @@ const MQTT_URL_PROTOCOLS = new Set([
 function rejectUnknownFields(
   section: string,
   value: object,
-  allowed: readonly string[],
+  allowed: Readonly<Record<string, true>>,
 ): void {
-  const unknown = Object.keys(value).find((key) => !allowed.includes(key));
+  const fields = Object.keys(allowed);
+  const unknown = Object.keys(value).find((key) => !fields.includes(key));
   if (unknown !== undefined) {
     throw new Error(
-      `${section}: unknown field ${JSON.stringify(unknown)}; supported fields are ${FIELD_LIST.format(allowed)}`,
+      `${section}: unknown field ${JSON.stringify(unknown)}; supported fields are ${new Intl.ListFormat("en-US").format(fields)}`,
     );
   }
 }
@@ -584,58 +592,82 @@ function validateScene(
   return { name: s.name, id: s.id };
 }
 
-export function loadConfig(path: string): Config {
-  const content = readFileSync(path, "utf8");
-  const data: unknown = parse(content);
-  return validateConfig(data);
+// The parser's messages, for errors and for warnings such as an unresolved tag,
+// quote the offending line, which can be an mqtt.url with a password in it.
+function parseYAML(path: string, content: string): unknown {
+  const document = parseDocument(content);
+  const [problem] = [...document.errors, ...document.warnings];
+  if (problem) {
+    const { line, col } = problem.linePos?.[0] ?? { line: 0, col: 0 };
+    throw new Error(
+      `${path}: invalid YAML (${problem.code} at line ${String(line)}, column ${String(col)})`,
+    );
+  }
+  return document.toJS();
 }
 
-export function stripMQTTUserinfo(url: string): string {
-  return url.replace(MQTT_URL_USERINFO_RE, "$1");
+export function loadConfig(path: string): Config {
+  const content = readFileSync(path, "utf8");
+  return validateConfig(parseYAML(path, content));
 }
 
 // The legacy parser can warn, or throw an error, that quotes the whole URL,
-// userinfo included, and warns once per process that it is deprecated.
+// userinfo included, and warns once per process that it is deprecated. Node
+// makes noDeprecation read-only, and already true, under --no-deprecation.
 function parseLegacy(url: string) {
-  const suppressed = process.noDeprecation === true;
+  if (process.noDeprecation === true) return parseLegacyURL(url, true);
   process.noDeprecation = true;
   try {
     return parseLegacyURL(url, true);
   } finally {
-    process.noDeprecation = suppressed;
+    process.noDeprecation = false;
   }
 }
 
-// True for a URL that mqtt.js connects with as written. It parses the URL as
-// mqtt.js does, with the legacy url.parse, and as a WHATWG URL. Both must find
-// the same host, which rejects what url.parse alone accepts: a port that is not
-// a number, which it drops, and characters that it ends a host at and moves
-// into the path. Neither the URL nor an error about it leaves this function.
-export function isMQTTURL(url: string): boolean {
+interface MQTTEndpoint {
+  protocol: string;
+  host: string;
+}
+
+// mqtt.js parses with the legacy url.parse, so the URL is parsed that way and
+// again as a WHATWG URL. Both must find the same host, which rejects what
+// url.parse alone accepts: a port above 65535, and characters that it ends a
+// host at and moves into the path. Neither the URL nor an error about it leaves
+// this function.
+function parseMQTTURL(url: string): MQTTEndpoint | undefined {
   try {
     const strict = new URL(url);
     const legacy = parseLegacy(url);
-    return (
-      legacy.protocol !== null &&
-      MQTT_URL_PROTOCOLS.has(legacy.protocol) &&
-      legacy.hostname !== null &&
-      legacy.hostname !== "" &&
+    const { protocol, host, hostname } = legacy;
+    return protocol !== null &&
+      MQTT_URL_PROTOCOLS.has(protocol) &&
+      host !== null &&
+      hostname !== null &&
+      hostname !== "" &&
       Number(legacy.port ?? 1) >= 1 &&
-      new URL(`${legacy.protocol}//${legacy.host ?? ""}`).host ===
-        strict.host.toLowerCase()
-    );
+      !(WEBSOCKET_PROTOCOLS.has(protocol) && hostname.includes(":")) &&
+      new URL(`${protocol}//${host}`).host === strict.host.toLowerCase()
+      ? { protocol, host }
+      : undefined;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+export function isMQTTURL(url: string): boolean {
+  return parseMQTTURL(url) !== undefined;
 }
 
 export function assertMQTTURL(url: string): void {
   if (!isMQTTURL(url)) throw new Error("mqtt.url is not a valid MQTT URL");
 }
 
-// A URL that does not parse cannot be reliably stripped of credentials.
+// Only the scheme, host, and port, because a password that begins with "/",
+// "?", or "#" ends the authority early and leaves the rest of the userinfo in
+// the path, query, or fragment.
 export function displayMQTTURL(url: string): string {
-  return isMQTTURL(url) ? stripMQTTUserinfo(url) : "(not shown)";
+  const endpoint = parseMQTTURL(url);
+  return endpoint ? `${endpoint.protocol}//${endpoint.host}` : "(not shown)";
 }
 
 // Node and mqtt.js quote the URL, userinfo included, in the errors that they

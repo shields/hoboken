@@ -309,11 +309,11 @@ export class TucsonMQTT<S extends TucsonMQTTSource> {
     client.on("disconnect", () => {
       this.#fail(client, "mqtt_server_disconnect");
     });
+    withoutErrorMessage(() => client.connect());
     this.#deadline = setTimeout(() => {
       this.#fail(client, "mqtt_connection_timeout");
     }, CONNECT_TIMEOUT);
     this.#deadline.unref();
-    withoutErrorMessage(() => client.connect());
   }
 
   #fail(

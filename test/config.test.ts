@@ -27,7 +27,6 @@ import {
   isMQTTURL,
   loadConfig,
   resolveMQTTCredentials,
-  stripMQTTUserinfo,
   validateConfig,
   withoutErrorMessage,
 } from "../src/config.ts";
@@ -42,7 +41,7 @@ import {
   MALFORMED_MQTT_URLS,
   SECRET,
   VALID_MQTT_URLS,
-  type UrlReport,
+  type URLReport,
 } from "./mqtt-urls.ts";
 
 const PASSWORD = "correct-horse-9f3a";
@@ -545,7 +544,7 @@ describe("validateConfig", () => {
 
     describe("in a fresh process", () => {
       let stderr: string;
-      let report: UrlReport;
+      let report: URLReport;
 
       beforeAll(() => {
         const result = spawnSync(
@@ -556,11 +555,12 @@ describe("validateConfig", () => {
             env: Object.fromEntries(
               Object.entries(process.env).filter(([key]) => key !== "DEBUG"),
             ),
+            timeout: 60000,
           },
         );
         expect(result.status).toBe(0);
         stderr = result.stderr;
-        report = JSON.parse(result.stdout) as UrlReport;
+        report = JSON.parse(result.stdout) as URLReport;
       });
 
       test("accepts every valid form and rejects every malformed one", () => {
@@ -569,8 +569,8 @@ describe("validateConfig", () => {
       });
 
       test("mqtt.js builds a client for every valid form but a bare hostname", () => {
-        expect(report.mqttJsRejectedValid).toStrictEqual([]);
-        expect(report.mqttJsBareHostname).toBe("Missing protocol");
+        expect(report.mqttJSRejectedValid).toStrictEqual([]);
+        expect(report.mqttJSBareHostname).toBe("Missing protocol");
       });
 
       test("raises no process warning and prints nothing", () => {
@@ -1298,6 +1298,40 @@ ${extraLines}
     expect(message).not.toContain("127.0.0.1");
   });
 
+  test.each([
+    [
+      "BAD_DQ_ESCAPE",
+      String.raw`  url: "mqtt://svc:pa\s${SECRET}@broker:1883"`,
+      22,
+    ],
+    ["BLOCK_AS_IMPLICIT_KEY", `  url: mqtt://svc:${SECRET}: x@broker:1883`, 8],
+    [
+      "TAG_RESOLVE_FAILED",
+      `  url: !mqtt "mqtt://svc:${SECRET}@broker:1883"`,
+      8,
+    ],
+  ])(
+    "reports a YAML %s problem by position, without quoting the line",
+    async (code, line, column) => {
+      const warnings: string[] = [];
+      const record = (warning: Error) => {
+        warnings.push(warning.message);
+      };
+      process.on("warning", record);
+      try {
+        const configPath = writeConfig(line);
+        const message = errorMessage(() => loadConfig(configPath));
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(message).toBe(
+          `${configPath}: invalid YAML (${code} at line 8, column ${String(column)})`,
+        );
+        expect(warnings).toStrictEqual([]);
+      } finally {
+        process.off("warning", record);
+      }
+    },
+  );
+
   test("loads the shipped example configuration", () => {
     const config = loadConfig(
       fileURLToPath(new URL("../config.yaml", import.meta.url)),
@@ -1625,31 +1659,6 @@ describe("credentialOptions", () => {
   });
 });
 
-describe("stripMQTTUserinfo", () => {
-  test.each([
-    ["mqtt://user:pw@broker:1883", "mqtt://broker:1883"],
-    ["mqtt://user@broker", "mqtt://broker"],
-    ["mqtts://user:pw@broker/path", "mqtts://broker/path"],
-    ["mqtt://u:p@ss@broker", "mqtt://broker"],
-    ["//user:pw@broker", "//broker"],
-    ["mqtt:user:pw@broker:1883", "mqtt:broker:1883"],
-    [String.raw`mqtt:\\user:pw@broker`, String.raw`mqtt:\\broker`],
-  ])("removes the userinfo from %s", (url, expected) => {
-    expect(stripMQTTUserinfo(url)).toBe(expected);
-  });
-
-  test.each([
-    "mqtt://broker:1883",
-    "mqtt://broker:1883/a@b",
-    "mqtt://broker:1883?x=a@b",
-    "mqtt://broker:1883#a@b",
-    "mqtt://[::1]:1883",
-    "not a valid url",
-  ])("leaves %s unchanged", (url) => {
-    expect(stripMQTTUserinfo(url)).toBe(url);
-  });
-});
-
 describe("assertMQTTURL", () => {
   test.each(VALID_MQTT_URLS)("accepts %j", (url) => {
     expect(isMQTTURL(url)).toBe(true);
@@ -1666,17 +1675,62 @@ describe("assertMQTTURL", () => {
   });
 });
 
+describe("isMQTTURL while Node.js ignores deprecations", () => {
+  const original = Object.getOwnPropertyDescriptor(process, "noDeprecation");
+
+  afterEach(() => {
+    if (original) Object.defineProperty(process, "noDeprecation", original);
+    else Reflect.deleteProperty(process, "noDeprecation");
+  });
+
+  test("reads a URL although --no-deprecation makes noDeprecation read-only", () => {
+    Object.defineProperty(process, "noDeprecation", {
+      value: true,
+      writable: false,
+      enumerable: true,
+      configurable: true,
+    });
+    expect(isMQTTURL(MQTT_URL)).toBe(true);
+    expect(displayMQTTURL(MQTT_URL)).toBe(MQTT_URL);
+    expect(process.noDeprecation).toBe(true);
+  });
+
+  test("leaves deprecation warnings enabled", () => {
+    process.noDeprecation = false;
+    expect(isMQTTURL(MQTT_URL)).toBe(true);
+    expect(process.noDeprecation).toBe(false);
+  });
+});
+
 describe("displayMQTTURL", () => {
   test.each([
     ["mqtt://user:pw@broker:1883", "mqtt://broker:1883"],
     ["mqtt://user@broker", "mqtt://broker"],
-    ["mqtts://user:pw@broker/path", "mqtts://broker/path"],
+    ["mqtts://user:pw@broker/path", "mqtts://broker"],
     ["mqtt://u:p@ss@broker", "mqtt://broker"],
-    ["ws://user:pw@broker:9001/mqtt", "ws://broker:9001/mqtt"],
+    ["ws://user:pw@broker:9001/mqtt", "ws://broker:9001"],
+    ["MQTT://Broker:1883", "mqtt://broker:1883"],
     ["mqtt://broker:1883", "mqtt://broker:1883"],
     ["mqtt://[::1]:1883", "mqtt://[::1]:1883"],
-    ["mqtt://broker:1883/a@b", "mqtt://broker:1883/a@b"],
+    ["mqtt://broker:1883/a@b", "mqtt://broker:1883"],
+    ["wss://broker/mqtt?token=a%20b", "wss://broker"],
   ])("shows %s as %s", (url, expected) => {
+    expect(displayMQTTURL(url)).toBe(expected);
+  });
+
+  // A password that begins with "/", "?", or "#", or with digits and one of
+  // them, ends the authority early, so the parsers read the username as the
+  // host and the rest of the userinfo as a path, query, or fragment.
+  test.each([
+    [`mqtt://hoboken:#${SECRET}@broker:1883`, "mqtt://hoboken"],
+    [`mqtt://hoboken:/${SECRET}@broker:1883`, "mqtt://hoboken"],
+    [`mqtt://hoboken:?${SECRET}@broker:1883`, "mqtt://hoboken"],
+    [`mqtt://hoboken:2024/${SECRET}@broker:1883`, "mqtt://hoboken:2024"],
+    [`mqtt://ho#boken:${SECRET}@broker`, "mqtt://ho"],
+    [String.raw`ws://CORP\svc:${SECRET}@broker:9001/mqtt`, "ws://corp"],
+    [`wss://broker/mqtt?token=${SECRET}`, "wss://broker"],
+  ])("shows only the host of %j", (url, expected) => {
+    expect(isMQTTURL(url)).toBe(true);
     expect(displayMQTTURL(url)).toBe(expected);
   });
 

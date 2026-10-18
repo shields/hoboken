@@ -2376,8 +2376,10 @@ describe("startBridge with MQTT credentials", () => {
 
   test.each([
     ["mqtt://legacy:LEGACYPW@localhost:1883", "mqtt://localhost:1883"],
-    ["ws://legacy:LEGACYPW@localhost:9001/mqtt", "ws://localhost:9001/mqtt"],
+    ["ws://legacy:LEGACYPW@localhost:9001/mqtt", "ws://localhost:9001"],
     ["mqtt://legacy:LEGACYPW@[::1]", "mqtt://[::1]"],
+    ["mqtt://legacy:#LEGACYPW@localhost:1883", "mqtt://legacy"],
+    ["mqtt://legacy:/LEGACYPW@localhost:1883", "mqtt://legacy"],
   ])(
     "credentials embedded in the URL %s stay out of logs and the status page",
     async (url, sanitized) => {

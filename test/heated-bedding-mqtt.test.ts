@@ -1163,12 +1163,16 @@ describe("heated bedding MQTT owner with an mqtt.url that is not well formed", (
         return client as unknown as MqttClient;
       },
     ],
-  ])("rethrows an error from %s without its message", (_step, connect) => {
-    const error = failure(() => {
-      owner = createOwner("mqtt://localhost", connect);
-    });
-    expect(error.message).toBe(REDACTED_MESSAGE);
-    expect(error.code).toBe("ERR_INVALID_ARG_VALUE");
-    expect(error.stack).not.toContain(SECRET);
-  });
+  ])(
+    "rethrows an error from %s without its message and leaves no timer",
+    (_step, connect) => {
+      const error = failure(() => {
+        owner = createOwner("mqtt://localhost", connect);
+      });
+      expect(error.message).toBe(REDACTED_MESSAGE);
+      expect(error.code).toBe("ERR_INVALID_ARG_VALUE");
+      expect(error.stack).not.toContain(SECRET);
+      expect(jest.getTimerCount()).toBe(0);
+    },
+  );
 });

@@ -268,7 +268,10 @@ host's LAN interface name (e.g., `eno1`) so HomeKit clients can reach the bridge
 `mqtt://mosquitto:1883` or `mqtts://broker.example.com:8883`. The scheme is
 `mqtt`, `mqtts`, `tcp`, `ssl`, `tls`, `ws`, or `wss`, the host is required, and
 a port, if present, is 1 to 65535. A bare hostname does not work, because
-mqtt.js requires a scheme. Write a non-ASCII hostname in punycode.
+mqtt.js requires a scheme, and neither does `host:port`, because mqtt.js reads
+the host as the scheme. Write a non-ASCII hostname in punycode. A `ws` or `wss`
+URL needs a hostname rather than an IPv6 address, because mqtt.js writes the
+address without its brackets and cannot connect.
 
 Hoboken refuses to start with `mqtt.url is not a valid MQTT URL` when the URL
 breaks these rules. The URL can carry credentials, and a URL that is not well
@@ -276,9 +279,9 @@ formed cannot be reliably stripped of them, so no part of it appears in that
 error, the logs, the status page, the metrics, or a process warning. Hoboken
 parses the URL as mqtt.js does, with Node.js's legacy `url.parse`, and again
 with the WHATWG `URL` parser, and requires both to find the same host. That
-rejects what `url.parse` alone accepts and mqtt.js then connects with, such as
-a port that is not a number or a stray character in the host, where `url.parse`
-drops the rest of the host and mqtt.js connects to what remains. If mqtt.js
+rejects what `url.parse` alone accepts, such as a port above 65535 or a stray
+character in the host, where `url.parse` drops the rest of the host and mqtt.js
+connects to what remains. If mqtt.js
 still fails synchronously while it creates a client, Hoboken reports only
 `MQTT client could not be started` and the error code, because Node.js quotes the
 URL in those errors.
@@ -309,9 +312,14 @@ or `passwd`. The error names the key but not its value. Keep the password out of
 `config.yaml`, which is typically a ConfigMap.
 
 Credentials embedded in `mqtt.url` as `scheme://user:password@host` keep working
-when `mqtt.username` and `mqtt.passwordFile` are both unset, and are removed
-from the logs and the status page. The configured password never appears in
-logs, the status page, metrics, or error messages. Rotating it takes a restart.
+when `mqtt.username` and `mqtt.passwordFile` are both unset. Percent-encode any
+`/`, `?`, or `#` in them. The logs and the status page show only the
+scheme, host, and port of `mqtt.url`, never its credentials, path, or query. A
+YAML error or warning in `config.yaml`, such as a syntax error or an unresolved
+tag, stops startup and is reported by its code, line, and column without the
+text of the line, which can hold such credentials. The configured password never
+appears in logs, the status page, metrics, or error messages. Rotating it takes
+a restart.
 Use `mqtts://` unless the broker is on a trusted network, because `mqtt://`
 sends the password unencrypted. `mqtt.passwordFile` can name any file that the
 container can read, so treat `config.yaml` as being as trusted as the container.
@@ -447,7 +455,8 @@ in the host, a missing host, and a bare hostname. It shows that startup exits
 with `mqtt.url is not a valid MQTT URL` and that no output, including a Node.js
 deprecation warning, contains any part of the URL. It also shows that `startBridge`
 refuses the same URLs without a log line or a warning, and that a fresh Node.js
-process accepts every form that mqtt.js can use and raises no warning.
+process accepts every supported form and raises no warning, also when Node.js
+starts with `--no-deprecation`.
 
 To qualify the complete controller path, run Tucson's `make homekit` target
 with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 26.

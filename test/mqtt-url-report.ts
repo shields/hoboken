@@ -21,7 +21,7 @@ import { validateConfig } from "../src/config.ts";
 import {
   MALFORMED_MQTT_URLS,
   VALID_MQTT_URLS,
-  type UrlReport,
+  type URLReport,
 } from "./mqtt-urls.ts";
 
 const warnings: string[] = [];
@@ -49,7 +49,7 @@ function validates(url: string): boolean {
   }
 }
 
-function mqttJsError(url: string): string | undefined {
+function mqttJSError(url: string): string | undefined {
   try {
     connect(url, { manualConnect: true });
   } catch (error: unknown) {
@@ -58,13 +58,13 @@ function mqttJsError(url: string): string | undefined {
   return undefined;
 }
 
-const report: UrlReport = {
+const report: URLReport = {
   rejectedValid: VALID_MQTT_URLS.filter((url) => !validates(url)),
   acceptedMalformed: MALFORMED_MQTT_URLS.filter(validates),
-  mqttJsRejectedValid: VALID_MQTT_URLS.filter(
-    (url) => mqttJsError(url) !== undefined,
+  mqttJSRejectedValid: VALID_MQTT_URLS.filter(
+    (url) => mqttJSError(url) !== undefined,
   ),
-  mqttJsBareHostname: mqttJsError("broker"),
+  mqttJSBareHostname: mqttJSError("broker"),
   warnings,
 };
 

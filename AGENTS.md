@@ -101,23 +101,33 @@ Each module is independently testable with dependency injection:
   space, `;`, or `%` in the host, where mqtt.js would connect to the text
   before it. A bare hostname fails because mqtt.js throws "Missing protocol".
   mqtt.js would map an unknown scheme to `mqtt`, so the scheme list is stricter
-  than mqtt.js. `validateConfig`, `startBridge`, and the `HeatedBeddingMQTT`
+  than mqtt.js. A `ws` or `wss` URL with an IPv6 address fails too, because
+  mqtt.js writes its host without brackets and `new WebSocket` rejects the
+  result. `validateConfig`, `startBridge`, and the `HeatedBeddingMQTT`
   constructor call `assertMQTTURL`, which throws "mqtt.url is not a valid MQTT
-  URL". The log line and status page use `displayMQTTURL`, which shows
-  "(not shown)" for a URL that does not pass; `startBridge` has already refused
-  such a URL, so that is a second layer. Both clients create and connect
-  through `withoutErrorMessage`, which replaces any error that mqtt.js or Node
-  throws synchronously, because Node quotes the URL in them, with "MQTT client
-  could not be started" and keeps only a string `code`. `isMQTTURL` runs the
-  legacy parser with `process.noDeprecation` set, because Node 22 and 24 emit
-  DEP0170 with the whole URL for a port that `url.parse` finds invalid but
-  `new URL` accepts, as in `mqtt:user:pw@host:1x`, and Node 24 emits DEP0169
-  for any `url.parse` call outside `node_modules`; Node 26 throws an error that
-  quotes the URL instead. A process emits each warning once, so
+  URL". The log line and status page use `displayMQTTURL`, which shows only the
+  scheme, host, and port, or "(not shown)" for a URL that does not pass;
+  `startBridge` has already refused such a URL, so that is a second layer. It
+  never shows the path, query, or fragment, because a password that begins with
+  `/`, `?`, or `#` ends the authority early and leaves the rest of the userinfo
+  there, where no userinfo pattern finds it. `loadConfig` stops on a YAML error
+  or warning, such as an unresolved tag, and reports it by code, line, and
+  column only, because the parser's messages quote the offending line. Both
+  clients create and connect through `withoutErrorMessage`, which replaces any
+  error that mqtt.js or Node throws synchronously, because Node quotes the URL
+  in them, with "MQTT client could not be started" and keeps only a string
+  `code`. `isMQTTURL` runs the legacy parser with `process.noDeprecation` set,
+  except that Node has already set it, read-only, under `--no-deprecation`.
+  Node 22 and 24 emit DEP0170 with the whole URL for a port that `url.parse`
+  finds invalid but `new URL` accepts, as in `mqtt:user:pw@host:1x`; Node 26
+  throws an error that quotes the URL instead. Node 24 and 26 emit DEP0169,
+  which does not quote the URL, for any `url.parse` call outside
+  `node_modules`. A process emits each warning once, so
   `test/mqtt-url-report.ts` checks the shared lists in `test/mqtt-urls.ts` in a
   fresh process, which `config.test.ts` starts under Bun and
   `integration/mqtt-url-rejection.ts` starts under Node. Every malformed URL in
-  those lists carries a secret, so any output that quotes part of one fails.
+  those lists that has a place for credentials carries a secret there, so any
+  output that quotes part of one fails.
 - **Main MQTT reconnect backoff**: the main client sets
   `reconnectOnConnackError` in every configuration, because mqtt.js otherwise
   never retries after a refused login, and starts `reconnectPeriod` at the
@@ -258,7 +268,8 @@ make lint test
   page on every interface. The check runs first in each section, so a
   misspelled required field is named rather than reported missing, except that
   `mqtt.password` is checked before it and keeps its own message. A new config
-  key must join its section's allowlist.
+  key must join its section's allowlist, a `Record` over the interface's keys
+  that the compiler requires to be complete.
 - MQTT password: only from `mqtt.passwordFile` (strictly decoded UTF-8; a
   leading byte order mark and one trailing line ending, LF or CRLF, removed, so
   a lone trailing CR stays); the environment is never consulted, so a stray

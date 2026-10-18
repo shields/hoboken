@@ -16,11 +16,11 @@ export const SECRET = "pw123";
 export const INVALID_MQTT_URL = "mqtt.url is not a valid MQTT URL";
 
 // What test/mqtt-url-report.ts prints, from a fresh process.
-export interface UrlReport {
+export interface URLReport {
   rejectedValid: string[];
   acceptedMalformed: string[];
-  mqttJsRejectedValid: string[];
-  mqttJsBareHostname: string | undefined;
+  mqttJSRejectedValid: string[];
+  mqttJSBareHostname: string | undefined;
   warnings: string[];
 }
 
@@ -65,8 +65,8 @@ export const VALID_MQTT_URLS = [
   "mqtt://broker:1883#//x@y",
 ];
 
-// Each carries SECRET where credentials would sit, so that a message, a log
-// line, or a page that quotes any part of the URL shows it.
+// Each that has a place for credentials carries SECRET there, so that a
+// message, a log line, or a page that quotes any part of the URL shows it.
 export const MALFORMED_MQTT_URLS = [
   // Ports that are not 1 to 65535.
   `mqtt://user:${SECRET}@127.0.0.1:18x3`,
@@ -86,6 +86,8 @@ export const MALFORMED_MQTT_URLS = [
   `mqtt://user:${SECRET}@ho^st`,
   `mqtt://user:${SECRET}@ho|st`,
   `mqtt://user:${SECRET}@ho<st>`,
+  // A host that is not ASCII, which url.parse writes in punycode and a WHATWG
+  // URL of this scheme does not.
   `mqtt://user:${SECRET}@bröker`,
   // No host.
   `mqtt://user:${SECRET}@`,
@@ -109,6 +111,9 @@ export const MALFORMED_MQTT_URLS = [
   `mqtt://user:${SECRET}@::1`,
   `mqtt://us%er:${SECRET}@broker`,
   `mqtt://user:${SECRET}%zz@broker`,
+  // An IPv6 address in a ws or wss URL, which mqtt.js cannot connect to.
+  `ws://user:${SECRET}@[::1]:9001/mqtt`,
+  `wss://user:${SECRET}@[2001:db8::1]/mqtt`,
   // Not an MQTT scheme.
   `http://user:${SECRET}@broker`,
   `ftp://user:${SECRET}@broker:21`,
