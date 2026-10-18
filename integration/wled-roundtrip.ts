@@ -339,17 +339,13 @@ describe("WLED integration", { timeout: 30000 }, () => {
     });
 
     test("color round-trip read-back", async () => {
-      // Writing green (H=120, S=100) sets HomeKit's local hue/sat. WLED echoes
-      // the color back almost immediately, but that echo lands inside the
-      // bridge's 500ms color write-back suppression window and is dropped, so
-      // this does not exercise the echo path. After waiting that window out, we
-      // confirm HomeKit still reports the locally-written values (they were not
-      // clobbered or reset).
+      // HomeKit reads come from the state cache, and only inbound MQTT
+      // updates change it, so the baseline's hue 240 gives way to the written
+      // 120 only once WLED's echo of the write reaches the bridge. The bridge's
+      // 500ms write-back suppression withholds the echo from the pushed
+      // HomeKit update, not from the cache.
       await writeGreen();
-      await new Promise<void>((r) => setTimeout(r, 600));
-      const values = await getCharValues(client!, hueKey, satKey);
-      assert.equal(values.get(hueKey), 120);
-      assert.equal(values.get(satKey), 100);
+      await waitForValues({ [hueKey]: 120, [satKey]: 100 });
     });
 
     test("WLED→HK brightness 128→50%", async () => {
