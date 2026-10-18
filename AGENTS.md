@@ -190,6 +190,9 @@ make lint test
   accompany userinfo in `mqtt.url`
 - `mqtt.passwordFile`: optional non-empty path; `mqtt.password` is rejected so
   the password never lives in config.yaml
+- `mqtt` accepts only `url`, `username`, and `passwordFile`; any other key is
+  rejected by name without its value, so a misspelled login cannot connect
+  anonymously
 - MQTT password: from `mqtt.passwordFile` (UTF-8, one trailing line feed
   removed) or else `MQTT_PASSWORD`. A username needs a source, a source needs a
   username, the two sources cannot be combined, and an unreadable, empty, or

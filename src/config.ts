@@ -91,6 +91,7 @@ export interface Config {
 // An MQTT string, such as the username or password in a CONNECT packet, carries
 // a two-byte length.
 const MQTT_STRING_MAX_BYTES = 65535;
+const MQTT_FIELDS = new Set(["url", "username", "passwordFile"]);
 const MAC_RE = /^[\dA-Fa-f]{2}(:[\dA-Fa-f]{2}){5}$/;
 const PIN_RE = /^\d{3}-\d{2}-\d{3}$/;
 // Userinfo as url.parse, which mqtt.js uses, finds it: after a scheme or
@@ -163,6 +164,14 @@ export function validateConfig(data: unknown): Config {
   if ("password" in mqtt) {
     throw new Error(
       "mqtt.password is not supported; use mqtt.passwordFile or the MQTT_PASSWORD environment variable",
+    );
+  }
+  const unknownField = Object.keys(mqtt).find(
+    (field) => !MQTT_FIELDS.has(field),
+  );
+  if (unknownField !== undefined) {
+    throw new Error(
+      `mqtt: unknown mqtt field ${JSON.stringify(unknownField)}; supported fields are url, username, and passwordFile`,
     );
   }
   if (mqtt.username !== undefined && MQTT_URL_USERINFO_RE.test(mqtt.url)) {

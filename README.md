@@ -248,9 +248,11 @@ password source has no `mqtt.username`, when `mqtt.passwordFile` and
 (a file holding only a newline is empty), when `MQTT_PASSWORD` is empty, when
 `mqtt.username` or `mqtt.passwordFile` is not a non-empty string, when the
 username or password is longer than 65535 bytes, when `mqtt.username` is
-combined with credentials in `mqtt.url`, or when `config.yaml` contains
-`mqtt.password`. Keep the password out of `config.yaml`, which is typically a
-ConfigMap.
+combined with credentials in `mqtt.url`, when `config.yaml` contains
+`mqtt.password`, or when `mqtt` has any key other than `url`, `username`, and
+`passwordFile`, such as a misspelled `user` or `passwd`. The error names the
+key but not its value. Keep the password out of `config.yaml`, which is
+typically a ConfigMap.
 
 Credentials embedded in `mqtt.url` as `scheme://user:password@host` keep working
 when `mqtt.username`, `mqtt.passwordFile`, and `MQTT_PASSWORD` are all unset (an

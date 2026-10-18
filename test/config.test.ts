@@ -575,6 +575,48 @@ describe("validateConfig", () => {
     );
 
     test.each([
+      ["user", "never-log-value"],
+      ["passwd", "never-log-value"],
+      ["userName", "hoboken"],
+      ["passwordfile", "/run/secrets/never-log-value"],
+      ["password_file", "/run/secrets/never-log-value"],
+      ["auth", { username: "hoboken", password: "never-log-value" }],
+      ["tls", { ca: "never-log-value" }],
+      ["0", "never-log-value"],
+    ])("rejects unknown mqtt field %s without its value", (field, value) => {
+      const data = withMQTT({ username: "hoboken", [field]: value });
+      const message = errorMessage(() => validateConfig(data));
+      expect(message).toBe(
+        `mqtt: unknown mqtt field ${JSON.stringify(field)}; supported fields are url, username, and passwordFile`,
+      );
+      expect(message).not.toContain("never-log-value");
+    });
+
+    test("rejects a login section whose keys are all misspelled", () => {
+      const data = withMQTT({ user: "hoboken", passwd: "never-log-value" });
+      expect(() => validateConfig(data)).toThrow('unknown mqtt field "user"');
+    });
+
+    test("escapes control characters in an unknown mqtt field", () => {
+      const message = errorMessage(() =>
+        validateConfig(withMQTT({ "a\nb": "never-log-value" })),
+      );
+      expect(message).toContain(String.raw`"a\nb"`);
+      expect(message).not.toContain("\n");
+    });
+
+    test.each([
+      { user: "hoboken", password: "never-log-value" },
+      { password: "never-log-value", user: "hoboken" },
+    ])("reports mqtt.password rather than an unknown field: %j", (extra) => {
+      const message = errorMessage(() => validateConfig(withMQTT(extra)));
+      expect(message).toBe(
+        "mqtt.password is not supported; use mqtt.passwordFile or the MQTT_PASSWORD environment variable",
+      );
+      expect(message).not.toContain("never-log-value");
+    });
+
+    test.each([
       "mqtt://user:pw@broker:1883",
       "mqtt://user@broker",
       "mqtt://:pw@broker",
@@ -936,6 +978,21 @@ devices:
     const serialized = JSON.stringify(config);
     expect(serialized).toContain(passwordFile);
     expect(serialized).not.toContain(PASSWORD);
+  });
+
+  test("rejects misspelled login keys in YAML without their values", () => {
+    const configPath = writeConfig(
+      [
+        '  url: "mqtt://localhost:1883"',
+        "  user: hoboken",
+        "  passwd: never-log-value",
+        "  auth:",
+        "    password: never-log-value",
+      ].join("\n"),
+    );
+    const message = errorMessage(() => loadConfig(configPath));
+    expect(message).toContain('unknown mqtt field "user"');
+    expect(message).not.toContain("never-log-value");
   });
 
   test("rejects a bare username key", () => {
