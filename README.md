@@ -196,8 +196,8 @@ bridge:
 
 mqtt:
   url: "mqtt://mosquitto:1883"
-  # username: "hoboken" # optional: broker login; needs one password source
-  # passwordFile: "/run/secrets/mqtt_password" # or set MQTT_PASSWORD instead
+  # username: "hoboken" # optional: broker login; needs passwordFile
+  # passwordFile: "/run/secrets/mqtt_password" # needs username
 
 # metrics:
 #   port: 9090
@@ -238,38 +238,33 @@ host's LAN interface name (e.g., `eno1`) so HomeKit clients can reach the bridge
 
 ### MQTT authentication
 
-Brokers that require a login take an optional `mqtt.username` and a password
-from exactly one of two sources. `mqtt.passwordFile` names a file that contains
-the password; Hoboken reads it once at startup as UTF-8, removes a leading byte
-order mark, and removes one trailing line ending, either a line feed or a
-carriage return and line feed, so a file made with `echo`, `kubectl create
-secret --from-file`, or a Windows editor works as written. A lone trailing
-carriage return stays part of the password. The file must be valid UTF-8;
-invalid bytes, including a UTF-16 file with a byte order mark, fail startup
-instead of becoming a different password. Without `mqtt.passwordFile`, the
-password comes from the `MQTT_PASSWORD` environment variable, whose value is
-used exactly as set, including any trailing newline. Prefer the file, because
-child processes inherit environment variables. The connection for Zigbee2MQTT
-and WLED devices and the heated bedding connection use the same credentials.
+Brokers that require a login take an optional `mqtt.username` and an
+`mqtt.passwordFile` that names a file containing the password. Hoboken reads the
+file once at startup as UTF-8, removes a leading byte order mark, and removes one
+trailing line ending, either a line feed or a carriage return and line feed, so a
+file made with `echo`, `kubectl create secret --from-file`, or a Windows editor
+works as written. A lone trailing carriage return stays part of the password.
+The file must be valid UTF-8; invalid bytes, including a UTF-16 file with a byte
+order mark, fail startup instead of becoming a different password. Hoboken takes
+the password from no other source and ignores any `MQTT_PASSWORD` environment
+variable. The connection for Zigbee2MQTT and WLED devices and the heated bedding
+connection use the same credentials.
 
-Hoboken refuses to start when `mqtt.username` has no password source, when a
-password source has no `mqtt.username`, when `mqtt.passwordFile` and
-`MQTT_PASSWORD` are both set, when the password file cannot be read, is not
-valid UTF-8, or is empty (a file holding only a line ending, with or without a
-byte order mark, is empty), when `MQTT_PASSWORD` is empty, when
-`mqtt.username` or `mqtt.passwordFile` is not a non-empty string, when the
-username or password is longer than 65535 bytes, when `mqtt.username` is
-combined with credentials in `mqtt.url`, when `config.yaml` contains
-`mqtt.password`, or when `mqtt` has any key other than `url`, `username`, and
-`passwordFile`, such as a misspelled `user` or `passwd`. The error names the
-key but not its value. Keep the password out of `config.yaml`, which is
-typically a ConfigMap.
+Hoboken refuses to start when `mqtt.username` has no `mqtt.passwordFile`, when
+`mqtt.passwordFile` has no `mqtt.username`, when the password file cannot be
+read, is not valid UTF-8, or is empty (a file holding only a line ending, with or
+without a byte order mark, is empty), when `mqtt.username` or
+`mqtt.passwordFile` is not a non-empty string, when the username or password is
+longer than 65535 bytes, when `mqtt.username` is combined with credentials in
+`mqtt.url`, when `config.yaml` contains `mqtt.password`, or when `mqtt` has any
+key other than `url`, `username`, and `passwordFile`, such as a misspelled `user`
+or `passwd`. The error names the key but not its value. Keep the password out of
+`config.yaml`, which is typically a ConfigMap.
 
 Credentials embedded in `mqtt.url` as `scheme://user:password@host` keep working
-when `mqtt.username`, `mqtt.passwordFile`, and `MQTT_PASSWORD` are all unset (an
-empty `MQTT_PASSWORD` counts as set), and are removed from the logs and the
-status page. The configured password never appears in logs, the status page,
-metrics, or error messages. Rotating it takes a restart.
+when `mqtt.username` and `mqtt.passwordFile` are both unset, and are removed
+from the logs and the status page. The configured password never appears in
+logs, the status page, metrics, or error messages. Rotating it takes a restart.
 Use `mqtts://` unless the broker is on a trusted network, because `mqtt://`
 sends the password unencrypted. `mqtt.passwordFile` can name any file that the
 container can read, so treat `config.yaml` as being as trusted as the container.
@@ -382,9 +377,9 @@ The authenticated round trip runs a broker that refuses anonymous clients and
 restricts each user's topics. It shows that both MQTT connections log in with a
 password read from a file, that Zigbee2MQTT and heated bedding writes and state
 get through the topic permissions, that the status page and metrics never carry
-the password, that `main.ts` exits without a password source, and that a login
-the broker first refuses, with credentials or without, is retried until the
-broker accepts it.
+the password, that `main.ts` exits without a password file and never takes the
+password from `MQTT_PASSWORD`, and that a login the broker first refuses, with
+credentials or without, is retried until the broker accepts it.
 
 The refused-subscription round trip runs an in-process broker that refuses
 chosen topics. It shows that the bridge names only the refused topic, counts
@@ -419,10 +414,8 @@ reconciled automatically.
 - `strategy: Recreate` — single instance (MAC uniqueness)
 - PVC at `/persist` — pairing data survives restarts
 - ConfigMap at `/config/config.yaml`
-- Optional Secret for the MQTT password: mount it read-only and name it in
-  `mqtt.passwordFile`, or inject `MQTT_PASSWORD` with `secretKeyRef`, which
-  needs a Secret value without a trailing newline (`--from-literal`, not
-  `--from-file` of a file that ends with one)
+- Optional Secret for the MQTT password: mount it read-only and name its file
+  in `mqtt.passwordFile`
 
 ### Pairing with Apple Home
 

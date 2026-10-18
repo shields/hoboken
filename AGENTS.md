@@ -77,9 +77,9 @@ Each module is independently testable with dependency injection:
   trusted, so every zone starts over from a clean MQTT session.
 - **No config reload**: restart the container for config changes.
 - **MQTT credentials**: `Config` holds only `mqtt.username` and the password
-  file path. `main.ts` calls `resolveMQTTCredentials(config.mqtt, process.env)`
-  and passes the resulting `MQTTCredentials` to `startBridge`, which gives them
-  to both MQTT clients, so the status page, metrics, and logs cannot reach the
+  file path. `main.ts` calls `resolveMQTTCredentials(config.mqtt)` and passes
+  the resulting `MQTTCredentials` to `startBridge`, which gives them to both
+  MQTT clients, so the status page, metrics, and logs cannot reach the
   password. `validateConfig` stays pure and `startBridge` never reads the
   environment, which keeps tests independent of the developer's shell. Both
   clients build their options with `credentialOptions`, which empties mqtt.js's
@@ -215,12 +215,12 @@ make lint test
 - `mqtt` accepts only `url`, `username`, and `passwordFile`; any other key is
   rejected by name without its value, so a misspelled login cannot connect
   anonymously
-- MQTT password: from `mqtt.passwordFile` (strictly decoded UTF-8; a leading
-  byte order mark and one trailing line ending, LF or CRLF, removed, so a lone
-  trailing CR stays) or else `MQTT_PASSWORD`. A username needs a source, a
-  source needs a username, the two sources cannot be combined, and an
-  unreadable, invalid UTF-8, empty, or oversized (over 65535 bytes) password
-  fails startup. Messages never contain the password.
+- MQTT password: only from `mqtt.passwordFile` (strictly decoded UTF-8; a
+  leading byte order mark and one trailing line ending, LF or CRLF, removed, so
+  a lone trailing CR stays); the environment is never consulted, so a stray
+  `MQTT_PASSWORD` is ignored. A username needs a password file, a password file
+  needs a username, and an unreadable, invalid UTF-8, empty, or oversized (over
+  65535 bytes) password fails startup. Messages never contain the password.
 - `devices`: non-empty array unless `heatedBedding` configures at least one zone;
   a configuration with only heated bedding can omit `devices` or use an empty array
 - Each device: `name`, `topic`, `capabilities` (non-empty, valid values)

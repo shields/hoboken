@@ -68,7 +68,7 @@ const configPath = process.env.CONFIG_PATH ?? "/config/config.yaml";
 HAPStorage.setCustomStoragePath(process.env.PERSIST_PATH ?? "/persist");
 
 const config = loadConfig(configPath);
-const credentials = resolveMQTTCredentials(config.mqtt, process.env);
+const credentials = resolveMQTTCredentials(config.mqtt);
 const handle = await startBridge(config, credentials);
 shutdown = handle.shutdown;
 if (pendingSignal !== undefined) runShutdown(handle.shutdown);

@@ -566,7 +566,7 @@ describe("validateConfig", () => {
       (password) => {
         const data = withMQTT({ username: "hoboken", password });
         expect(() => validateConfig(data)).toThrow(
-          "mqtt.password is not supported; use mqtt.passwordFile or the MQTT_PASSWORD environment variable",
+          "mqtt.password is not supported; use mqtt.passwordFile",
         );
         expect(errorMessage(() => validateConfig(data))).not.toContain(
           "hunter2",
@@ -611,7 +611,7 @@ describe("validateConfig", () => {
     ])("reports mqtt.password rather than an unknown field: %j", (extra) => {
       const message = errorMessage(() => validateConfig(withMQTT(extra)));
       expect(message).toBe(
-        "mqtt.password is not supported; use mqtt.passwordFile or the MQTT_PASSWORD environment variable",
+        "mqtt.password is not supported; use mqtt.passwordFile",
       );
       expect(message).not.toContain("never-log-value");
     });
@@ -1030,37 +1030,15 @@ describe("resolveMQTTCredentials", () => {
     return file;
   }
 
-  test.each([[{}], [{ UNRELATED: "x" }]])(
-    "returns undefined when nothing is configured with env %j",
-    (env) => {
-      expect(resolveMQTTCredentials(mqtt(), env)).toBeUndefined();
-    },
-  );
+  test("returns undefined when nothing is configured", () => {
+    expect(resolveMQTTCredentials(mqtt())).toBeUndefined();
+  });
 
   test("returns undefined for credentials embedded in the URL", () => {
     expect(
-      resolveMQTTCredentials(mqtt({ url: "mqtt://u:p@h" }), {}),
+      resolveMQTTCredentials(mqtt({ url: "mqtt://u:p@h" })),
     ).toBeUndefined();
   });
-
-  test("reads the password from the environment", () => {
-    expect(
-      resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
-        MQTT_PASSWORD: PASSWORD,
-      }),
-    ).toStrictEqual({ username: "hoboken", password: PASSWORD });
-  });
-
-  test.each([["pw\n"], [" a b "], ["pässwörd€"]])(
-    "uses the environment password verbatim: %j",
-    (value) => {
-      expect(
-        resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
-          MQTT_PASSWORD: value,
-        }),
-      ).toStrictEqual({ username: "hoboken", password: value });
-    },
-  );
 
   test.each([
     ["s3cret", "s3cret"],
@@ -1083,7 +1061,6 @@ describe("resolveMQTTCredentials", () => {
     expect(
       resolveMQTTCredentials(
         mqtt({ username: "hoboken", passwordFile: passwordFile(content) }),
-        {},
       ),
     ).toStrictEqual({ username: "hoboken", password: expected });
   });
@@ -1101,105 +1078,73 @@ describe("resolveMQTTCredentials", () => {
       expect(
         resolveMQTTCredentials(
           mqtt({ username: "hoboken", passwordFile: passwordFile(content) }),
-          {},
         ),
       ).toStrictEqual({ username: "hoboken", password: expected });
     },
   );
 
-  test("ignores an unrelated environment password source when reading the file", () => {
-    expect(
-      resolveMQTTCredentials(
-        mqtt({ username: "hoboken", passwordFile: passwordFile("s3cret\n") }),
-        { UNRELATED: "x" },
-      ),
-    ).toStrictEqual({ username: "hoboken", password: "s3cret" });
-  });
-
-  test("requires a password source for a username", () => {
-    expect(() =>
-      resolveMQTTCredentials(mqtt({ username: "hoboken" }), {}),
-    ).toThrow(
-      "mqtt.username requires mqtt.passwordFile or the MQTT_PASSWORD environment variable",
+  test("requires a password file for a username", () => {
+    expect(() => resolveMQTTCredentials(mqtt({ username: "hoboken" }))).toThrow(
+      "mqtt.username requires mqtt.passwordFile",
     );
   });
 
   test("requires a username for a password file", () => {
     expect(() =>
-      resolveMQTTCredentials(mqtt({ passwordFile: passwordFile("x") }), {}),
+      resolveMQTTCredentials(mqtt({ passwordFile: passwordFile("x") })),
     ).toThrow("mqtt.passwordFile requires mqtt.username");
   });
-
-  test.each([["x"], [""]])(
-    "requires a username for the environment password %j",
-    (value) => {
-      expect(() =>
-        resolveMQTTCredentials(mqtt(), { MQTT_PASSWORD: value }),
-      ).toThrow("MQTT_PASSWORD requires mqtt.username");
-    },
-  );
-
-  test.each([
-    [undefined, PASSWORD],
-    [undefined, ""],
-    ["hoboken", PASSWORD],
-    ["hoboken", ""],
-  ])(
-    "rejects both password sources before reading the file with username %s and environment password %j",
-    (username, envPassword) => {
-      const missing = path.join(tmpDir, "missing");
-      expect(() =>
-        resolveMQTTCredentials(
-          mqtt({
-            ...(username === undefined ? {} : { username }),
-            passwordFile: missing,
-          }),
-          { MQTT_PASSWORD: envPassword },
-        ),
-      ).toThrow(
-        "mqtt.passwordFile and MQTT_PASSWORD cannot be combined; use one or the other",
-      );
-    },
-  );
 
   test("requires a username for a password file before reading it", () => {
     expect(() =>
       resolveMQTTCredentials(
         mqtt({ passwordFile: path.join(tmpDir, "missing") }),
-        {},
       ),
     ).toThrow("mqtt.passwordFile requires mqtt.username");
   });
 
-  test("rejects an empty environment password", () => {
-    expect(() =>
-      resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
-        MQTT_PASSWORD: "",
-      }),
-    ).toThrow("MQTT_PASSWORD is empty");
+  describe("with MQTT_PASSWORD set in the environment", () => {
+    const original = process.env.MQTT_PASSWORD;
+
+    afterEach(() => {
+      if (original === undefined) delete process.env.MQTT_PASSWORD;
+      else process.env.MQTT_PASSWORD = original;
+    });
+
+    test.each([[PASSWORD], [""]])(
+      "does not take the password of a username from %j",
+      (value) => {
+        process.env.MQTT_PASSWORD = value;
+        const message = errorMessage(() =>
+          resolveMQTTCredentials(mqtt({ username: "hoboken" })),
+        );
+        expect(message).toBe("mqtt.username requires mqtt.passwordFile");
+      },
+    );
+
+    test.each([[PASSWORD], [""]])(
+      "does not count %j as a password for a missing username",
+      (value) => {
+        process.env.MQTT_PASSWORD = value;
+        expect(resolveMQTTCredentials(mqtt())).toBeUndefined();
+      },
+    );
+
+    test.each([[`other-${PASSWORD}`], [""]])(
+      "reads the password file rather than %j",
+      (value) => {
+        process.env.MQTT_PASSWORD = value;
+        expect(
+          resolveMQTTCredentials(
+            mqtt({
+              username: "hoboken",
+              passwordFile: passwordFile(`${PASSWORD}\n`),
+            }),
+          ),
+        ).toStrictEqual({ username: "hoboken", password: PASSWORD });
+      },
+    );
   });
-
-  test.each(["a".repeat(65535), "€".repeat(21845)])(
-    "accepts an environment password of 65535 bytes",
-    (password) => {
-      expect(
-        resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
-          MQTT_PASSWORD: password,
-        }),
-      ).toStrictEqual({ username: "hoboken", password });
-    },
-  );
-
-  test.each(["a".repeat(65536), "€".repeat(21846)])(
-    "rejects an environment password over 65535 bytes",
-    (password) => {
-      expect(() =>
-        resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
-          MQTT_PASSWORD: password,
-        }),
-      ).toThrow("MQTT_PASSWORD must be at most 65535 bytes");
-    },
-  );
 
   test("limits a password file to 65535 bytes after its trailing newline", () => {
     const username = "hoboken";
@@ -1209,13 +1154,11 @@ describe("resolveMQTTCredentials", () => {
           username,
           passwordFile: passwordFile("a".repeat(65535) + "\n"),
         }),
-        {},
       ),
     ).toStrictEqual({ username, password: "a".repeat(65535) });
     expect(() =>
       resolveMQTTCredentials(
         mqtt({ username, passwordFile: passwordFile("a".repeat(65536)) }),
-        {},
       ),
     ).toThrow("mqtt.passwordFile must be at most 65535 bytes");
   });
@@ -1228,7 +1171,6 @@ describe("resolveMQTTCredentials", () => {
           username,
           passwordFile: passwordFile("\u{FEFF}" + "€".repeat(21845) + "\r\n"),
         }),
-        {},
       ),
     ).toStrictEqual({ username, password: "€".repeat(21845) });
     expect(() =>
@@ -1237,7 +1179,6 @@ describe("resolveMQTTCredentials", () => {
           username,
           passwordFile: passwordFile("\u{FEFF}" + "€".repeat(21846) + "\r\n"),
         }),
-        {},
       ),
     ).toThrow("mqtt.passwordFile must be at most 65535 bytes");
   });
@@ -1253,7 +1194,6 @@ describe("resolveMQTTCredentials", () => {
     expect(() =>
       resolveMQTTCredentials(
         mqtt({ username: "hoboken", passwordFile: passwordFile(content) }),
-        {},
       ),
     ).toThrow("mqtt.passwordFile is empty");
   });
@@ -1292,7 +1232,6 @@ describe("resolveMQTTCredentials", () => {
       const message = errorMessage(() =>
         resolveMQTTCredentials(
           mqtt({ username: "hoboken", passwordFile: file }),
-          {},
         ),
       );
       expect(message).toBe("mqtt.passwordFile is not valid UTF-8");
@@ -1309,7 +1248,6 @@ describe("resolveMQTTCredentials", () => {
               Buffer.concat([Buffer.alloc(65536, 0x61), Buffer.from([0xff])]),
             ),
           }),
-          {},
         ),
       ).toThrow("mqtt.passwordFile is not valid UTF-8");
     });
@@ -1321,7 +1259,6 @@ describe("resolveMQTTCredentials", () => {
       errorMessage(() =>
         resolveMQTTCredentials(
           mqtt({ username: "hoboken", passwordFile: file }),
-          {},
         ),
       ),
     ).not.toContain(file);
@@ -1334,7 +1271,6 @@ describe("resolveMQTTCredentials", () => {
           username: "hoboken",
           passwordFile: path.join(tmpDir, "missing"),
         }),
-        {},
       ),
     ).toThrow("ENOENT");
   });
@@ -1343,58 +1279,32 @@ describe("resolveMQTTCredentials", () => {
     expect(() =>
       resolveMQTTCredentials(
         mqtt({ username: "hoboken", passwordFile: tmpDir }),
-        {},
       ),
     ).toThrow("EISDIR");
   });
 
-  describe("error messages never contain the password", () => {
-    test("with the secret in the file and no username", () => {
-      const file = passwordFile(`${PASSWORD}\n`);
-      expect(
-        errorMessage(() =>
-          resolveMQTTCredentials(mqtt({ passwordFile: file }), {}),
-        ),
-      ).not.toContain(PASSWORD);
-    });
-
-    test("with the secret in the environment and no username", () => {
-      expect(
-        errorMessage(() =>
-          resolveMQTTCredentials(mqtt(), { MQTT_PASSWORD: PASSWORD }),
-        ),
-      ).not.toContain(PASSWORD);
-    });
-
-    test("with the secret in both the file and the environment", () => {
-      const file = passwordFile(`${PASSWORD}\n`);
-      expect(
-        errorMessage(() =>
-          resolveMQTTCredentials(
-            mqtt({ username: "hoboken", passwordFile: file }),
-            { MQTT_PASSWORD: PASSWORD },
-          ),
-        ),
-      ).not.toContain(PASSWORD);
-    });
+  test("error messages never contain the password", () => {
+    const file = passwordFile(`${PASSWORD}\n`);
+    expect(
+      errorMessage(() => resolveMQTTCredentials(mqtt({ passwordFile: file }))),
+    ).not.toContain(PASSWORD);
   });
 
-  test.each([
-    ["file", () => ({ passwordFile: passwordFile(`${PASSWORD}\n`) }), {}],
-    ["environment", () => ({}), { MQTT_PASSWORD: PASSWORD }],
-  ] as const)(
-    "does not modify or retain the %s password in its input",
-    (_source, extra, env) => {
-      const input = Object.freeze(mqtt({ username: "hoboken", ...extra() }));
-      const before = JSON.stringify(input);
-      expect(resolveMQTTCredentials(input, env)).toStrictEqual({
+  test("does not modify or retain the password in its input", () => {
+    const input = Object.freeze(
+      mqtt({
         username: "hoboken",
-        password: PASSWORD,
-      });
-      expect(JSON.stringify(input)).toBe(before);
-      expect(before).not.toContain(PASSWORD);
-    },
-  );
+        passwordFile: passwordFile(`${PASSWORD}\n`),
+      }),
+    );
+    const before = JSON.stringify(input);
+    expect(resolveMQTTCredentials(input)).toStrictEqual({
+      username: "hoboken",
+      password: PASSWORD,
+    });
+    expect(JSON.stringify(input)).toBe(before);
+    expect(before).not.toContain(PASSWORD);
+  });
 });
 
 describe("credentialOptions", () => {

@@ -162,9 +162,7 @@ export function validateConfig(data: unknown): Config {
     throw new Error("mqtt.passwordFile must be a non-empty string");
   }
   if ("password" in mqtt) {
-    throw new Error(
-      "mqtt.password is not supported; use mqtt.passwordFile or the MQTT_PASSWORD environment variable",
-    );
+    throw new Error("mqtt.password is not supported; use mqtt.passwordFile");
   }
   const unknownField = Object.keys(mqtt).find(
     (field) => !MQTT_FIELDS.has(field),
@@ -550,44 +548,25 @@ function decodePasswordFile(bytes: Uint8Array): string {
 
 export function resolveMQTTCredentials(
   mqtt: MqttConfig,
-  env: Readonly<Record<string, string | undefined>>,
 ): MQTTCredentials | undefined {
   const { username, passwordFile } = mqtt;
-  const envPassword = env.MQTT_PASSWORD;
-  if (passwordFile !== undefined && envPassword !== undefined) {
-    throw new Error(
-      "mqtt.passwordFile and MQTT_PASSWORD cannot be combined; use one or the other",
-    );
-  }
   if (username === undefined) {
     if (passwordFile !== undefined) {
       throw new Error("mqtt.passwordFile requires mqtt.username");
     }
-    if (envPassword !== undefined) {
-      throw new Error("MQTT_PASSWORD requires mqtt.username");
-    }
     return undefined;
   }
-  let source: string;
-  let password: string;
-  if (passwordFile !== undefined) {
-    source = "mqtt.passwordFile";
-    password = decodePasswordFile(readFileSync(passwordFile)).replace(
-      /\r?\n$/,
-      "",
-    );
-  } else if (envPassword === undefined) {
-    throw new Error(
-      "mqtt.username requires mqtt.passwordFile or the MQTT_PASSWORD environment variable",
-    );
-  } else {
-    source = "MQTT_PASSWORD";
-    password = envPassword;
+  if (passwordFile === undefined) {
+    throw new Error("mqtt.username requires mqtt.passwordFile");
   }
-  if (password.length === 0) throw new Error(`${source} is empty`);
+  const password = decodePasswordFile(readFileSync(passwordFile)).replace(
+    /\r?\n$/,
+    "",
+  );
+  if (password.length === 0) throw new Error("mqtt.passwordFile is empty");
   if (Buffer.byteLength(password) > MQTT_STRING_MAX_BYTES) {
     throw new Error(
-      `${source} must be at most ${String(MQTT_STRING_MAX_BYTES)} bytes`,
+      `mqtt.passwordFile must be at most ${String(MQTT_STRING_MAX_BYTES)} bytes`,
     );
   }
   return { username, password };

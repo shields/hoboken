@@ -47,11 +47,7 @@ const MAIN_ATTEMPTS = 3;
 const HOBOKEN_SENTINEL = "hoboken-sentinel-4c1e9b27";
 const BACKEND_PASSWORD = "backend-sentinel-7d20af83";
 const MAIN = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const SCRUBBED_ENVIRONMENT = new Set([
-  "DEBUG",
-  "MQTT_PASSWORD",
-  "NODE_TEST_CONTEXT",
-]);
+const SCRUBBED_ENVIRONMENT = new Set(["DEBUG", "NODE_TEST_CONTEXT"]);
 const ZONES = ["side_a", "side_b"].map((zone) => ({
   name: `Bed Side ${zone === "side_a" ? "A" : "B"}`,
   prefix: PREFIX,
@@ -281,7 +277,7 @@ describe(
     async function expectMainAuthenticates(
       name: string,
       mac: string,
-      source: { passwordFile?: string; environment?: Record<string, string> },
+      source: { passwordFile: string; environment?: Record<string, string> },
     ): Promise<void> {
       assert(broker);
       for (let attempt = 1; ; attempt++) {
@@ -393,10 +389,11 @@ describe(
 
         const passwordFile = path.join(directory, "hoboken-password");
         writeFileSync(passwordFile, `${HOBOKEN_SENTINEL}\n`, { mode: 0o600 });
-        credentials = resolveMQTTCredentials(
-          { url: broker.url, username: "hoboken", passwordFile },
-          {},
-        );
+        credentials = resolveMQTTCredentials({
+          url: broker.url,
+          username: "hoboken",
+          passwordFile,
+        });
         handle = await startBridge(
           {
             bridge: {
@@ -594,7 +591,7 @@ describe(
         }
       });
 
-      test("main.ts refuses to start with a username and no password source", async () => {
+      test("main.ts refuses to start with a username and no password file, whatever MQTT_PASSWORD holds", async () => {
         assert(broker);
         const [bridge, metrics] = await freePortPair();
         const files = writeMainConfig(
@@ -603,7 +600,7 @@ describe(
           broker.url,
           { bridge, metrics },
         );
-        const main = runMain(files);
+        const main = runMain({ ...files, MQTT_PASSWORD: HOBOKEN_SENTINEL });
         const code = await main.exited;
         assert.notEqual(code, 0);
         assert.notEqual(code, null);
@@ -611,16 +608,17 @@ describe(
           main.stderr(),
           /mqtt\.username requires mqtt\.passwordFile/,
         );
+        assert(!main.output().includes(HOBOKEN_SENTINEL));
       });
 
-      test("main.ts authenticates with the password from the environment", async () => {
-        await expectMainAuthenticates(
-          "environment-start",
-          "0E:36:29:42:81:18",
-          {
-            environment: { MQTT_PASSWORD: HOBOKEN_SENTINEL },
-          },
-        );
+      test("main.ts reads the password file and ignores MQTT_PASSWORD", async () => {
+        assert(directory);
+        const passwordFile = path.join(directory, "main-ignored-password");
+        writeFileSync(passwordFile, `${HOBOKEN_SENTINEL}\n`, { mode: 0o600 });
+        await expectMainAuthenticates("ignored-start", "0E:36:29:42:81:18", {
+          passwordFile,
+          environment: { MQTT_PASSWORD: `wrong-${HOBOKEN_SENTINEL}` },
+        });
       });
 
       test("main.ts authenticates with the password from a file with a trailing newline", async () => {
