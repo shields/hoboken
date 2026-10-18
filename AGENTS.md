@@ -34,7 +34,7 @@ bun install               # Install dependencies
 make lint                 # tsc --noEmit, ESLint, Renovate config validation, Prettier
 make test                 # Unit tests with coverage
 make test-broker-deps     # System packages for the pinned Mosquitto build
-make test-integration     # WLED, heated bedding, authenticated broker, and refused subscription round trips (Node.js)
+make test-integration     # WLED, heated bedding, authenticated broker, refused subscription, and dropped session round trips (Node.js)
 make test-screenshot      # Compare status page against golden file (Docker)
 make run                  # Run with Node.js
 make demo                 # Serve the status page with sample data
@@ -94,10 +94,15 @@ Each module is independently testable with dependency injection:
   never retries after a refused login, and starts `reconnectPeriod` at the
   Tucson MQTT client's `MIN_BACKOFF`. Each `reconnect` event, which mqtt.js
   emits once per attempt however that attempt fails, doubles
-  `client.options.reconnectPeriod` up to `MAX_BACKOFF`, and `connect` resets it
-  to `MIN_BACKOFF`. The doubled period is the wait after that attempt fails.
-  Counting `reconnect` rather than `error`, `close`, or `offline` counts a
-  failed attempt once.
+  `client.options.reconnectPeriod` up to `MAX_BACKOFF`. The doubled period is
+  the wait after that attempt fails. Counting `reconnect` rather than `error`,
+  `close`, or `offline` counts a failed attempt once. `connect` starts a timer,
+  like the heated bedding client's stable-connection timer, that resets the
+  period to `MIN_BACKOFF` once the connection has stayed up for `MAX_BACKOFF`;
+  `close` and shutdown clear it. A broker that accepts the login and then drops
+  the session, such as VerneMQ or EMQX with `deny_action=disconnect` after a
+  denied publish, keeps the period, so each drop is followed by a longer wait
+  and the bridge does not request every device's state once a second.
 - **Main MQTT subscription results**: the main client's connect handler passes
   `subscribe` a callback, and the client sets `resubscribe: false`. With
   mqtt.js's own resubscribe on, it re-sends the earlier subscriptions before the

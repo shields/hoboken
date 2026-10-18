@@ -2482,18 +2482,88 @@ describe("main MQTT connection reconnects", () => {
     },
   );
 
-  test("a successful connect resets the delay to 1 s", async () => {
+  test.each([
+    ["at once", 0],
+    ["after 59.999 s", 59999],
+  ])(
+    "connections that the broker drops %s keep doubling the delay up to 60 s",
+    async (_name, uptime) => {
+      const session = await startReconnectTest();
+      try {
+        for (const delay of BACKOFF_MS) {
+          emitConnect();
+          jest.advanceTimersByTime(uptime);
+          session.expectAttemptAfter(delay, connectionClosed);
+        }
+      } finally {
+        await session.shutdown();
+      }
+    },
+  );
+
+  test("a connection that stays up for 60 s resets the delay to 1 s", async () => {
     const session = await startReconnectTest();
     try {
       for (const delay of BACKOFF_MS.slice(0, 4))
         session.expectAttemptAfter(delay, loginRefused);
       emitConnect();
+      jest.advanceTimersByTime(60000);
       session.expectAttemptAfter(1000, connectionClosed);
       session.expectAttemptAfter(2000, brokerDown);
       session.expectAttemptAfter(4000, loginRefused);
     } finally {
       await session.shutdown();
     }
+  });
+
+  test("the reset timer restarts with each connection", async () => {
+    const session = await startReconnectTest();
+    try {
+      for (const delay of BACKOFF_MS.slice(0, 4))
+        session.expectAttemptAfter(delay, loginRefused);
+      emitConnect();
+      jest.advanceTimersByTime(30000);
+      session.expectAttemptAfter(16000, connectionClosed);
+      emitConnect();
+      jest.advanceTimersByTime(59999);
+      session.expectAttemptAfter(32000, connectionClosed);
+      emitConnect();
+      jest.advanceTimersByTime(60000);
+      session.expectAttemptAfter(1000, connectionClosed);
+    } finally {
+      await session.shutdown();
+    }
+  });
+
+  test("a connection that has dropped cannot reset the delay during the outage", async () => {
+    const session = await startReconnectTest();
+    try {
+      emitConnect();
+      const outage = [brokerDown, loginRefused, connectionClosed];
+      for (const [index, delay] of BACKOFF_MS.entries())
+        session.expectAttemptAfter(delay, outage[index % 3]!);
+    } finally {
+      await session.shutdown();
+    }
+  });
+
+  test("a repeated connect leaves a single reset timer", async () => {
+    const session = await startReconnectTest();
+    try {
+      emitConnect();
+      const timers = jest.getTimerCount();
+      emitConnect();
+      expect(jest.getTimerCount()).toBe(timers);
+    } finally {
+      await session.shutdown();
+    }
+  });
+
+  test("shutdown leaves no pending timer", async () => {
+    const session = await startReconnectTest();
+    emitConnect();
+    await session.shutdown();
+    expect(jest.getTimerCount()).toBe(0);
   });
 });
 

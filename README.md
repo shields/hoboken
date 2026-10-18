@@ -139,9 +139,12 @@ qualification.
   Without retain, the bridge has no way to learn the device's current state at
   startup.
 - **MQTT reconnect**: re-subscribes and refreshes state automatically. The
-  Zigbee2MQTT and WLED connection waits 1 second before its first retry,
-  doubles the wait after each failed attempt up to 60 seconds, and returns to 1
-  second once it connects.
+  Zigbee2MQTT and WLED connection waits 1 second before its first retry and
+  doubles the wait with each further attempt up to 60 seconds. The wait returns
+  to 1 second only after a connection has stayed up for 60 seconds, so a broker
+  that accepts the login and then drops the session, such as one that
+  disconnects a client after a denied publish, is retried at the growing
+  interval rather than every second.
 - **MQTT credentials**: misconfiguration exits at startup. A broker that
   refuses the connection, with or without `mqtt.username`, is reported as
   `MQTT error: Connection refused: ...` and retried with that backoff (see
@@ -296,11 +299,12 @@ Do not set `DEBUG` to a pattern that matches `mqttjs:client` or
 When the broker refuses the connection, with or without `mqtt.username`, the
 Zigbee2MQTT and WLED connection logs `MQTT error: Connection refused: ...`,
 counts it in `hoboken_mqtt_errors_total`, and keeps retrying. It waits 1 second
-before the first retry, doubles the wait after each failed attempt up to 60
-seconds, and returns to 1 second once it connects. The heated bedding connection
-logs an `mqtt_connection_error` event with the reason code, counts it in the
-same metric, and retries with backoff over the same 1 to 60 second range.
-Correcting the broker therefore takes effect without a restart.
+before the first retry and doubles the wait with each further attempt up to 60
+seconds. The wait returns to 1 second only after a connection has stayed up for
+60 seconds. The heated bedding connection logs an `mqtt_connection_error` event
+with the reason code, counts it in the same metric, and retries with backoff
+over the same 1 to 60 second range. Correcting the broker therefore takes
+effect without a restart.
 
 Brokers that restrict topics per user must grant Hoboken these topics:
 
@@ -384,8 +388,8 @@ On Debian or Ubuntu, install the broker build packages with
 `make test-broker-deps`. Then run `make test-integration` on Node.js 26.
 The target builds the pinned Mosquitto release and runs the existing WLED
 tests, heated bedding tests over paired HAP HTTP and MQTT 5 connections, an
-authenticated broker round trip, and a round trip with a broker that refuses
-subscriptions.
+authenticated broker round trip, a round trip with a broker that refuses
+subscriptions, and a round trip with a broker that drops every session.
 Use `NODE=/path/to/node make test-integration` to select the runtime.
 
 Heated bedding integration covers reported state on both zones, fan-write
@@ -407,6 +411,11 @@ chosen topics. It shows that the bridge names only the refused topic, counts
 the refusal once, stays connected, keeps delivering the topic the broker
 granted, says nothing when a reconnect is granted, and reports a refusal that
 begins at a later reconnect.
+
+The dropped-session round trip runs an in-process broker that accepts every
+login and closes each session as soon as the bridge subscribes. It shows that
+the Zigbee2MQTT and WLED connection waits at least 1, 2, and 4 seconds before
+its next three attempts rather than retrying every second.
 
 To qualify the complete controller path, run Tucson's `make homekit` target
 with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 26.

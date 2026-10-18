@@ -173,6 +173,7 @@ export async function startBridge(
   const stateCache = new Map<string, RawState>();
   const lastColorPublish = new Map<string, number>();
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let stableTimer: ReturnType<typeof setTimeout> | undefined;
   let heatedBedding: HeatedBeddingMQTT | undefined;
   let curtains: CurtainMQTT | undefined;
   const curtainAccessories: CurtainAccessory[] = [];
@@ -274,6 +275,7 @@ export async function startBridge(
 
   mqttClient?.on("close", () => {
     log.log("MQTT connection closed");
+    clearTimeout(stableTimer);
     cancelAllRetries();
     metrics?.mqttConnected.set(0);
     metricsServer?.notifyStateChange();
@@ -569,7 +571,13 @@ export async function startBridge(
 
   mqttClient?.on("connect", () => {
     log.log("MQTT connected");
-    mqttClient.options.reconnectPeriod = MIN_BACKOFF;
+    // A broker that accepts the login and then drops the session keeps backing
+    // off unless the connection outlasts the longest delay.
+    clearTimeout(stableTimer);
+    stableTimer = setTimeout(() => {
+      mqttClient.options.reconnectPeriod = MIN_BACKOFF;
+    }, MAX_BACKOFF);
+    stableTimer.unref();
     cancelAllRetries();
     const topics = config.devices.flatMap((d) => {
       switch (d.type) {
@@ -801,6 +809,7 @@ export async function startBridge(
             resolve();
           });
         });
+        clearTimeout(stableTimer);
       }
       const ms = metricsServer;
       if (ms) {
