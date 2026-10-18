@@ -282,10 +282,7 @@ export class HeatedBeddingMQTT {
       clearTimeout(this.#stable);
       this.source.disconnect();
       client.end(true);
-      const delay = Math.min(
-        MAX_BACKOFF,
-        this.#backoff * (1 + 0.25 * this.#random()),
-      );
+      const delay = this.#backoff * (1 - 0.25 * this.#random());
       this.#backoff = Math.min(MAX_BACKOFF, this.#backoff * 2);
       this.#retry = setTimeout(() => {
         this.#retry = undefined;

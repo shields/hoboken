@@ -118,6 +118,7 @@ describe("heated bedding MQTT owner", () => {
   let owner: HeatedBeddingMQTT;
   let logs: string[];
   let changed: number;
+  let random: number;
   let shutdownError: Error | undefined;
   let onChange: (() => void) | undefined;
 
@@ -126,6 +127,7 @@ describe("heated bedding MQTT owner", () => {
     clients = [];
     logs = [];
     changed = 0;
+    random = 0;
     shutdownError = undefined;
     onChange = undefined;
     owner = new HeatedBeddingMQTT("mqtt://user:secret@localhost", [ZONE], {
@@ -134,7 +136,7 @@ describe("heated bedding MQTT owner", () => {
         clients.push(client);
         return client as unknown as MqttClient;
       },
-      random: () => 0,
+      random: () => random,
       changed: () => {
         changed++;
         onChange?.();
@@ -383,6 +385,25 @@ describe("heated bedding MQTT owner", () => {
     jest.advanceTimersByTime(60000);
     clients.at(-1)!.emit("close");
     expectRetry(1000);
+  });
+
+  test("jitter shortens each delay, including at the cap", () => {
+    const retryDelay = (): number => {
+      clients.at(-1)!.emit("error", new Error("network"));
+      const delay = (JSON.parse(logs.at(-1)!) as { retry_ms: number }).retry_ms;
+      jest.advanceTimersByTime(delay);
+      return delay;
+    };
+    for (const delay of [1000, 2000, 4000, 8000, 16000, 32000])
+      expect(retryDelay()).toBe(delay);
+    random = 0.4;
+    expect(retryDelay()).toBe(54000);
+    random = 0.8;
+    expect(retryDelay()).toBe(48000);
+    random = 1;
+    expect(retryDelay()).toBe(45000);
+    random = 0;
+    expect(retryDelay()).toBe(60000);
   });
 
   test("an invalid retained snapshot after subscription readiness keeps backing off", () => {
