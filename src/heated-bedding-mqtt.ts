@@ -40,6 +40,7 @@ const CLOSE_TIMEOUT = 2000;
 const MAX_PAYLOAD = 65536;
 const MIN_BACKOFF = 1000;
 const MAX_BACKOFF = 60000;
+const JITTER_FRACTION = 0.25;
 
 export class HeatedBeddingMQTT {
   readonly source: HeatedBeddingSource;
@@ -112,10 +113,23 @@ export class HeatedBeddingMQTT {
     this.#depth++;
     try {
       run();
-    } finally {
-      this.#depth--;
+    } catch (error: unknown) {
+      try {
+        this.#settle();
+      } catch (observer: unknown) {
+        throw new AggregateError(
+          [error, observer],
+          "Heated bedding MQTT observer failed while an event was failing",
+          { cause: observer },
+        );
+      }
+      throw error;
     }
-    if (this.#depth > 0 || !this.#dirty) return;
+    this.#settle();
+  }
+
+  #settle(): void {
+    if (--this.#depth > 0 || !this.#dirty) return;
     this.#dirty = false;
     this.#changed?.();
   }
@@ -144,12 +158,7 @@ export class HeatedBeddingMQTT {
   }
 
   #attempt(): void {
-    // eslint-disable-next-line unicorn/no-declarations-before-early-exit -- State invalidation can synchronously request shutdown.
     const generation = this.source.connect();
-    if (this.#stopped) {
-      this.source.disconnect();
-      return;
-    }
     const client = this.#connect(this.#url, {
       protocolVersion: 5,
       clean: true,
@@ -282,7 +291,7 @@ export class HeatedBeddingMQTT {
       clearTimeout(this.#stable);
       this.source.disconnect();
       client.end(true);
-      const delay = this.#backoff * (1 - 0.25 * this.#random());
+      const delay = this.#backoff * (1 - JITTER_FRACTION * this.#random());
       this.#backoff = Math.min(MAX_BACKOFF, this.#backoff * 2);
       this.#retry = setTimeout(() => {
         this.#retry = undefined;
@@ -305,11 +314,10 @@ export class HeatedBeddingMQTT {
     clearTimeout(this.#retry);
     const client = this.#client;
     if (!client) return;
-    this.#batch(() => {
-      this.#client = undefined;
-      this.#ready = false;
-      this.source.disconnect();
-    });
+    this.#client = undefined;
+    this.#ready = false;
+    // The client is ended before the observers hear of the disconnect, so an
+    // observer that throws cannot leave it open.
     this.#stopPromise = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error("Heated bedding MQTT shutdown timed out"));
@@ -321,6 +329,17 @@ export class HeatedBeddingMQTT {
         else resolve();
       });
     });
+    try {
+      this.source.disconnect();
+    } catch (error: unknown) {
+      const [closed] = await Promise.allSettled([this.#stopPromise]);
+      throw closed.status === "rejected"
+        ? new AggregateError(
+            [error, closed.reason],
+            `Heated bedding MQTT shutdown failed: ${String(error)}; ${String(closed.reason)}`,
+          )
+        : error;
+    }
     return this.#stopPromise;
   }
 }

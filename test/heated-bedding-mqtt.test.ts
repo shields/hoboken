@@ -113,6 +113,26 @@ class TestMqttClient extends EventEmitter {
   }
 }
 
+// bun:test's toThrow(error) compares only the message, so identity needs the
+// caught value itself.
+function thrownBy(run: () => void): unknown {
+  try {
+    run();
+  } catch (error: unknown) {
+    return error;
+  }
+  throw new Error("Expected the callback to throw");
+}
+
+async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise;
+  } catch (error: unknown) {
+    return error;
+  }
+  throw new Error("Expected the promise to reject");
+}
+
 describe("heated bedding MQTT owner", () => {
   let clients: TestMqttClient[];
   let owner: HeatedBeddingMQTT;
@@ -388,22 +408,23 @@ describe("heated bedding MQTT owner", () => {
   });
 
   test("jitter shortens each delay, including at the cap", () => {
-    const retryDelay = (): number => {
+    for (const [jitter, delay] of [
+      [1, 750],
+      [0.5, 1750],
+      [0.25, 3750],
+      [0.75, 6500],
+      [1, 12000],
+      [0.5, 28000],
+      [0.4, 54000],
+      [0.8, 48000],
+      [1, 45000],
+      [0, 60000],
+    ] as const) {
+      random = jitter;
       clients.at(-1)!.emit("error", new Error("network"));
-      const delay = (JSON.parse(logs.at(-1)!) as { retry_ms: number }).retry_ms;
-      jest.advanceTimersByTime(delay);
-      return delay;
-    };
-    for (const delay of [1000, 2000, 4000, 8000, 16000, 32000])
-      expect(retryDelay()).toBe(delay);
-    random = 0.4;
-    expect(retryDelay()).toBe(54000);
-    random = 0.8;
-    expect(retryDelay()).toBe(48000);
-    random = 1;
-    expect(retryDelay()).toBe(45000);
-    random = 0;
-    expect(retryDelay()).toBe(60000);
+      expect(JSON.parse(logs.at(-1)!)).toMatchObject({ retry_ms: delay });
+      expectRetry(delay);
+    }
   });
 
   test("an invalid retained snapshot after subscription readiness keeps backing off", () => {
@@ -546,23 +567,18 @@ describe("heated bedding MQTT owner", () => {
     expect(clients).toHaveLength(1);
   });
 
-  test.each(["disconnect", "retry"])(
-    "shutdown requested by a %s observer prevents another connection",
-    (phase) => {
-      const client = ready();
-      const stopOnChange = (): void => {
-        onChange = undefined;
-        void owner.stop();
-      };
-      if (phase === "disconnect") onChange = stopOnChange;
-      client.emit("close");
-      if (phase === "retry") onChange = stopOnChange;
-      jest.advanceTimersByTime(60000);
-      expect(clients).toHaveLength(1);
-      expect(client.ended).toBe(1);
-      expect(owner.connected).toBe(false);
-    },
-  );
+  test("shutdown requested by a disconnect observer prevents another connection", () => {
+    const client = ready();
+    onChange = () => {
+      onChange = undefined;
+      void owner.stop();
+    };
+    client.emit("close");
+    jest.advanceTimersByTime(60000);
+    expect(clients).toHaveLength(1);
+    expect(client.ended).toBe(1);
+    expect(owner.connected).toBe(false);
+  });
 
   test("shutdown surfaces the MQTT end error", async () => {
     shutdownError = new Error("Injected shutdown failure");
@@ -570,6 +586,40 @@ describe("heated bedding MQTT owner", () => {
     expect(await Promise.allSettled([owner.stop()])).toEqual([
       { status: "rejected", reason: shutdownError },
     ]);
+  });
+
+  test("shutdown ends the client even when an observer throws", async () => {
+    const client = ready();
+    const error = new Error("Unexpected observer failure");
+    onChange = () => {
+      onChange = undefined;
+      throw error;
+    };
+    expect(await Promise.allSettled([owner.stop()])).toEqual([
+      { status: "rejected", reason: error },
+    ]);
+    expect(client.ended).toBe(1);
+  });
+
+  test("shutdown reports a close failure together with an observer failure", async () => {
+    shutdownError = new Error("Injected shutdown failure");
+    const client = ready();
+    client.endError = shutdownError;
+    const error = new Error("Unexpected observer failure");
+    onChange = () => {
+      onChange = undefined;
+      throw error;
+    };
+    const failure = await rejectionOf(owner.stop());
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors[0]).toBe(error);
+    expect((failure as AggregateError).errors[1]).toBe(shutdownError);
+    expect((failure as AggregateError).errors).toHaveLength(2);
+    expect((failure as AggregateError).message).toContain(error.message);
+    expect((failure as AggregateError).message).toContain(
+      shutdownError.message,
+    );
+    expect(client.ended).toBe(1);
   });
 
   test("shutdown has a finite deadline", async () => {
@@ -582,26 +632,43 @@ describe("heated bedding MQTT owner", () => {
     ]);
   });
 
-  test("unexpected observer errors propagate", async () => {
-    await owner.stop();
-    let explode = false;
-    const error = new Error("Unexpected observer failure");
-    owner = new HeatedBeddingMQTT("mqtt://localhost", [ZONE], {
-      connect: (_url, options) => {
-        const client = new TestMqttClient(options);
-        clients.push(client);
-        return client as unknown as MqttClient;
-      },
-      changed: () => {
-        if (explode) throw error;
-      },
-    });
+  test("an observer error propagates and leaves no notification pending", () => {
     const client = ready();
-    explode = true;
-    expect(() => {
-      client.receive(TOPIC, STATE);
-    }).toThrow(error);
-    explode = false;
+    const error = new Error("Unexpected observer failure");
+    onChange = () => {
+      onChange = undefined;
+      throw error;
+    };
+    changed = 0;
+    expect(
+      thrownBy(() => {
+        client.receive(TOPIC, STATE);
+      }),
+    ).toBe(error);
+    expect(changed).toBe(1);
+    changed = 0;
+    client.receive(`${TOPIC}/result`, {
+      request_id: "unknown",
+      outcome: "confirmed",
+    });
+    expect(changed).toBe(0);
+  });
+
+  test("an unexpected error decoding a message propagates without failing the connection", () => {
+    const client = ready();
+    const error = new TypeError("Unexpected decode failure");
+    const payload = {
+      byteLength: 1,
+      toString: () => {
+        throw error;
+      },
+    };
+    expect(
+      thrownBy(() => {
+        client.emit("message", TOPIC, payload, { retain: false });
+      }),
+    ).toBe(error);
+    expect(owner.connected).toBe(true);
   });
 });
 
@@ -617,14 +684,16 @@ describe("heated bedding MQTT change notifications", () => {
   let owner: HeatedBeddingMQTT;
   let seen: Seen[];
   let errors: number;
-  let constructed: boolean;
+  let failure: Error | undefined;
+  let observerFailure: Error | undefined;
 
   beforeEach(() => {
     jest.useFakeTimers();
     clients = [];
     seen = [];
-    constructed = false;
     errors = 0;
+    failure = undefined;
+    observerFailure = undefined;
     owner = new HeatedBeddingMQTT("mqtt://localhost", [ZONE], {
       connect: (_url, options) => {
         const client = new TestMqttClient(options);
@@ -632,23 +701,26 @@ describe("heated bedding MQTT change notifications", () => {
         return client as unknown as MqttClient;
       },
       random: () => 0,
+      logger: pino({ level: "silent" }),
       failed: () => {
         errors++;
+        if (failure) throw failure;
       },
       changed: () => {
-        if (!constructed) return;
         seen.push({
           connected: owner.connected,
           state: owner.source.usableState(TOPIC),
           pending: owner.source.pendingCount(TOPIC),
           errors,
         });
+        if (observerFailure) throw observerFailure;
       },
     });
-    constructed = true;
   });
 
   afterEach(async () => {
+    failure = undefined;
+    observerFailure = undefined;
     await owner.stop();
     jest.useRealTimers();
   });
@@ -770,10 +842,67 @@ describe("heated bedding MQTT change notifications", () => {
     expect((await outcome)[0].status).toBe("rejected");
   });
 
-  test("shutdown after the connection already failed does not notify", async () => {
+  test("shutdown after the connection already failed cancels the retry without notifying", async () => {
     ready().emit("close");
     seen.length = 0;
     await owner.stop();
+    jest.advanceTimersByTime(60000);
+    expect(clients).toHaveLength(1);
     expect(seen).toEqual([]);
+  });
+
+  test("construction and a retry attempt do not notify", () => {
+    expect(seen).toEqual([]);
+    ready().emit("close");
+    seen.length = 0;
+    jest.advanceTimersByTime(1000);
+    expect(clients).toHaveLength(2);
+    expect(seen).toEqual([]);
+  });
+
+  test("a write on a socket that is down notifies once, with the error counted", async () => {
+    const client = ready();
+    client.connected = false;
+    seen.length = 0;
+    const outcome = await Promise.allSettled([
+      owner.source.writePreheat(TOPIC, true),
+    ]);
+    expect(seen).toEqual([DOWN]);
+    expect(outcome[0].status).toBe("rejected");
+  });
+
+  test("a failure still notifies once when the failure callback throws", () => {
+    const client = ready();
+    failure = new Error("Unexpected metrics failure");
+    seen.length = 0;
+    expect(
+      thrownBy(() => {
+        client.emit("close");
+      }),
+    ).toBe(failure);
+    expect(seen).toEqual([DOWN]);
+    failure = undefined;
+    jest.advanceTimersByTime(1000);
+    expect(clients).toHaveLength(2);
+    const replacement = ready();
+    seen.length = 0;
+    replacement.receive(`${TOPIC}/result`, {
+      request_id: "unknown",
+      outcome: "confirmed",
+    });
+    expect(seen).toEqual([]);
+  });
+
+  test("a failure callback and an observer that both throw are both reported", () => {
+    const client = ready();
+    failure = new Error("Unexpected metrics failure");
+    observerFailure = new Error("Unexpected observer failure");
+    const error = thrownBy(() => {
+      client.emit("close");
+    });
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors[0]).toBe(failure);
+    expect((error as AggregateError).errors[1]).toBe(observerFailure);
+    expect((error as AggregateError).errors).toHaveLength(2);
   });
 });

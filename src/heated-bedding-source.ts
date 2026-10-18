@@ -208,6 +208,7 @@ export class HeatedBeddingSource {
   }
 
   disconnect(): void {
+    const connected = this.#connected;
     this.#generation++;
     this.#connected = false;
     this.#subscribed = false;
@@ -224,7 +225,10 @@ export class HeatedBeddingSource {
       zone.state = undefined;
       this.#cancel(zone);
     }
-    this.#changed?.();
+    // HeatedBeddingMQTT connects only a disconnected source and relies on
+    // connect() staying silent, so no observer can stop it before it has a
+    // client.
+    if (connected) this.#changed?.();
   }
 
   topics(): { topic: string; live: boolean }[] {

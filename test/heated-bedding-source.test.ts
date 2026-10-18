@@ -455,6 +455,16 @@ describe("heated bedding source", () => {
     ).toEqual(steps.map(() => 1));
   });
 
+  test("only a connected source notifies when it disconnects", () => {
+    source.disconnect();
+    changed = 0;
+    source.disconnect();
+    generation = source.connect();
+    expect(changed).toBe(0);
+    source.disconnect();
+    expect(changed).toBe(1);
+  });
+
   test("a new session cancels pending work and requires a matching snapshot", async () => {
     ready();
     const outcome = Promise.allSettled([source.writePreheat(TOPIC, true)]);
