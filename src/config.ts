@@ -539,6 +539,15 @@ export function stripMQTTUserinfo(url: string): string {
   return url.replace(MQTT_URL_USERINFO_RE, "$1");
 }
 
+function decodePasswordFile(bytes: Uint8Array): string {
+  try {
+    // TextDecoder drops a leading byte order mark unless ignoreBOM is set.
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error: unknown) {
+    throw new Error("mqtt.passwordFile is not valid UTF-8", { cause: error });
+  }
+}
+
 export function resolveMQTTCredentials(
   mqtt: MqttConfig,
   env: Readonly<Record<string, string | undefined>>,
@@ -563,7 +572,10 @@ export function resolveMQTTCredentials(
   let password: string;
   if (passwordFile !== undefined) {
     source = "mqtt.passwordFile";
-    password = readFileSync(passwordFile, "utf8").replace(/\n$/, "");
+    password = decodePasswordFile(readFileSync(passwordFile)).replace(
+      /\r?\n$/,
+      "",
+    );
   } else if (envPassword === undefined) {
     throw new Error(
       "mqtt.username requires mqtt.passwordFile or the MQTT_PASSWORD environment variable",

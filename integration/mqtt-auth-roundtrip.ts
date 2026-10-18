@@ -632,6 +632,17 @@ describe(
         });
       });
 
+      test("main.ts authenticates with the password from a file with a byte order mark and CRLF", async () => {
+        assert(directory);
+        const passwordFile = path.join(directory, "main-crlf-password");
+        writeFileSync(passwordFile, `\u{FEFF}${HOBOKEN_SENTINEL}\r\n`, {
+          mode: 0o600,
+        });
+        await expectMainAuthenticates("crlf-file-start", "0E:36:29:42:81:1D", {
+          passwordFile,
+        });
+      });
+
       test("configured credentials win over userinfo in the broker URL", async () => {
         assert(broker && credentials);
         const address = `127.0.0.1:${String(broker.port)}`;

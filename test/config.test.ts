@@ -1024,7 +1024,7 @@ describe("resolveMQTTCredentials", () => {
     return { url: MQTT_URL, ...extra };
   }
 
-  function passwordFile(content: string): string {
+  function passwordFile(content: string | Uint8Array): string {
     const file = path.join(tmpDir, "password");
     writeFileSync(file, content);
     return file;
@@ -1068,9 +1068,17 @@ describe("resolveMQTTCredentials", () => {
     ["s3cret\n\n", "s3cret\n"],
     [" a b \n", " a b "],
     ["multi\nline\n", "multi\nline"],
-    ["x\r\n", "x\r"],
+    ["x\r\n", "x"],
+    ["x\r", "x\r"],
+    ["x\r\r\n", "x\r"],
+    ["x\r\n\r\n", "x\r\n"],
+    ["x\n\r\n", "x\n"],
+    ["a\r\nb\r\n", "a\r\nb"],
     ["a\n\nb\n", "a\n\nb"],
     ["pässwörd€\n", "pässwörd€"],
+    ["pässwörd€\r\n", "pässwörd€"],
+    ["🔑\r\n", "🔑"],
+    ["a\0b\n", "a\0b"],
   ])("reads password file content %j as %j", (content, expected) => {
     expect(
       resolveMQTTCredentials(
@@ -1079,6 +1087,25 @@ describe("resolveMQTTCredentials", () => {
       ),
     ).toStrictEqual({ username: "hoboken", password: expected });
   });
+
+  test.each([
+    ["no line ending", "\u{FEFF}s3cret", "s3cret"],
+    ["a line feed", "\u{FEFF}s3cret\n", "s3cret"],
+    ["a carriage return and line feed", "\u{FEFF}s3cret\r\n", "s3cret"],
+    ["non-ASCII text", "\u{FEFF}pässwörd€\r\n", "pässwörd€"],
+    ["a second one", "\u{FEFF}\u{FEFF}s3cret\n", "\u{FEFF}s3cret"],
+    ["one before the line ending", "s3cret\u{FEFF}\n", "s3cret\u{FEFF}"],
+  ])(
+    "reads a password file with a byte order mark and %s",
+    (_case, content, expected) => {
+      expect(
+        resolveMQTTCredentials(
+          mqtt({ username: "hoboken", passwordFile: passwordFile(content) }),
+          {},
+        ),
+      ).toStrictEqual({ username: "hoboken", password: expected });
+    },
+  );
 
   test("ignores an unrelated environment password source when reading the file", () => {
     expect(
@@ -1193,13 +1220,99 @@ describe("resolveMQTTCredentials", () => {
     ).toThrow("mqtt.passwordFile must be at most 65535 bytes");
   });
 
-  test.each([[""], ["\n"]])("rejects password file content %j", (content) => {
+  test("limits a password file to 65535 bytes after its byte order mark and CRLF", () => {
+    const username = "hoboken";
+    expect(
+      resolveMQTTCredentials(
+        mqtt({
+          username,
+          passwordFile: passwordFile("\u{FEFF}" + "€".repeat(21845) + "\r\n"),
+        }),
+        {},
+      ),
+    ).toStrictEqual({ username, password: "€".repeat(21845) });
+    expect(() =>
+      resolveMQTTCredentials(
+        mqtt({
+          username,
+          passwordFile: passwordFile("\u{FEFF}" + "€".repeat(21846) + "\r\n"),
+        }),
+        {},
+      ),
+    ).toThrow("mqtt.passwordFile must be at most 65535 bytes");
+  });
+
+  test.each([
+    ["no content", ""],
+    ["only a line feed", "\n"],
+    ["only a carriage return and line feed", "\r\n"],
+    ["only a byte order mark", "\u{FEFF}"],
+    ["only a byte order mark and line feed", "\u{FEFF}\n"],
+    ["only a byte order mark and CRLF", "\u{FEFF}\r\n"],
+  ])("rejects a password file with %s", (_case, content) => {
     expect(() =>
       resolveMQTTCredentials(
         mqtt({ username: "hoboken", passwordFile: passwordFile(content) }),
         {},
       ),
     ).toThrow("mqtt.passwordFile is empty");
+  });
+
+  describe("rejects a password file that is not valid UTF-8", () => {
+    const secret = Buffer.from(PASSWORD);
+
+    test.each([
+      [
+        "UTF-16LE with a byte order mark",
+        Buffer.from("\u{FEFF}s3cret\n", "utf16le"),
+      ],
+      [
+        "UTF-16BE with a byte order mark",
+        Buffer.from("\u{FEFF}s3cret\n", "utf16le").swap16(),
+      ],
+      ["a lone continuation byte", Buffer.from([0x80])],
+      ["a truncated sequence", Buffer.from([0x61, 0xe2, 0x82])],
+      ["an overlong encoding", Buffer.from([0xc0, 0xaf])],
+      ["an encoded surrogate", Buffer.from([0xed, 0xa0, 0x80])],
+      ["a Latin-1 byte", Buffer.from([0x70, 0xe4, 0x73, 0x73, 0x0a])],
+      [
+        "an invalid byte after the secret",
+        Buffer.concat([secret, Buffer.from([0xff, 0x0a])]),
+      ],
+      [
+        "an invalid byte after a byte order mark",
+        Buffer.concat([
+          Buffer.from([0xef, 0xbb, 0xbf]),
+          secret,
+          Buffer.from([0xff]),
+        ]),
+      ],
+    ])("with %s", (_description, content) => {
+      const file = passwordFile(content);
+      const message = errorMessage(() =>
+        resolveMQTTCredentials(
+          mqtt({ username: "hoboken", passwordFile: file }),
+          {},
+        ),
+      );
+      expect(message).toBe("mqtt.passwordFile is not valid UTF-8");
+      expect(message).not.toContain(PASSWORD);
+      expect(message).not.toContain(file);
+    });
+
+    test("before applying the size limit", () => {
+      expect(() =>
+        resolveMQTTCredentials(
+          mqtt({
+            username: "hoboken",
+            passwordFile: passwordFile(
+              Buffer.concat([Buffer.alloc(65536, 0x61), Buffer.from([0xff])]),
+            ),
+          }),
+          {},
+        ),
+      ).toThrow("mqtt.passwordFile is not valid UTF-8");
+    });
   });
 
   test("does not name the password file in the empty file message", () => {

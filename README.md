@@ -236,10 +236,13 @@ host's LAN interface name (e.g., `eno1`) so HomeKit clients can reach the bridge
 
 Brokers that require a login take an optional `mqtt.username` and a password
 from exactly one of two sources. `mqtt.passwordFile` names a file that contains
-the password; Hoboken reads it once at startup as UTF-8 and removes one
-trailing line feed, so a file made with `echo` or `kubectl create secret
---from-file` works as written. A carriage return before that line feed or a
-byte order mark stays part of the password. Without `mqtt.passwordFile`, the
+the password; Hoboken reads it once at startup as UTF-8, removes a leading byte
+order mark, and removes one trailing line ending, either a line feed or a
+carriage return and line feed, so a file made with `echo`, `kubectl create
+secret --from-file`, or a Windows editor works as written. A lone trailing
+carriage return stays part of the password. The file must be valid UTF-8;
+invalid bytes, including a UTF-16 file with a byte order mark, fail startup
+instead of becoming a different password. Without `mqtt.passwordFile`, the
 password comes from the `MQTT_PASSWORD` environment variable, whose value is
 used exactly as set, including any trailing newline. Prefer the file, because
 child processes inherit environment variables. The connection for Zigbee2MQTT
@@ -247,8 +250,9 @@ and WLED devices and the heated bedding connection use the same credentials.
 
 Hoboken refuses to start when `mqtt.username` has no password source, when a
 password source has no `mqtt.username`, when `mqtt.passwordFile` and
-`MQTT_PASSWORD` are both set, when the password file cannot be read or is empty
-(a file holding only a newline is empty), when `MQTT_PASSWORD` is empty, when
+`MQTT_PASSWORD` are both set, when the password file cannot be read, is not
+valid UTF-8, or is empty (a file holding only a line ending, with or without a
+byte order mark, is empty), when `MQTT_PASSWORD` is empty, when
 `mqtt.username` or `mqtt.passwordFile` is not a non-empty string, when the
 username or password is longer than 65535 bytes, when `mqtt.username` is
 combined with credentials in `mqtt.url`, when `config.yaml` contains

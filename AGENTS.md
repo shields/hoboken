@@ -199,11 +199,12 @@ make lint test
 - `mqtt` accepts only `url`, `username`, and `passwordFile`; any other key is
   rejected by name without its value, so a misspelled login cannot connect
   anonymously
-- MQTT password: from `mqtt.passwordFile` (UTF-8, one trailing line feed
-  removed) or else `MQTT_PASSWORD`. A username needs a source, a source needs a
-  username, the two sources cannot be combined, and an unreadable, empty, or
-  oversized (over 65535 bytes) password fails startup. Messages never contain
-  the password.
+- MQTT password: from `mqtt.passwordFile` (strictly decoded UTF-8; a leading
+  byte order mark and one trailing line ending, LF or CRLF, removed, so a lone
+  trailing CR stays) or else `MQTT_PASSWORD`. A username needs a source, a
+  source needs a username, the two sources cannot be combined, and an
+  unreadable, invalid UTF-8, empty, or oversized (over 65535 bytes) password
+  fails startup. Messages never contain the password.
 - `devices`: non-empty array unless `heatedBedding` configures at least one zone;
   a configuration with only heated bedding can omit `devices` or use an empty array
 - Each device: `name`, `topic`, `capabilities` (non-empty, valid values)
