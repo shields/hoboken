@@ -19,6 +19,8 @@ import {
   type MqttClient,
 } from "mqtt";
 import pino, { type Logger } from "pino";
+import { credentialOptions, type MQTTCredentials } from "./config.ts";
+
 export interface TucsonMQTTSource {
   connect: () => number;
   disconnect: () => void;
@@ -42,6 +44,7 @@ export type SourceFactory<S> = (
 ) => S;
 
 export interface MqttOptions {
+  credentials?: MQTTCredentials | undefined;
   connect?: (url: string, options: IClientOptions) => MqttClient;
   random?: () => number;
   changed?: () => void;
@@ -62,6 +65,7 @@ const JITTER_FRACTION = 0.25;
 export class TucsonMQTT<S extends TucsonMQTTSource> {
   readonly source: S;
   #url: string;
+  #credentials: MQTTCredentials | undefined;
   #connect: (url: string, options: IClientOptions) => MqttClient;
   #random: () => number;
   #changed: MqttOptions["changed"];
@@ -88,6 +92,7 @@ export class TucsonMQTT<S extends TucsonMQTTSource> {
     options: MqttOptions = {},
   ) {
     this.#url = url;
+    this.#credentials = options.credentials;
     this.#connect = options.connect ?? connect;
     this.#random = options.random ?? Math.random;
     this.#changed = options.changed;
@@ -185,6 +190,7 @@ export class TucsonMQTT<S extends TucsonMQTTSource> {
   #attempt(): void {
     const generation = this.source.connect();
     const client = this.#connect(this.#url, {
+      ...(this.#credentials && credentialOptions(this.#credentials)),
       protocolVersion: 5,
       clean: true,
       properties: { sessionExpiryInterval: 0, maximumPacketSize: MAX_PAYLOAD },

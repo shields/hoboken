@@ -12,11 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { describe, expect, test } from "bun:test";
-import { loadConfig, validateConfig } from "../src/config.ts";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  credentialOptions,
+  loadConfig,
+  resolveMQTTCredentials,
+  stripMQTTUserinfo,
+  validateConfig,
+} from "../src/config.ts";
+import type { MqttConfig } from "../src/config.ts";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
+
+const PASSWORD = "correct-horse-9f3a";
+const MQTT_URL = "mqtt://localhost:1883";
+
+function errorMessage(fn: () => unknown): string {
+  try {
+    fn();
+  } catch (error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error("expected the call to throw");
+}
 
 function validConfig() {
   return {
@@ -469,6 +488,133 @@ describe("validateConfig", () => {
     );
   });
 
+  describe("mqtt credentials", () => {
+    function withMQTT(mqtt: Record<string, unknown>) {
+      return { ...validConfig(), mqtt: { url: MQTT_URL, ...mqtt } };
+    }
+
+    test("accepts username and passwordFile", () => {
+      const mqtt = {
+        url: MQTT_URL,
+        username: "hoboken",
+        passwordFile: "/run/secrets/mqtt_password",
+      };
+      expect(validateConfig(withMQTT(mqtt)).mqtt).toStrictEqual(mqtt);
+    });
+
+    test("accepts username alone", () => {
+      expect(
+        validateConfig(withMQTT({ username: "hoboken" })).mqtt,
+      ).toStrictEqual({ url: MQTT_URL, username: "hoboken" });
+    });
+
+    test("accepts passwordFile alone", () => {
+      expect(
+        validateConfig(withMQTT({ passwordFile: "/run/secrets/mqtt_password" }))
+          .mqtt,
+      ).toStrictEqual({
+        url: MQTT_URL,
+        passwordFile: "/run/secrets/mqtt_password",
+      });
+    });
+
+    test("omits credentials when not configured", () => {
+      expect(validateConfig(validConfig()).mqtt).toStrictEqual({
+        url: MQTT_URL,
+      });
+    });
+
+    test.each([[""], [5], [null], [false], [{}], [[]]])(
+      "rejects invalid mqtt.username: %j",
+      (username) => {
+        expect(() => validateConfig(withMQTT({ username }))).toThrow(
+          "mqtt.username must be a non-empty string",
+        );
+      },
+    );
+
+    test.each(["a".repeat(65535), "€".repeat(21845)])(
+      "accepts an mqtt.username of 65535 bytes",
+      (username) => {
+        expect(validateConfig(withMQTT({ username })).mqtt).toStrictEqual({
+          url: MQTT_URL,
+          username,
+        });
+      },
+    );
+
+    test.each(["a".repeat(65536), "€".repeat(21846)])(
+      "rejects an mqtt.username over 65535 bytes",
+      (username) => {
+        expect(() => validateConfig(withMQTT({ username }))).toThrow(
+          "mqtt.username must be at most 65535 bytes",
+        );
+      },
+    );
+
+    test.each([[""], [5], [null], [false], [{}], [[]]])(
+      "rejects invalid mqtt.passwordFile: %j",
+      (passwordFile) => {
+        expect(() => validateConfig(withMQTT({ passwordFile }))).toThrow(
+          "mqtt.passwordFile must be a non-empty string",
+        );
+      },
+    );
+
+    test.each([["hunter2"], [null]])(
+      "rejects mqtt.password with value %j",
+      (password) => {
+        const data = withMQTT({ username: "hoboken", password });
+        expect(() => validateConfig(data)).toThrow(
+          "mqtt.password is not supported; use mqtt.passwordFile or the MQTT_PASSWORD environment variable",
+        );
+        expect(errorMessage(() => validateConfig(data))).not.toContain(
+          "hunter2",
+        );
+      },
+    );
+
+    test.each([
+      "mqtt://user:pw@broker:1883",
+      "mqtt://user@broker",
+      "mqtt://:pw@broker",
+      "mqtts://user:pw@broker/path",
+      "//user:pw@broker",
+      "mqtt:user@broker:1883",
+      "mqtt:user:pw@broker:1883",
+      String.raw`mqtt:\\user:pw@broker:1883`,
+      String.raw`mqtt:/\user:pw@broker:1883`,
+      String.raw`mqtt:\/user:pw@broker:1883`,
+      String.raw`\\user:pw@broker`,
+    ])("rejects mqtt.username combined with URL credentials: %s", (url) => {
+      const data = withMQTT({ url, username: "hoboken" });
+      expect(() => validateConfig(data)).toThrow(
+        "mqtt.username cannot be combined with credentials in mqtt.url; use one or the other",
+      );
+      expect(errorMessage(() => validateConfig(data))).not.toContain("pw");
+    });
+
+    test.each([
+      "mqtt://broker:1883/a@b",
+      "mqtt://broker:1883?x=a@b",
+      "mqtt://broker:1883#a@b",
+      "mqtt://broker:1883/a//b@c",
+      "ws://broker:9001/mqtt?next=//x@y",
+      "mqtt://broker:1883#//x@y",
+      "mqtt://[::1]:1883",
+      "mqtt://@broker",
+    ])("accepts a URL without userinfo: %s", (url) => {
+      expect(
+        validateConfig(withMQTT({ url, username: "hoboken" })).mqtt,
+      ).toStrictEqual({ url, username: "hoboken" });
+    });
+
+    test("accepts URL credentials without mqtt.username", () => {
+      const url = "mqtt://user:pw@broker";
+      expect(validateConfig(withMQTT({ url })).mqtt).toStrictEqual({ url });
+    });
+  });
+
   test("rejects empty devices array", () => {
     const data = validConfig();
     data.devices = [];
@@ -736,8 +882,15 @@ describe("validateConfig", () => {
 describe("loadConfig", () => {
   let tmpDir: string;
 
-  test("loads valid YAML file", () => {
+  beforeEach(() => {
     tmpDir = mkdtempSync(path.join(tmpdir(), "hoboken-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  function writeConfig(mqttLines: string): string {
     const configPath = path.join(tmpDir, "config.yaml");
     writeFileSync(
       configPath,
@@ -748,19 +901,361 @@ bridge:
   pincode: "111-22-333"
   port: 51826
 mqtt:
-  url: "mqtt://localhost:1883"
+${mqttLines}
 devices:
   - name: "Light"
     topic: "light"
     capabilities: [on_off]
 `,
     );
-    const config = loadConfig(configPath);
+    return configPath;
+  }
+
+  test("loads valid YAML file", () => {
+    const config = loadConfig(writeConfig('  url: "mqtt://localhost:1883"'));
     expect(config.bridge.name).toBe("Test");
-    rmSync(tmpDir, { recursive: true });
+  });
+
+  test("loads the broker login and password file path without reading the file", () => {
+    const passwordFile = path.join(tmpDir, "password");
+    writeFileSync(passwordFile, `${PASSWORD}\n`);
+    const config = loadConfig(
+      writeConfig(
+        [
+          '  url: "mqtt://localhost:1883"',
+          "  username: hoboken",
+          `  passwordFile: ${passwordFile}`,
+        ].join("\n"),
+      ),
+    );
+    expect(config.mqtt).toStrictEqual({
+      url: MQTT_URL,
+      username: "hoboken",
+      passwordFile,
+    });
+    const serialized = JSON.stringify(config);
+    expect(serialized).toContain(passwordFile);
+    expect(serialized).not.toContain(PASSWORD);
+  });
+
+  test("rejects a bare username key", () => {
+    const configPath = writeConfig(
+      ['  url: "mqtt://localhost:1883"', "  username:"].join("\n"),
+    );
+    expect(() => loadConfig(configPath)).toThrow(
+      "mqtt.username must be a non-empty string",
+    );
   });
 
   test("throws on missing file", () => {
     expect(() => loadConfig("/nonexistent/path.yaml")).toThrow();
+  });
+});
+
+describe("resolveMQTTCredentials", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(path.join(tmpdir(), "hoboken-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true });
+  });
+
+  function mqtt(extra: Partial<MqttConfig> = {}): MqttConfig {
+    return { url: MQTT_URL, ...extra };
+  }
+
+  function passwordFile(content: string): string {
+    const file = path.join(tmpDir, "password");
+    writeFileSync(file, content);
+    return file;
+  }
+
+  test.each([[{}], [{ UNRELATED: "x" }]])(
+    "returns undefined when nothing is configured with env %j",
+    (env) => {
+      expect(resolveMQTTCredentials(mqtt(), env)).toBeUndefined();
+    },
+  );
+
+  test("returns undefined for credentials embedded in the URL", () => {
+    expect(
+      resolveMQTTCredentials(mqtt({ url: "mqtt://u:p@h" }), {}),
+    ).toBeUndefined();
+  });
+
+  test("reads the password from the environment", () => {
+    expect(
+      resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
+        MQTT_PASSWORD: PASSWORD,
+      }),
+    ).toStrictEqual({ username: "hoboken", password: PASSWORD });
+  });
+
+  test.each([["pw\n"], [" a b "], ["pässwörd€"]])(
+    "uses the environment password verbatim: %j",
+    (value) => {
+      expect(
+        resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
+          MQTT_PASSWORD: value,
+        }),
+      ).toStrictEqual({ username: "hoboken", password: value });
+    },
+  );
+
+  test.each([
+    ["s3cret", "s3cret"],
+    ["s3cret\n", "s3cret"],
+    ["s3cret\n\n", "s3cret\n"],
+    [" a b \n", " a b "],
+    ["multi\nline\n", "multi\nline"],
+    ["x\r\n", "x\r"],
+    ["a\n\nb\n", "a\n\nb"],
+    ["pässwörd€\n", "pässwörd€"],
+  ])("reads password file content %j as %j", (content, expected) => {
+    expect(
+      resolveMQTTCredentials(
+        mqtt({ username: "hoboken", passwordFile: passwordFile(content) }),
+        {},
+      ),
+    ).toStrictEqual({ username: "hoboken", password: expected });
+  });
+
+  test("ignores an unrelated environment password source when reading the file", () => {
+    expect(
+      resolveMQTTCredentials(
+        mqtt({ username: "hoboken", passwordFile: passwordFile("s3cret\n") }),
+        { UNRELATED: "x" },
+      ),
+    ).toStrictEqual({ username: "hoboken", password: "s3cret" });
+  });
+
+  test("requires a password source for a username", () => {
+    expect(() =>
+      resolveMQTTCredentials(mqtt({ username: "hoboken" }), {}),
+    ).toThrow(
+      "mqtt.username requires mqtt.passwordFile or the MQTT_PASSWORD environment variable",
+    );
+  });
+
+  test("requires a username for a password file", () => {
+    expect(() =>
+      resolveMQTTCredentials(mqtt({ passwordFile: passwordFile("x") }), {}),
+    ).toThrow("mqtt.passwordFile requires mqtt.username");
+  });
+
+  test.each([["x"], [""]])(
+    "requires a username for the environment password %j",
+    (value) => {
+      expect(() =>
+        resolveMQTTCredentials(mqtt(), { MQTT_PASSWORD: value }),
+      ).toThrow("MQTT_PASSWORD requires mqtt.username");
+    },
+  );
+
+  test.each([
+    [undefined, PASSWORD],
+    [undefined, ""],
+    ["hoboken", PASSWORD],
+    ["hoboken", ""],
+  ])(
+    "rejects both password sources before reading the file with username %s and environment password %j",
+    (username, envPassword) => {
+      const missing = path.join(tmpDir, "missing");
+      expect(() =>
+        resolveMQTTCredentials(
+          mqtt({
+            ...(username === undefined ? {} : { username }),
+            passwordFile: missing,
+          }),
+          { MQTT_PASSWORD: envPassword },
+        ),
+      ).toThrow(
+        "mqtt.passwordFile and MQTT_PASSWORD cannot be combined; use one or the other",
+      );
+    },
+  );
+
+  test("requires a username for a password file before reading it", () => {
+    expect(() =>
+      resolveMQTTCredentials(
+        mqtt({ passwordFile: path.join(tmpDir, "missing") }),
+        {},
+      ),
+    ).toThrow("mqtt.passwordFile requires mqtt.username");
+  });
+
+  test("rejects an empty environment password", () => {
+    expect(() =>
+      resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
+        MQTT_PASSWORD: "",
+      }),
+    ).toThrow("MQTT_PASSWORD is empty");
+  });
+
+  test.each(["a".repeat(65535), "€".repeat(21845)])(
+    "accepts an environment password of 65535 bytes",
+    (password) => {
+      expect(
+        resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
+          MQTT_PASSWORD: password,
+        }),
+      ).toStrictEqual({ username: "hoboken", password });
+    },
+  );
+
+  test.each(["a".repeat(65536), "€".repeat(21846)])(
+    "rejects an environment password over 65535 bytes",
+    (password) => {
+      expect(() =>
+        resolveMQTTCredentials(mqtt({ username: "hoboken" }), {
+          MQTT_PASSWORD: password,
+        }),
+      ).toThrow("MQTT_PASSWORD must be at most 65535 bytes");
+    },
+  );
+
+  test("limits a password file to 65535 bytes after its trailing newline", () => {
+    const username = "hoboken";
+    expect(
+      resolveMQTTCredentials(
+        mqtt({
+          username,
+          passwordFile: passwordFile("a".repeat(65535) + "\n"),
+        }),
+        {},
+      ),
+    ).toStrictEqual({ username, password: "a".repeat(65535) });
+    expect(() =>
+      resolveMQTTCredentials(
+        mqtt({ username, passwordFile: passwordFile("a".repeat(65536)) }),
+        {},
+      ),
+    ).toThrow("mqtt.passwordFile must be at most 65535 bytes");
+  });
+
+  test.each([[""], ["\n"]])("rejects password file content %j", (content) => {
+    expect(() =>
+      resolveMQTTCredentials(
+        mqtt({ username: "hoboken", passwordFile: passwordFile(content) }),
+        {},
+      ),
+    ).toThrow("mqtt.passwordFile is empty");
+  });
+
+  test("does not name the password file in the empty file message", () => {
+    const file = passwordFile("");
+    expect(
+      errorMessage(() =>
+        resolveMQTTCredentials(
+          mqtt({ username: "hoboken", passwordFile: file }),
+          {},
+        ),
+      ),
+    ).not.toContain(file);
+  });
+
+  test("propagates the error for a missing password file", () => {
+    expect(() =>
+      resolveMQTTCredentials(
+        mqtt({
+          username: "hoboken",
+          passwordFile: path.join(tmpDir, "missing"),
+        }),
+        {},
+      ),
+    ).toThrow("ENOENT");
+  });
+
+  test("propagates the error for a password file that is a directory", () => {
+    expect(() =>
+      resolveMQTTCredentials(
+        mqtt({ username: "hoboken", passwordFile: tmpDir }),
+        {},
+      ),
+    ).toThrow("EISDIR");
+  });
+
+  describe("error messages never contain the password", () => {
+    test("with the secret in the file and no username", () => {
+      const file = passwordFile(`${PASSWORD}\n`);
+      expect(
+        errorMessage(() =>
+          resolveMQTTCredentials(mqtt({ passwordFile: file }), {}),
+        ),
+      ).not.toContain(PASSWORD);
+    });
+
+    test("with the secret in the environment and no username", () => {
+      expect(
+        errorMessage(() =>
+          resolveMQTTCredentials(mqtt(), { MQTT_PASSWORD: PASSWORD }),
+        ),
+      ).not.toContain(PASSWORD);
+    });
+
+    test("with the secret in both the file and the environment", () => {
+      const file = passwordFile(`${PASSWORD}\n`);
+      expect(
+        errorMessage(() =>
+          resolveMQTTCredentials(
+            mqtt({ username: "hoboken", passwordFile: file }),
+            { MQTT_PASSWORD: PASSWORD },
+          ),
+        ),
+      ).not.toContain(PASSWORD);
+    });
+  });
+
+  test.each([
+    ["file", () => ({ passwordFile: passwordFile(`${PASSWORD}\n`) }), {}],
+    ["environment", () => ({}), { MQTT_PASSWORD: PASSWORD }],
+  ] as const)(
+    "does not modify or retain the %s password in its input",
+    (_source, extra, env) => {
+      const input = Object.freeze(mqtt({ username: "hoboken", ...extra() }));
+      const before = JSON.stringify(input);
+      expect(resolveMQTTCredentials(input, env)).toStrictEqual({
+        username: "hoboken",
+        password: PASSWORD,
+      });
+      expect(JSON.stringify(input)).toBe(before);
+      expect(before).not.toContain(PASSWORD);
+    },
+  );
+});
+
+describe("credentialOptions", () => {
+  test("adds an empty auth to the login", () => {
+    expect(
+      credentialOptions({ username: "hoboken", password: PASSWORD }),
+    ).toStrictEqual({ username: "hoboken", password: PASSWORD, auth: "" });
+  });
+});
+
+describe("stripMQTTUserinfo", () => {
+  test.each([
+    ["mqtt://user:pw@broker:1883", "mqtt://broker:1883"],
+    ["mqtt://user@broker", "mqtt://broker"],
+    ["mqtts://user:pw@broker/path", "mqtts://broker/path"],
+    ["mqtt://u:p@ss@broker", "mqtt://broker"],
+    ["//user:pw@broker", "//broker"],
+    ["mqtt:user:pw@broker:1883", "mqtt:broker:1883"],
+    [String.raw`mqtt:\\user:pw@broker`, String.raw`mqtt:\\broker`],
+  ])("removes the userinfo from %s", (url, expected) => {
+    expect(stripMQTTUserinfo(url)).toBe(expected);
+  });
+
+  test.each([
+    "mqtt://broker:1883",
+    "mqtt://broker:1883/a@b",
+    "mqtt://broker:1883?x=a@b",
+    "mqtt://broker:1883#a@b",
+    "mqtt://[::1]:1883",
+    "not a valid url",
+  ])("leaves %s unchanged", (url) => {
+    expect(stripMQTTUserinfo(url)).toBe(url);
   });
 });

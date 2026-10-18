@@ -23,6 +23,7 @@ import type {
   IClientPublishOptions,
 } from "mqtt";
 import pino from "pino";
+import type { MQTTCredentials } from "../src/config.ts";
 import { HeatedBeddingMQTT } from "../src/heated-bedding-mqtt.ts";
 
 const ZONE = {
@@ -37,6 +38,11 @@ const STATE = {
   power: false,
   heat_level: 4,
   preheat: false,
+};
+const PASSWORD = "correct-horse-9f3a";
+const CREDENTIALS: MQTTCredentials = {
+  username: "tucson-hoboken",
+  password: PASSWORD,
 };
 
 // eslint-disable-next-line unicorn/prefer-event-target -- MQTT exposes EventEmitter callbacks.
@@ -150,16 +156,12 @@ describe("heated bedding MQTT owner", () => {
   let onChange: (() => void) | undefined;
   let onPublish: (() => void) | undefined;
 
-  beforeEach(() => {
-    jest.useFakeTimers();
-    clients = [];
-    logs = [];
-    changed = 0;
-    random = 0;
-    shutdownError = undefined;
-    onChange = undefined;
-    onPublish = undefined;
-    owner = new HeatedBeddingMQTT("mqtt://user:secret@localhost", [ZONE], {
+  function createOwner(
+    url: string,
+    credentials?: MQTTCredentials,
+  ): HeatedBeddingMQTT {
+    return new HeatedBeddingMQTT(url, [ZONE], {
+      credentials,
       connect: (_url, options) => {
         const client = new TestMqttClient(options);
         clients.push(client);
@@ -182,6 +184,18 @@ describe("heated bedding MQTT owner", () => {
         },
       ),
     });
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    clients = [];
+    logs = [];
+    changed = 0;
+    random = 0;
+    shutdownError = undefined;
+    onChange = undefined;
+    onPublish = undefined;
+    owner = createOwner("mqtt://user:secret@localhost");
   });
 
   afterEach(async () => {
@@ -226,6 +240,68 @@ describe("heated bedding MQTT owner", () => {
     expect(owner.connected).toBe(true);
     expect(owner.source.getState(TOPIC)).toMatchObject(STATE);
     expect(changed).toBeGreaterThan(0);
+  });
+
+  test("adds no login options unless credentials are configured, leaving URL userinfo to mqtt.js", () => {
+    expect(clients).toHaveLength(1);
+    for (const key of ["username", "password", "auth"])
+      expect(key in clients[0]!.options).toBe(false);
+  });
+
+  test("authenticates every connection attempt", async () => {
+    await owner.stop();
+    const first = clients.length;
+    owner = createOwner("mqtt://localhost", CREDENTIALS);
+    const failures: [string, unknown?][] = [
+      ["close"],
+      [
+        "error",
+        Object.assign(new Error("Connection refused: Not authorized"), {
+          code: 135,
+        }),
+      ],
+      ["offline"],
+      ["disconnect"],
+      ["error", new Error("failure")],
+    ];
+    for (const [event, error] of failures) {
+      clients.at(-1)!.emit(event, error);
+      jest.advanceTimersToNextTimer();
+    }
+    expect(clients).toHaveLength(first + failures.length + 1);
+    for (const client of clients.slice(first)) {
+      expect(client.options).toMatchObject({
+        ...CREDENTIALS,
+        auth: "",
+        protocolVersion: 5,
+      });
+    }
+  });
+
+  test("never logs the password", async () => {
+    await owner.stop();
+    owner = createOwner("mqtt://localhost", CREDENTIALS);
+    expect(clients.at(-1)!.options.password).toBe(PASSWORD);
+    const failures: [string, unknown][] = [
+      ["error", new Error(PASSWORD)],
+      ["close", new Error(PASSWORD)],
+      ["offline", new Error(PASSWORD)],
+      ["disconnect", new Error(PASSWORD)],
+      ["error", Object.assign(new Error("Connection refused"), { code: 135 })],
+    ];
+    for (const [event, error] of failures) {
+      ready().emit(event, error);
+      jest.advanceTimersToNextTimer();
+    }
+    ready().receive(TOPIC, `not JSON ${PASSWORD}`);
+    jest.advanceTimersToNextTimer();
+    ready();
+    await owner.stop();
+    const output = logs.join(" ");
+    expect(output).toContain("mqtt_connection_error");
+    expect(output).toContain('"code":135');
+    expect(output).toContain("mqtt_ready");
+    expect(output).not.toContain(PASSWORD);
   });
 
   test("publishes QoS 0 commands and waits for result plus reported state", async () => {

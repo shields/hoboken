@@ -63,6 +63,10 @@ spec:
               readOnly: true
             - name: persist
               mountPath: /persist
+            # Uncomment when mqtt.passwordFile is /run/secrets/mqtt_password:
+            # - name: secrets
+            #   mountPath: /run/secrets
+            #   readOnly: true
       volumes:
         - name: config
           configMap:
@@ -70,6 +74,13 @@ spec:
         - name: persist
           persistentVolumeClaim:
             claimName: hoboken-persist
+        # Uncomment with the secrets volumeMount above. The key mqtt_password
+        # becomes /run/secrets/mqtt_password, and fsGroup lets the container
+        # user read it at mode 0440.
+        # - name: secrets
+        #   secret:
+        #     secretName: hoboken-mqtt # kubectl create secret generic hoboken-mqtt --from-file=mqtt_password
+        #     defaultMode: 0440
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

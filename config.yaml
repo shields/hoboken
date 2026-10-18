@@ -6,6 +6,8 @@ bridge:
 
 mqtt:
   url: "mqtt://mosquitto:1883"
+  # username: "hoboken" # optional: broker login; needs one password source
+  # passwordFile: "/run/secrets/mqtt_password" # or set MQTT_PASSWORD instead
 
 # metrics:
 #   port: 9090

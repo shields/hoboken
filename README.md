@@ -40,14 +40,14 @@ It's called "Hoboken" because that has some of the same letters as
 
 ### Modules
 
-| Module               | Responsibility                        |
-| -------------------- | ------------------------------------- |
-| `src/config.ts`      | Load and validate YAML config         |
-| `src/convert.ts`     | Value conversion (Z2M/WLED ↔ HomeKit) |
-| `src/accessories.ts` | Create HAP accessories and scenes     |
-| `src/bridge.ts`      | MQTT client, bridge wiring, lifecycle |
-| `src/metrics.ts`     | Prometheus metrics and HTTP server    |
-| `src/main.ts`        | Entry point                           |
+| Module               | Responsibility                                          |
+| -------------------- | ------------------------------------------------------- |
+| `src/config.ts`      | Load and validate YAML config; resolve MQTT credentials |
+| `src/convert.ts`     | Value conversion (Z2M/WLED ↔ HomeKit)                   |
+| `src/accessories.ts` | Create HAP accessories and scenes                       |
+| `src/bridge.ts`      | MQTT client, bridge wiring, lifecycle                   |
+| `src/metrics.ts`     | Prometheus metrics and HTTP server                      |
+| `src/main.ts`        | Entry point                                             |
 
 Modules are split for testability. Each has clear inputs/outputs and minimal
 coupling. Accessory creation takes injected `publish`/`getState` functions
@@ -138,6 +138,10 @@ qualification.
   Without retain, the bridge has no way to learn the device's current state at
   startup.
 - **MQTT reconnect**: re-subscribes and refreshes state automatically
+- **MQTT credentials**: misconfiguration exits at startup. When `mqtt.username`
+  is set, a broker that refuses the login is reported as
+  `MQTT error: Connection refused: ...` and retried (see
+  [MQTT authentication](#mqtt-authentication)).
 - **Config changes**: restart the container (no hot reload)
 
 ### Metrics
@@ -185,6 +189,8 @@ bridge:
 
 mqtt:
   url: "mqtt://mosquitto:1883"
+  # username: "hoboken" # optional: broker login; needs one password source
+  # passwordFile: "/run/secrets/mqtt_password" # or set MQTT_PASSWORD instead
 
 # metrics:
 #   port: 9090
@@ -222,6 +228,65 @@ specific network interface. Without it, hap-nodejs advertises on all interfaces,
 which in Kubernetes with `hostNetwork: true` can cause mDNS to advertise a
 cluster-internal IP (e.g., `cni0`) instead of the LAN IP. Set `bind` to the
 host's LAN interface name (e.g., `eno1`) so HomeKit clients can reach the bridge.
+
+### MQTT authentication
+
+Brokers that require a login take an optional `mqtt.username` and a password
+from exactly one of two sources. `mqtt.passwordFile` names a file that contains
+the password; Hoboken reads it once at startup as UTF-8 and removes one
+trailing line feed, so a file made with `echo` or `kubectl create secret
+--from-file` works as written. A carriage return before that line feed or a
+byte order mark stays part of the password. Without `mqtt.passwordFile`, the
+password comes from the `MQTT_PASSWORD` environment variable, whose value is
+used exactly as set, including any trailing newline. Prefer the file, because
+child processes inherit environment variables. The connection for Zigbee2MQTT
+and WLED devices and the heated bedding connection use the same credentials.
+
+Hoboken refuses to start when `mqtt.username` has no password source, when a
+password source has no `mqtt.username`, when `mqtt.passwordFile` and
+`MQTT_PASSWORD` are both set, when the password file cannot be read or is empty
+(a file holding only a newline is empty), when `MQTT_PASSWORD` is empty, when
+`mqtt.username` or `mqtt.passwordFile` is not a non-empty string, when the
+username or password is longer than 65535 bytes, when `mqtt.username` is
+combined with credentials in `mqtt.url`, or when `config.yaml` contains
+`mqtt.password`. Keep the password out of `config.yaml`, which is typically a
+ConfigMap.
+
+Credentials embedded in `mqtt.url` as `scheme://user:password@host` keep working
+when `mqtt.username`, `mqtt.passwordFile`, and `MQTT_PASSWORD` are all unset (an
+empty `MQTT_PASSWORD` counts as set), and are removed from the logs and the
+status page. Only `mqtt.username` makes the Zigbee2MQTT and WLED connection
+retry a login that the broker refuses. The configured password never appears in
+logs, the status page, metrics, or error messages. Rotating it takes a restart.
+Use `mqtts://` unless the broker is on a trusted network, because `mqtt://`
+sends the password unencrypted. `mqtt.passwordFile` can name any file that the
+container can read, so treat `config.yaml` as being as trusted as the container.
+Do not set `DEBUG` to a pattern that matches `mqttjs:client` or
+`mqtt-packet:writeToStream`, such as `DEBUG=*`, `DEBUG=mqtt*`, or
+`DEBUG=mqttjs*`, which makes the MQTT library print the password.
+
+When `mqtt.username` is set and the broker refuses the login, the Zigbee2MQTT
+and WLED connection logs `MQTT error: Connection refused: ...`, counts it in
+`hoboken_mqtt_errors_total`, and keeps retrying. The heated bedding connection
+logs an `mqtt_connection_error` event with the reason code, counts it in the
+same metric, and retries with backoff. Correcting the broker therefore takes
+effect without a restart.
+
+Brokers that restrict topics per user must grant Hoboken these topics:
+
+- Zigbee2MQTT devices: read `<topic>`; write `<topic>/set` and `<topic>/get`.
+- WLED devices: read `<topic>/g` and `<topic>/c`; write `<topic>/api`.
+- Heated bedding: read `<prefix>/bridge/availability`,
+  `<prefix>/bridge/heartbeat`, `<prefix>/<controller>/availability`, and each
+  zone's `<prefix>/<controller>/<zone>` and `<prefix>/<controller>/<zone>/result`;
+  write each zone's `<prefix>/<controller>/<zone>/set`.
+
+With an `acl_file`, Mosquitto accepts a subscription to a topic that the user
+cannot read and then delivers nothing, so a missing read permission shows up as
+a device that never reports state. It also drops a QoS 0 publish that the user
+cannot write without telling the sender, so a missing write permission shows up
+as a Zigbee2MQTT or WLED command that HomeKit reports as done while nothing
+happens.
 
 ### MAC and PIN Generation
 
@@ -275,7 +340,8 @@ make run     # Run with Node.js
 On Debian or Ubuntu, install the broker build packages with
 `make test-broker-deps`. Then run `make test-integration` on Node.js 26.
 The target builds the pinned Mosquitto release and runs the existing WLED
-tests plus heated bedding tests over paired HAP HTTP and MQTT 5 connections.
+tests, heated bedding tests over paired HAP HTTP and MQTT 5 connections, and an
+authenticated broker round trip.
 Use `NODE=/path/to/node make test-integration` to select the runtime.
 
 Heated bedding integration covers reported state on both zones, fan-write
@@ -283,6 +349,13 @@ ordering, stateful preheat, rejected and retained results, session changes,
 the full HAP write deadline, and broker restart without command replay.
 The simulated MQTT controller exercises the contract; actual Sunbeam, Home
 app, and Siri qualification still requires hardware.
+
+The authenticated round trip runs a broker that refuses anonymous clients and
+restricts each user's topics. It shows that both MQTT connections log in with a
+password read from a file, that Zigbee2MQTT and heated bedding writes and state
+get through the topic permissions, that the status page and metrics never carry
+the password, that `main.ts` exits without a password source, and that a login
+the broker first refuses is retried until the broker accepts it.
 
 To qualify the complete controller path, run Tucson's `make homekit` target
 with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 26.
@@ -311,6 +384,10 @@ reconciled automatically.
 - `strategy: Recreate` — single instance (MAC uniqueness)
 - PVC at `/persist` — pairing data survives restarts
 - ConfigMap at `/config/config.yaml`
+- Optional Secret for the MQTT password: mount it read-only and name it in
+  `mqtt.passwordFile`, or inject `MQTT_PASSWORD` with `secretKeyRef`, which
+  needs a Secret value without a trailing newline (`--from-literal`, not
+  `--from-file` of a file that ends with one)
 
 ### Pairing with Apple Home
 

@@ -65,6 +65,13 @@ export interface BridgeConfig {
 
 export interface MqttConfig {
   url: string;
+  username?: string;
+  passwordFile?: string;
+}
+
+export interface MQTTCredentials {
+  username: string;
+  password: string;
 }
 
 export interface MetricsConfig {
@@ -81,8 +88,15 @@ export interface Config {
   metrics?: MetricsConfig;
 }
 
+// An MQTT string, such as the username or password in a CONNECT packet, carries
+// a two-byte length.
+const MQTT_STRING_MAX_BYTES = 65535;
 const MAC_RE = /^[\dA-Fa-f]{2}(:[\dA-Fa-f]{2}){5}$/;
 const PIN_RE = /^\d{3}-\d{2}-\d{3}$/;
+// Userinfo as url.parse, which mqtt.js uses, finds it: after a scheme or
+// leading slashes, with backslashes as slashes and the "//" optional. The
+// capture group is the text before the userinfo.
+const MQTT_URL_USERINFO_RE = /^((?:[^/\\?#:]+:[/\\]{0,2}|[/\\]{2}))[^/\\?#]+@/;
 
 export function validateConfig(data: unknown): Config {
   if (typeof data !== "object" || data === null) {
@@ -125,6 +139,36 @@ export function validateConfig(data: unknown): Config {
 
   if (typeof mqtt.url !== "string" || mqtt.url.length === 0) {
     throw new Error("mqtt.url must be a non-empty string");
+  }
+  if (
+    mqtt.username !== undefined &&
+    (typeof mqtt.username !== "string" || mqtt.username.length === 0)
+  ) {
+    throw new Error("mqtt.username must be a non-empty string");
+  }
+  if (
+    typeof mqtt.username === "string" &&
+    Buffer.byteLength(mqtt.username) > MQTT_STRING_MAX_BYTES
+  ) {
+    throw new Error(
+      `mqtt.username must be at most ${String(MQTT_STRING_MAX_BYTES)} bytes`,
+    );
+  }
+  if (
+    mqtt.passwordFile !== undefined &&
+    (typeof mqtt.passwordFile !== "string" || mqtt.passwordFile.length === 0)
+  ) {
+    throw new Error("mqtt.passwordFile must be a non-empty string");
+  }
+  if ("password" in mqtt) {
+    throw new Error(
+      "mqtt.password is not supported; use mqtt.passwordFile or the MQTT_PASSWORD environment variable",
+    );
+  }
+  if (mqtt.username !== undefined && MQTT_URL_USERINFO_RE.test(mqtt.url)) {
+    throw new Error(
+      "mqtt.username cannot be combined with credentials in mqtt.url; use one or the other",
+    );
   }
 
   const heatedBedding =
@@ -221,6 +265,10 @@ export function validateConfig(data: unknown): Config {
     },
     mqtt: {
       url: mqtt.url,
+      ...(typeof mqtt.username === "string" ? { username: mqtt.username } : {}),
+      ...(typeof mqtt.passwordFile === "string"
+        ? { passwordFile: mqtt.passwordFile }
+        : {}),
     },
     devices,
     ...(heatedBedding ? { heatedBedding } : {}),
@@ -476,4 +524,58 @@ export function loadConfig(path: string): Config {
   const content = readFileSync(path, "utf8");
   const data: unknown = parse(content);
   return validateConfig(data);
+}
+
+export function stripMQTTUserinfo(url: string): string {
+  return url.replace(MQTT_URL_USERINFO_RE, "$1");
+}
+
+export function resolveMQTTCredentials(
+  mqtt: MqttConfig,
+  env: Readonly<Record<string, string | undefined>>,
+): MQTTCredentials | undefined {
+  const { username, passwordFile } = mqtt;
+  const envPassword = env.MQTT_PASSWORD;
+  if (passwordFile !== undefined && envPassword !== undefined) {
+    throw new Error(
+      "mqtt.passwordFile and MQTT_PASSWORD cannot be combined; use one or the other",
+    );
+  }
+  if (username === undefined) {
+    if (passwordFile !== undefined) {
+      throw new Error("mqtt.passwordFile requires mqtt.username");
+    }
+    if (envPassword !== undefined) {
+      throw new Error("MQTT_PASSWORD requires mqtt.username");
+    }
+    return undefined;
+  }
+  let source: string;
+  let password: string;
+  if (passwordFile !== undefined) {
+    source = "mqtt.passwordFile";
+    password = readFileSync(passwordFile, "utf8").replace(/\n$/, "");
+  } else if (envPassword === undefined) {
+    throw new Error(
+      "mqtt.username requires mqtt.passwordFile or the MQTT_PASSWORD environment variable",
+    );
+  } else {
+    source = "MQTT_PASSWORD";
+    password = envPassword;
+  }
+  if (password.length === 0) throw new Error(`${source} is empty`);
+  if (Buffer.byteLength(password) > MQTT_STRING_MAX_BYTES) {
+    throw new Error(
+      `${source} must be at most ${String(MQTT_STRING_MAX_BYTES)} bytes`,
+    );
+  }
+  return { username, password };
+}
+
+// mqtt.js lets userinfo in the broker URL replace the username and password
+// options unless auth is empty.
+export function credentialOptions(
+  credentials: MQTTCredentials,
+): MQTTCredentials & { auth: string } {
+  return { ...credentials, auth: "" };
 }

@@ -13,9 +13,7 @@
 // limitations under the License.
 
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { createServer, createConnection } from "node:net";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
@@ -33,6 +31,7 @@ import type {
   HeatedBeddingCommand,
   HeatedBeddingState,
 } from "../src/heated-bedding-profile.ts";
+import { freePort, poll, TestBroker } from "./test-broker.ts";
 
 const PREFIX = "heated_bedding_test";
 const TOPIC = `${PREFIX}/bed/side_a`;
@@ -42,123 +41,6 @@ const ZONES = ["side_a", "side_b"].map((zone) => ({
   controller: "bed",
   zone,
 }));
-
-async function poll(
-  predicate: () => boolean | Promise<boolean>,
-  timeout = 10000,
-): Promise<void> {
-  const deadline = performance.now() + timeout;
-  while (performance.now() < deadline) {
-    if (await predicate()) return;
-    await delay(20);
-  }
-  throw new Error("Timed out waiting for heated bedding integration state");
-}
-
-async function freePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  assert(address && typeof address === "object");
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => {
-      if (error) reject(error);
-      else resolve();
-    });
-  });
-  return address.port;
-}
-
-async function listening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
-    socket.setTimeout(200);
-    const finish = (ready: boolean): void => {
-      socket.destroy();
-      resolve(ready);
-    };
-    socket.once("connect", () => {
-      finish(true);
-    });
-    socket.once("error", () => {
-      finish(false);
-    });
-    socket.once("timeout", () => {
-      finish(false);
-    });
-  });
-}
-
-class TestBroker {
-  readonly port: number;
-  readonly url: string;
-  #binary: string;
-  #config: string;
-  #process: ChildProcess | undefined;
-  #error: Error | undefined;
-  #stderr = "";
-
-  constructor(binary: string, directory: string, port: number) {
-    this.port = port;
-    this.url = `mqtt://127.0.0.1:${String(port)}`;
-    this.#binary = binary;
-    this.#config = path.join(directory, "mosquitto.conf");
-    writeFileSync(
-      this.#config,
-      `listener ${String(port)} 127.0.0.1\nallow_anonymous true\npersistence true\npersistence_location ${directory}/\n`,
-    );
-  }
-
-  async start(): Promise<void> {
-    this.#error = undefined;
-    this.#stderr = "";
-    this.#process = spawn(this.#binary, ["-c", this.#config], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    this.#process.stderr?.on("data", (data: Buffer) => {
-      this.#stderr = (this.#stderr + data.toString()).slice(-8192);
-    });
-    this.#process.once("error", (error) => {
-      this.#error = error;
-    });
-    this.#process.once("close", (code) => {
-      if (code !== 0)
-        this.#error = new Error(
-          `MQTT test broker exited unsuccessfully: ${this.#stderr.trim()}`,
-        );
-    });
-    await poll(async () => {
-      if (this.#error) throw this.#error;
-      return listening(this.port);
-    });
-  }
-
-  async stop(): Promise<void> {
-    const child = this.#process;
-    this.#process = undefined;
-    if (
-      child?.pid === undefined ||
-      child.exitCode !== null ||
-      child.signalCode !== null
-    )
-      return;
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        reject(new Error("MQTT test broker shutdown timed out"));
-      }, 5000);
-      child.once("close", (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else reject(new Error("MQTT test broker shutdown failed"));
-      });
-      child.kill("SIGTERM");
-    });
-  }
-}
 
 interface WireCharacteristic {
   aid: number;

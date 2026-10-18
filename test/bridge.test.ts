@@ -33,7 +33,7 @@ import {
   HAPStorage,
   Service,
 } from "@homebridge/hap-nodejs";
-import type { Config } from "../src/config.ts";
+import type { Config, MQTTCredentials } from "../src/config.ts";
 import { HeatedBeddingSource } from "../src/heated-bedding-source.ts";
 import type {
   IClientOptions,
@@ -79,6 +79,7 @@ class FakeHAPConnection extends EventEmitter {
 // eslint-disable-next-line unicorn/prefer-event-target -- mocks mqtt.js EventEmitter API
 class MockMqttClient extends EventEmitter {
   connected = false;
+  url = "";
   subscriptions: string[][] = [];
   published: { topic: string; message: string }[] = [];
   options: IClientOptions | undefined;
@@ -137,8 +138,9 @@ let mockClient: MockMqttClient;
 const mockClients: MockMqttClient[] = [];
 
 mock.module("mqtt", () => ({
-  connect: (_url: string, options?: IClientOptions) => {
+  connect: (url: string, options?: IClientOptions) => {
     mockClient = new MockMqttClient(options);
+    mockClient.url = url;
     mockClients.push(mockClient);
     return mockClient;
   },
@@ -155,6 +157,12 @@ const HEATED_BEDDING_STATE = {
   power: false,
   heat_level: 4,
   preheat: false,
+};
+
+const PASSWORD = "correct-horse-9f3a";
+const CREDENTIALS: MQTTCredentials = {
+  username: "hoboken",
+  password: PASSWORD,
 };
 
 function heatedBeddingMessage(
@@ -562,15 +570,17 @@ describe("startBridge", () => {
 
   test("mixed bridges keep legacy subscriptions and conversions on their own client", async () => {
     const count = mockClients.length;
-    const { bridge, shutdown } = await startBridge({
-      ...testConfig(),
-      heatedBedding: HEATED_BEDDING,
-    });
+    const config = { ...testConfig(), heatedBedding: HEATED_BEDDING };
+    const { bridge, shutdown } = await startBridge(config);
     try {
       const legacy = mockClients[count]!;
       const heatedBedding = mockClients[count + 1]!;
+      expect(legacy.url).toBe(config.mqtt.url);
       expect(legacy.options).toBeUndefined();
+      expect(heatedBedding.url).toBe(config.mqtt.url);
       expect(heatedBedding.options?.protocolVersion).toBe(5);
+      expect("username" in heatedBedding.options!).toBe(false);
+      expect("password" in heatedBedding.options!).toBe(false);
       legacy.connected = true;
       legacy.emit("connect");
       expect(legacy.subscriptions).toEqual([
@@ -1211,7 +1221,7 @@ describe("startBridge", () => {
     await shutdown();
   });
 
-  test("unparseable MQTT URL logs fallback without crashing", async () => {
+  test("unparseable MQTT URL does not crash", async () => {
     const cfg = testConfig();
     cfg.mqtt.url = "not a valid url";
     const { shutdown } = await startBridge(cfg);
@@ -1926,6 +1936,214 @@ function metricsConfig(): Config {
     metrics: { port: 0 },
   };
 }
+
+describe("startBridge with MQTT credentials", () => {
+  test("a devices-only bridge authenticates and retries a refused login", async () => {
+    const count = mockClients.length;
+    const config = testConfig();
+    const { shutdown } = await startBridge(config, CREDENTIALS);
+    try {
+      expect(mockClients.length - count).toBe(1);
+      expect(mockClient.url).toBe(config.mqtt.url);
+      expect(mockClient.url).not.toContain(PASSWORD);
+      expect(mockClient.options).toStrictEqual({
+        username: "hoboken",
+        password: PASSWORD,
+        auth: "",
+        reconnectOnConnackError: true,
+      });
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("a mixed bridge authenticates both clients and retries a refused login only on the legacy one", async () => {
+    const count = mockClients.length;
+    const config = { ...testConfig(), heatedBedding: HEATED_BEDDING };
+    const { shutdown } = await startBridge(config, CREDENTIALS);
+    try {
+      expect(mockClients.length - count).toBe(2);
+      const legacy = mockClients[count]!;
+      const heatedBedding = mockClients[count + 1]!;
+      expect(legacy.url).toBe(config.mqtt.url);
+      expect(legacy.options).toStrictEqual({
+        username: "hoboken",
+        password: PASSWORD,
+        auth: "",
+        reconnectOnConnackError: true,
+      });
+      expect(heatedBedding.url).toBe(config.mqtt.url);
+      expect(legacy.url).not.toContain(PASSWORD);
+      expect(heatedBedding.url).not.toContain(PASSWORD);
+      expect(heatedBedding.options).toMatchObject({
+        username: "hoboken",
+        password: PASSWORD,
+        auth: "",
+        protocolVersion: 5,
+        clean: true,
+        manualConnect: true,
+      });
+      expect("reconnectOnConnackError" in heatedBedding.options!).toBe(false);
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("a heated bedding bridge authenticates its only client", async () => {
+    const count = mockClients.length;
+    const config = {
+      ...testConfig(),
+      devices: [],
+      heatedBedding: HEATED_BEDDING,
+    };
+    const { shutdown } = await startBridge(config, CREDENTIALS);
+    try {
+      expect(mockClients.length - count).toBe(1);
+      expect(mockClient.url).toBe(config.mqtt.url);
+      expect(mockClient.options).toMatchObject({
+        username: "hoboken",
+        password: PASSWORD,
+        auth: "",
+        protocolVersion: 5,
+      });
+      expect("reconnectOnConnackError" in mockClient.options!).toBe(false);
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("a bridge with heated bedding and curtains authenticates both Tucson clients", async () => {
+    const count = mockClients.length;
+    const config = {
+      ...testConfig(),
+      devices: [],
+      heatedBedding: HEATED_BEDDING,
+      curtains: [
+        {
+          name: "Curtain",
+          prefix: "tuya",
+          controller: "window",
+          zone: "curtain",
+        },
+      ],
+    };
+    const { shutdown } = await startBridge(config, CREDENTIALS);
+    try {
+      expect(mockClients.length - count).toBe(2);
+      for (const client of mockClients.slice(count)) {
+        expect(client.url).toBe(config.mqtt.url);
+        expect(client.options).toMatchObject({
+          username: "hoboken",
+          password: PASSWORD,
+          auth: "",
+          protocolVersion: 5,
+        });
+        expect("reconnectOnConnackError" in client.options!).toBe(false);
+      }
+    } finally {
+      await shutdown();
+    }
+  });
+
+  function captureConsole() {
+    const spies = (["log", "warn", "error"] as const).map((method) =>
+      jest.spyOn(console, method).mockImplementation(() => {
+        /* captured */
+      }),
+    );
+    return {
+      lines: () =>
+        spies.flatMap((spy) => spy.mock.calls.map((call) => call.join(" "))),
+      restore: () => {
+        for (const spy of spies) spy.mockRestore();
+      },
+    };
+  }
+
+  test("the password never reaches logs, the status page, or metrics", async () => {
+    const output = captureConsole();
+    const count = mockClients.length;
+    const config = { ...metricsConfig(), heatedBedding: HEATED_BEDDING };
+    const controller = new AbortController();
+    try {
+      const { metricsPort, shutdown } = await startBridge(config, CREDENTIALS);
+      const legacy = mockClients[count]!;
+      expect(legacy.options?.password).toBe(PASSWORD);
+
+      legacy.connected = true;
+      legacy.emit("connect");
+      legacy.connected = false;
+      legacy.emit("error", new Error("Connection refused: Not authorized"));
+      legacy.emit("close");
+      legacy.emit("offline");
+      legacy.emit("reconnect");
+
+      const base = `http://127.0.0.1:${String(metricsPort)}`;
+      const pages = await Promise.all(
+        ["/", "/metrics", "/healthz", "/readyz"].map(
+          async (route) => await (await fetch(`${base}${route}`)).text(),
+        ),
+      );
+      const nextEvent = await openEvents(metricsPort!, controller.signal);
+      const bodies = [
+        ...pages,
+        await nextEvent(),
+        JSON.stringify(
+          buildStatusData(
+            config,
+            new Map(),
+            { url: config.mqtt.url, connected: true },
+            [],
+            "version",
+          ),
+        ),
+      ];
+      controller.abort();
+      await shutdown();
+
+      for (const body of bodies) {
+        expect(body).not.toBe("");
+        expect(body).not.toContain(PASSWORD);
+      }
+      const lines = output.lines();
+      expect(lines.some((line) => line.includes("MQTT error"))).toBe(true);
+      for (const line of lines) expect(line).not.toContain(PASSWORD);
+    } finally {
+      controller.abort();
+      output.restore();
+    }
+  });
+
+  test.each([
+    ["mqtt://legacy:LEGACYPW@localhost:1883", "mqtt://localhost:1883"],
+    ["//legacy:LEGACYPW@broker", "//broker"],
+    ["mqtt:legacy:LEGACYPW@localhost:1883", "mqtt:localhost:1883"],
+    [String.raw`mqtt:\\legacy:LEGACYPW@broker`, String.raw`mqtt:\\broker`],
+  ])(
+    "credentials embedded in the URL %s stay out of logs and the status page",
+    async (url, sanitized) => {
+      const output = captureConsole();
+      try {
+        const config = metricsConfig();
+        config.mqtt.url = url;
+        const { metricsPort, shutdown } = await startBridge(config);
+        const page = await (
+          await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
+        ).text();
+        await shutdown();
+
+        expect(mockClient.url).toBe(url);
+        expect(page).toContain(sanitized);
+        expect(page).not.toContain("LEGACYPW");
+        const lines = output.lines();
+        expect(lines.some((line) => line.includes(sanitized))).toBe(true);
+        for (const line of lines) expect(line).not.toContain("LEGACYPW");
+      } finally {
+        output.restore();
+      }
+    },
+  );
+});
 
 describe("startBridge with metrics", () => {
   test("starts and stops metrics server", async () => {

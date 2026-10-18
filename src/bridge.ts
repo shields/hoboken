@@ -34,7 +34,12 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { connect } from "mqtt";
 import { Registry } from "prom-client";
-import type { Config } from "./config.ts";
+import {
+  credentialOptions,
+  stripMQTTUserinfo,
+  type Config,
+  type MQTTCredentials,
+} from "./config.ts";
 import { HeatedBeddingMQTT } from "./heated-bedding-mqtt.ts";
 import { tucsonTopic } from "./tucson-profile.ts";
 import type { HeatedBeddingSource } from "./heated-bedding-source.ts";
@@ -129,7 +134,10 @@ interface BridgeHandle {
   shutdown: () => Promise<void>;
 }
 
-export async function startBridge(config: Config): Promise<BridgeHandle> {
+export async function startBridge(
+  config: Config,
+  credentials?: MQTTCredentials,
+): Promise<BridgeHandle> {
   const stateCache = new Map<string, RawState>();
   const lastColorPublish = new Map<string, number>();
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -187,23 +195,19 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     metrics = createMetrics(metricsRegister);
   }
 
-  let sanitizedUrl: string;
-  try {
-    const parsed = new URL(config.mqtt.url);
-    parsed.password = "";
-    parsed.username = "";
-    sanitizedUrl = parsed.href;
-  } catch {
-    // Strip userinfo (user:pass@) via regex for URLs that new URL() can't parse
-    // but mqtt.connect() accepts (e.g. bare hostnames).
-    sanitizedUrl = config.mqtt.url.replace(/\/\/[^@/]*@/, "//");
-  }
+  const sanitizedUrl = stripMQTTUserinfo(config.mqtt.url);
   if (config.devices.length) log.log(`Connecting to MQTT at ${sanitizedUrl}`);
 
-  // mqtt.connect() is more lenient than new URL() — it handles bare hostnames,
-  // missing protocols, etc. — so an unparseable URL here is not an error.
   const mqttClient = config.devices.length
-    ? connect(config.mqtt.url)
+    ? connect(
+        config.mqtt.url,
+        // mqtt.js stops reconnecting after the broker refuses a login unless
+        // reconnectOnConnackError is set; with it, a corrected broker user
+        // list recovers without a restart.
+        credentials
+          ? { ...credentialOptions(credentials), reconnectOnConnackError: true }
+          : undefined,
+      )
     : undefined;
 
   function mqttConnected(): boolean {
@@ -436,6 +440,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       config.mqtt.url,
       config.heatedBedding,
       {
+        credentials,
         changed: () => {
           for (const accessories of heatedBeddingAccessories)
             accessories.update();
@@ -486,6 +491,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       }),
     );
     curtains = new CurtainMQTT(config.mqtt.url, config.curtains, {
+      credentials,
       changed: () => {
         for (const accessory of curtainAccessories) accessory.update();
         updateMetrics();

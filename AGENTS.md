@@ -34,7 +34,7 @@ bun install               # Install dependencies
 make lint                 # tsc --noEmit, ESLint, Renovate config validation, Prettier
 make test                 # Unit tests with coverage
 make test-broker-deps     # System packages for the pinned Mosquitto build
-make test-integration     # WLED and heated bedding round trips (Node.js)
+make test-integration     # WLED, heated bedding, and authenticated broker round trips (Node.js)
 make test-screenshot      # Compare status page against golden file (Docker)
 make run                  # Run with Node.js
 make demo                 # Serve the status page with sample data
@@ -51,7 +51,7 @@ by that parser release.
 
 Each module is independently testable with dependency injection:
 
-- `src/config.ts` — Config loading/validation, type definitions
+- `src/config.ts` — Config loading/validation, MQTT credential resolution, type definitions
 - `src/convert.ts` — Pure value conversion functions (Z2M ↔ HomeKit)
 - `src/accessories.ts` — HAP accessory/scene creation, takes `PublishFn`/`GetStateFn`
 - `src/bridge.ts` — MQTT client, bridge wiring, state cache, lifecycle
@@ -76,6 +76,17 @@ Each module is independently testable with dependency injection:
   instead of invalidating only the affected zone. Partially invalid state isn't
   trusted, so every zone starts over from a clean MQTT session.
 - **No config reload**: restart the container for config changes.
+- **MQTT credentials**: `Config` holds only `mqtt.username` and the password
+  file path. `main.ts` calls `resolveMQTTCredentials(config.mqtt, process.env)`
+  and passes the resulting `MQTTCredentials` to `startBridge`, which gives them
+  to both MQTT clients, so the status page, metrics, and logs cannot reach the
+  password. `validateConfig` stays pure and `startBridge` never reads the
+  environment, which keeps tests independent of the developer's shell. The main
+  client retries a refused login (`reconnectOnConnackError`) only when
+  credentials are configured; the heated bedding client already retries with
+  backoff. Both clients build their options with `credentialOptions`, which
+  empties mqtt.js's `auth` so userinfo in the broker URL cannot replace the
+  configured login.
 - **State cache**: `Map<string, Z2MState>` in bridge.ts, keyed by device topic.
 - **Dashboard browser support**: The status page targets modern browsers
   (Chrome/Edge 111+, Safari 18+). Features like the View Transitions API are
@@ -174,6 +185,16 @@ make lint test
 - `bridge.pincode`: format `XXX-XX-XXX` (digits)
 - `bridge.port`: positive integer
 - `bridge.bind`: optional string (network interface name or IP for mDNS)
+- `mqtt.url`: non-empty string
+- `mqtt.username`: optional non-empty string of at most 65535 bytes; cannot
+  accompany userinfo in `mqtt.url`
+- `mqtt.passwordFile`: optional non-empty path; `mqtt.password` is rejected so
+  the password never lives in config.yaml
+- MQTT password: from `mqtt.passwordFile` (UTF-8, one trailing line feed
+  removed) or else `MQTT_PASSWORD`. A username needs a source, a source needs a
+  username, the two sources cannot be combined, and an unreadable, empty, or
+  oversized (over 65535 bytes) password fails startup. Messages never contain
+  the password.
 - `devices`: non-empty array unless `heatedBedding` configures at least one zone;
   a configuration with only heated bedding can omit `devices` or use an empty array
 - Each device: `name`, `topic`, `capabilities` (non-empty, valid values)

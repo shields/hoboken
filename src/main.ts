@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import { HAPStorage } from "@homebridge/hap-nodejs";
-import { loadConfig } from "./config.ts";
+import { loadConfig, resolveMQTTCredentials } from "./config.ts";
 import { startBridge } from "./bridge.ts";
 import * as log from "./log.ts";
 
@@ -68,6 +68,7 @@ const configPath = process.env.CONFIG_PATH ?? "/config/config.yaml";
 HAPStorage.setCustomStoragePath(process.env.PERSIST_PATH ?? "/persist");
 
 const config = loadConfig(configPath);
-const handle = await startBridge(config);
+const credentials = resolveMQTTCredentials(config.mqtt, process.env);
+const handle = await startBridge(config, credentials);
 shutdown = handle.shutdown;
 if (pendingSignal !== undefined) runShutdown(handle.shutdown);
