@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -39,9 +39,17 @@ async function poll(predicate: () => Promise<boolean>): Promise<void> {
   throw new Error("Timed out waiting for Tucson's reported HomeKit state");
 }
 
-assert(
-  process.versions.node.startsWith("26."),
-  "Qualification requires Node.js 26",
+const nodeMajor = /^\s+node-version: (\d+)\s*$/m.exec(
+  readFileSync(
+    new URL("../.github/workflows/build.yml", import.meta.url),
+    "utf8",
+  ),
+)?.[1];
+assert(nodeMajor, "build.yml must set node-version to a Node.js major");
+assert.equal(
+  process.versions.node.split(".", 1)[0],
+  nodeMajor,
+  `Qualification requires Node.js ${nodeMajor}`,
 );
 const curtainMode = process.env.MQTT_TEST_CURTAIN === "1";
 const url = process.env.MQTT_TEST_URL;

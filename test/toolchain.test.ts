@@ -25,6 +25,16 @@ const dockerPlaywrightVersion = async () =>
     await repoFile("Dockerfile.playwright").text(),
   )?.[1];
 
+const dockerNodeMajor = async () =>
+  /^FROM gcr\.io\/distroless\/nodejs(\d+)-debian\d+:nonroot@sha256:/m.exec(
+    await repoFile("Dockerfile").text(),
+  )?.[1];
+
+const ciNodeMajor = async () =>
+  /^\s+node-version: (\d+)\s*$/m.exec(
+    await repoFile(".github/workflows/build.yml").text(),
+  )?.[1];
+
 test("package.json and both Dockerfiles pin the same Bun release", async () => {
   const { packageManager } = (await repoFile("package.json").json()) as {
     packageManager?: unknown;
@@ -46,17 +56,16 @@ test("package.json and Dockerfile.playwright pin the same Playwright release", a
   expect(await dockerPlaywrightVersion()).toBe(version);
 });
 
-test("the production image, CI, and the Tucson driver use one Node.js major", async () => {
-  const image = /^FROM gcr\.io\/distroless\/nodejs(\d+)-/m.exec(
-    await repoFile("Dockerfile").text(),
-  )?.[1];
-  expect(image).toMatch(/^\d+$/);
+test("the production image, CI, and @types/node use the same Node.js major", async () => {
+  const { devDependencies } = (await repoFile("package.json").json()) as {
+    devDependencies?: Record<string, string>;
+  };
+  const major = await dockerNodeMajor();
+  expect(major).toMatch(/^\d+$/);
   expect({
-    ci: /^\s*node-version: (\d+)$/m.exec(
-      await repoFile(".github/workflows/build.yml").text(),
+    ".github/workflows/build.yml": await ciNodeMajor(),
+    "@types/node": /^(\d+)\.\d+\.\d+$/.exec(
+      devDependencies?.["@types/node"] ?? "",
     )?.[1],
-    driver: /process\.versions\.node\.startsWith\("(\d+)\."\)/.exec(
-      await repoFile("integration/tucson-roundtrip.ts").text(),
-    )?.[1],
-  }).toEqual({ ci: image, driver: image });
+  }).toEqual({ ".github/workflows/build.yml": major, "@types/node": major });
 });

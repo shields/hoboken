@@ -55,7 +55,7 @@ jobs:
       - name: Install MQTT broker build dependencies
         run: make test-broker-deps
 
-      - name: Integration tests (WLED, heated bedding, MQTT authentication, and refused subscriptions)
+      - name: Integration tests (WLED, heated bedding, MQTT authentication, refused subscriptions, dropped sessions, and malformed URLs)
         run: make test-integration
         env:
           VERBOSE: "1"

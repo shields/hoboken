@@ -9,9 +9,7 @@ to collectively as heated bedding. Use short zone names such as "Bed Side A".
 
 ## Toolchain
 
-- **Runtime**: Node.js 26 with unflagged TypeScript type stripping; the
-  production image, CI's `node-version`, and the Tucson qualification driver
-  must name the same major (`test/toolchain.test.ts`)
+- **Runtime**: Node.js 26 with unflagged TypeScript type stripping
 - **Package manager**: Bun (`bun install`, `bun.lock`)
 - **Bun version**: `packageManager` in package.json, which CI installs; both
   Dockerfiles' `oven/bun` tags must match (`test/toolchain.test.ts`)
@@ -20,6 +18,10 @@ to collectively as heated bedding. Use short zone names such as "Bed Side A".
   (`test/toolchain.test.ts`), because the image bundles the browser revision
   that npm release launches. Renovate holds the npm release for 3 days but not
   the image, so the image's PR is red until the npm release joins its branch.
+- **Node.js major**: the final stage's `gcr.io/distroless/nodejs<major>` image in
+  `Dockerfile`, `node-version` in `.github/workflows/build.yml`, and the
+  `@types/node` major in package.json must agree (`test/toolchain.test.ts`).
+  `integration/tucson-roundtrip.ts` requires the workflow's major.
 - **Test runner**: Bun test (`bun test`, `bun test --coverage`)
 - **TypeScript 6.0**: type checking only (`noEmit`), `erasableSyntaxOnly`
 - **ESLint 10**: `typescript-eslint` with `strictTypeChecked` + `stylisticTypeChecked`
