@@ -135,10 +135,24 @@ interface BridgeHandle {
   shutdown: () => Promise<void>;
 }
 
+function checkCredentials(
+  mqtt: Config["mqtt"],
+  credentials: MQTTCredentials | undefined,
+): void {
+  if (mqtt.username === undefined) {
+    if (credentials) throw new Error("credentials require mqtt.username");
+  } else if (!credentials) {
+    throw new Error("mqtt.username requires credentials");
+  } else if (credentials.username !== mqtt.username) {
+    throw new Error("credentials.username must match mqtt.username");
+  }
+}
+
 export async function startBridge(
   config: Config,
   credentials?: MQTTCredentials,
 ): Promise<BridgeHandle> {
+  checkCredentials(config.mqtt, credentials);
   const stateCache = new Map<string, RawState>();
   const lastColorPublish = new Map<string, number>();
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();

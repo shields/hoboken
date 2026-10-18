@@ -405,7 +405,7 @@ describe(
               pincode: "031-45-154",
               port: 0,
             },
-            mqtt: { url: broker.url },
+            mqtt: { url: broker.url, username: "hoboken" },
             devices: [
               {
                 name: "Auth Light",
@@ -710,7 +710,12 @@ describe(
                 pincode: "031-45-154",
                 port: 0,
               },
-              mqtt: { url: refusing.url },
+              mqtt: {
+                url: refusing.url,
+                ...(attempt.credentials && {
+                  username: attempt.credentials.username,
+                }),
+              },
               devices: [
                 {
                   name: "Auth Light",

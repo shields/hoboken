@@ -191,6 +191,9 @@ const HEATED_BEDDING = [
   { name: "Bed Side A", prefix: "tuya", controller: "bed", zone: "side_a" },
   { name: "Bed Side B", prefix: "tuya", controller: "bed", zone: "side_b" },
 ];
+const CURTAINS = [
+  { name: "Curtain", prefix: "tuya", controller: "window", zone: "curtain" },
+];
 const HEATED_BEDDING_STATE = {
   session_id: "live",
   power: false,
@@ -1979,10 +1982,17 @@ function metricsConfig(): Config {
   };
 }
 
+function loginConfig(config: Config = testConfig()): Config {
+  return {
+    ...config,
+    mqtt: { ...config.mqtt, username: CREDENTIALS.username },
+  };
+}
+
 describe("startBridge with MQTT credentials", () => {
   test("a devices-only bridge authenticates and retries a refused login", async () => {
     const count = mockClients.length;
-    const config = testConfig();
+    const config = loginConfig();
     const { shutdown } = await startBridge(config, CREDENTIALS);
     try {
       expect(mockClients.length - count).toBe(1);
@@ -2002,7 +2012,7 @@ describe("startBridge with MQTT credentials", () => {
 
   test("a mixed bridge authenticates both clients and retries a refused login only on the legacy one", async () => {
     const count = mockClients.length;
-    const config = { ...testConfig(), heatedBedding: HEATED_BEDDING };
+    const config = { ...loginConfig(), heatedBedding: HEATED_BEDDING };
     const { shutdown } = await startBridge(config, CREDENTIALS);
     try {
       expect(mockClients.length - count).toBe(2);
@@ -2036,7 +2046,7 @@ describe("startBridge with MQTT credentials", () => {
   test("a heated bedding bridge authenticates its only client", async () => {
     const count = mockClients.length;
     const config = {
-      ...testConfig(),
+      ...loginConfig(),
       devices: [],
       heatedBedding: HEATED_BEDDING,
     };
@@ -2059,17 +2069,10 @@ describe("startBridge with MQTT credentials", () => {
   test("a bridge with heated bedding and curtains authenticates both Tucson clients", async () => {
     const count = mockClients.length;
     const config = {
-      ...testConfig(),
+      ...loginConfig(),
       devices: [],
       heatedBedding: HEATED_BEDDING,
-      curtains: [
-        {
-          name: "Curtain",
-          prefix: "tuya",
-          controller: "window",
-          zone: "curtain",
-        },
-      ],
+      curtains: CURTAINS,
     };
     const { shutdown } = await startBridge(config, CREDENTIALS);
     try {
@@ -2089,6 +2092,46 @@ describe("startBridge with MQTT credentials", () => {
     }
   });
 
+  test.each([
+    [
+      "a configured username without credentials",
+      "hoboken",
+      undefined,
+      "mqtt.username requires credentials",
+    ],
+    [
+      "credentials without a configured username",
+      undefined,
+      CREDENTIALS,
+      "credentials require mqtt.username",
+    ],
+    [
+      "credentials for a different username",
+      "hoboken",
+      { ...CREDENTIALS, username: "intruder" },
+      "credentials.username must match mqtt.username",
+    ],
+  ])(
+    "refuses %s before creating any client or server",
+    async (_name, username, credentials, message) => {
+      const count = mockClients.length;
+      const config: Config = {
+        ...metricsConfig(),
+        heatedBedding: HEATED_BEDDING,
+        curtains: CURTAINS,
+      };
+      if (username !== undefined) config.mqtt.username = username;
+      let failure: unknown;
+      try {
+        await startBridge(config, credentials);
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toStrictEqual(new Error(message));
+      expect(mockClients.length).toBe(count);
+    },
+  );
+
   function captureConsole() {
     const spies = (["log", "warn", "error"] as const).map((method) =>
       jest.spyOn(console, method).mockImplementation(() => {
@@ -2107,7 +2150,10 @@ describe("startBridge with MQTT credentials", () => {
   test("the password never reaches logs, the status page, or metrics", async () => {
     const output = captureConsole();
     const count = mockClients.length;
-    const config = { ...metricsConfig(), heatedBedding: HEATED_BEDDING };
+    const config = {
+      ...loginConfig(metricsConfig()),
+      heatedBedding: HEATED_BEDDING,
+    };
     const controller = new AbortController();
     try {
       const { metricsPort, shutdown } = await startBridge(config, CREDENTIALS);
@@ -2210,7 +2256,10 @@ describe("main MQTT connection reconnects", () => {
   });
 
   async function startReconnectTest(credentials?: MQTTCredentials) {
-    const { shutdown } = await startBridge(testConfig(), credentials);
+    const { shutdown } = await startBridge(
+      credentials ? loginConfig() : testConfig(),
+      credentials,
+    );
     let attempts = 0;
     mockClient.on("reconnect", () => {
       attempts++;
