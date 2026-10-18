@@ -102,8 +102,9 @@ Match these logical names to Tucson's configuration. A bridge with only heated b
 can omit `devices` or set it to `[]`. Controller/zone pairs must be unique
 even across prefixes, because they determine accessory identities. Display
 names and prefixes can change without changing those identities. Heated bedding
-configuration contains only these four fields; Tucson owns controller
-credentials, protocol versions, and device connections.
+configuration contains only these four fields, and any other field fails
+startup; Tucson owns controller credentials, protocol versions, and device
+connections.
 
 The fan's Active control changes power. RotationSpeed zero turns power off
 and preserves the selected level; positive values select levels 1–10 in
@@ -227,6 +228,26 @@ devices:
 
 Neither `mac` nor `pincode` are secrets. The MAC is broadcast via mDNS.
 The PIN is only used during initial pairing and is not reusable afterward.
+
+### Supported keys
+
+Hoboken refuses to start when any object in `config.yaml` has a key that is not
+listed here, so a misspelled key cannot silently fall back to its default. A
+misspelled `metrics.bind`, for example, would otherwise leave the status page
+on every interface. The error gives the section and the key, such as
+`metrics: unknown field "bnd"; supported fields are port and bind`, but never
+the value.
+
+| Object                     | Keys                                                                |
+| -------------------------- | ------------------------------------------------------------------- |
+| top level                  | `bridge`, `mqtt`, `devices`, `heatedBedding`, `curtains`, `metrics` |
+| `bridge`                   | `name`, `mac`, `pincode`, `port`, `bind`                            |
+| `mqtt`                     | `url`, `username`, `passwordFile`                                   |
+| `metrics`                  | `port`, `bind`                                                      |
+| each `devices` entry       | `name`, `type`, `topic`, `capabilities`, `scenes`                   |
+| each `scenes` entry        | `name`, `id`                                                        |
+| each `heatedBedding` entry | `name`, `prefix`, `controller`, `zone`                              |
+| each `curtains` entry      | `name`, `prefix`, `controller`, `zone`                              |
 
 ### Bind Interface
 

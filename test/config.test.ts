@@ -20,10 +20,11 @@ import {
   stripMQTTUserinfo,
   validateConfig,
 } from "../src/config.ts";
-import type { MqttConfig } from "../src/config.ts";
+import type { Config, MqttConfig } from "../src/config.ts";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 const PASSWORD = "correct-horse-9f3a";
 const MQTT_URL = "mqtt://localhost:1883";
@@ -202,18 +203,17 @@ describe("validateConfig", () => {
     "protocol_version",
     "capabilities",
     "topic",
-  ])("rejects unknown Tucson field %s without its value", (key) => {
-    try {
+  ])("rejects unknown heated bedding field %s without its value", (key) => {
+    const message = errorMessage(() =>
       validateConfig({
         ...validConfig(),
-        heatedBedding: [{ ...heatedBedding, [key]: "never-log-key" }],
-      });
-      throw new Error("Unexpected success");
-    } catch (error: unknown) {
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain("unknown Tucson field");
-      expect((error as Error).message).not.toContain("never-log-key");
-    }
+        heatedBedding: [{ ...heatedBedding, [key]: "never-log-value" }],
+      }),
+    );
+    expect(message).toBe(
+      `heatedBedding[0]: unknown field ${JSON.stringify(key)}; supported fields are name, prefix, controller, and zone`,
+    );
+    expect(message).not.toContain("never-log-value");
   });
 
   test.each([
@@ -587,22 +587,14 @@ describe("validateConfig", () => {
       const data = withMQTT({ username: "hoboken", [field]: value });
       const message = errorMessage(() => validateConfig(data));
       expect(message).toBe(
-        `mqtt: unknown mqtt field ${JSON.stringify(field)}; supported fields are url, username, and passwordFile`,
+        `mqtt: unknown field ${JSON.stringify(field)}; supported fields are url, username, and passwordFile`,
       );
       expect(message).not.toContain("never-log-value");
     });
 
     test("rejects a login section whose keys are all misspelled", () => {
       const data = withMQTT({ user: "hoboken", passwd: "never-log-value" });
-      expect(() => validateConfig(data)).toThrow('unknown mqtt field "user"');
-    });
-
-    test("escapes control characters in an unknown mqtt field", () => {
-      const message = errorMessage(() =>
-        validateConfig(withMQTT({ "a\nb": "never-log-value" })),
-      );
-      expect(message).toContain(String.raw`"a\nb"`);
-      expect(message).not.toContain("\n");
+      expect(() => validateConfig(data)).toThrow('unknown field "user"');
     });
 
     test.each([
@@ -654,6 +646,218 @@ describe("validateConfig", () => {
     test("accepts URL credentials without mqtt.username", () => {
       const url = "mqtt://user:pw@broker";
       expect(validateConfig(withMQTT({ url })).mqtt).toStrictEqual({ url });
+    });
+  });
+
+  describe("unknown fields", () => {
+    function patched(
+      base: Record<string, unknown>,
+      changes: Record<string, unknown>,
+    ): Record<string, unknown> {
+      return Object.fromEntries(
+        Object.entries({ ...base, ...changes }).filter(
+          ([, value]) => value !== undefined,
+        ),
+      );
+    }
+
+    const secondDevice = {
+      name: "Second Light",
+      topic: "zigbee2mqtt/second_light",
+      capabilities: ["on_off"],
+    };
+    const secondScene = { name: "Reading", id: 2 };
+
+    const sections: {
+      path: string;
+      fields: string;
+      required: string;
+      build: (changes: Record<string, unknown>) => unknown;
+    }[] = [
+      {
+        path: "config",
+        fields: "bridge, mqtt, devices, heatedBedding, curtains, and metrics",
+        required: "devices",
+        build: (changes) => patched(validConfig(), changes),
+      },
+      {
+        path: "bridge",
+        fields: "name, mac, pincode, port, and bind",
+        required: "port",
+        build: (changes) => {
+          const config = validConfig();
+          return { ...config, bridge: patched(config.bridge, changes) };
+        },
+      },
+      {
+        path: "mqtt",
+        fields: "url, username, and passwordFile",
+        required: "url",
+        build: (changes) => {
+          const config = validConfig();
+          return { ...config, mqtt: patched(config.mqtt, changes) };
+        },
+      },
+      {
+        path: "metrics",
+        fields: "port and bind",
+        required: "port",
+        build: (changes) => ({
+          ...validConfig(),
+          metrics: patched({ port: 9090 }, changes),
+        }),
+      },
+      ...[0, 1].map((index) => ({
+        path: `devices[${String(index)}]`,
+        fields: "name, type, topic, capabilities, and scenes",
+        required: "topic",
+        build: (changes: Record<string, unknown>) => {
+          const config = validConfig();
+          const devices: unknown[] = [config.devices[0], secondDevice].slice(
+            0,
+            index + 1,
+          );
+          devices[index] = patched(
+            devices[index] as Record<string, unknown>,
+            changes,
+          );
+          return { ...config, devices };
+        },
+      })),
+      ...[0, 1].map((index) => ({
+        path: `devices[0].scenes[${String(index)}]`,
+        fields: "name and id",
+        required: "id",
+        build: (changes: Record<string, unknown>) => {
+          const config = validConfig();
+          const scenes: unknown[] = [
+            config.devices[0]!.scenes[0],
+            secondScene,
+          ].slice(0, index + 1);
+          scenes[index] = patched(
+            scenes[index] as Record<string, unknown>,
+            changes,
+          );
+          return {
+            ...config,
+            devices: [{ ...config.devices[0]!, scenes }],
+          };
+        },
+      })),
+      ...[0, 1].map((index) => ({
+        path: `heatedBedding[${String(index)}]`,
+        fields: "name, prefix, controller, and zone",
+        required: "zone",
+        build: (changes: Record<string, unknown>) => {
+          const entries: unknown[] = [
+            heatedBedding,
+            { ...heatedBedding, controller: "bed2" },
+          ].slice(0, index + 1);
+          entries[index] = patched(
+            entries[index] as Record<string, unknown>,
+            changes,
+          );
+          return { ...validConfig(), heatedBedding: entries };
+        },
+      })),
+      ...[0, 1].map((index) => ({
+        path: `curtains[${String(index)}]`,
+        fields: "name, prefix, controller, and zone",
+        required: "zone",
+        build: (changes: Record<string, unknown>) => {
+          const entries: unknown[] = [
+            heatedBedding,
+            { ...heatedBedding, controller: "bed2" },
+          ].slice(0, index + 1);
+          entries[index] = patched(
+            entries[index] as Record<string, unknown>,
+            changes,
+          );
+          return { ...validConfig(), curtains: entries };
+        },
+      })),
+    ];
+
+    test.each(sections)(
+      "rejects an unknown field in $path without its value",
+      ({ path, fields, build }) => {
+        const message = errorMessage(() =>
+          validateConfig(build({ typo: "never-log-value" })),
+        );
+        expect(message).toBe(
+          `${path}: unknown field "typo"; supported fields are ${fields}`,
+        );
+        expect(message).not.toContain("never-log-value");
+      },
+    );
+
+    test.each(sections)(
+      "escapes control characters in an unknown field in $path",
+      ({ build }) => {
+        const message = errorMessage(() =>
+          validateConfig(build({ 'a"\nb': "never-log-value" })),
+        );
+        expect(message).toContain(String.raw`"a\"\nb"`);
+        expect(message).not.toContain("\n");
+        expect(message).not.toContain("never-log-value");
+      },
+    );
+
+    test.each(sections)(
+      "rejects fields named like Object.prototype members in $path",
+      ({ build }) => {
+        for (const key of ["constructor", "toString", "__proto__"]) {
+          expect(() =>
+            validateConfig(build({ [key]: "never-log-value" })),
+          ).toThrow(`unknown field ${JSON.stringify(key)}`);
+        }
+      },
+    );
+
+    test.each(sections)(
+      "names a misspelled $required in $path rather than reporting it missing",
+      ({ path, required, build }) => {
+        const message = errorMessage(() =>
+          validateConfig(
+            build({
+              [required]: undefined,
+              [`${required}_typo`]: "never-log-value",
+            }),
+          ),
+        );
+        expect(message).toContain(`${path}: unknown field "${required}_typo"`);
+        expect(message).not.toContain("never-log-value");
+      },
+    );
+
+    test("accepts every supported field", () => {
+      const config: Config = {
+        bridge: {
+          name: "Hoboken",
+          mac: "0E:42:A1:B2:C3:D4",
+          pincode: "031-45-154",
+          port: 51826,
+          bind: "eno1",
+        },
+        mqtt: {
+          url: MQTT_URL,
+          username: "hoboken",
+          passwordFile: "/run/secrets/mqtt_password",
+        },
+        devices: [
+          {
+            name: "Living Room Light",
+            type: "z2m",
+            topic: "zigbee2mqtt/living_room_light",
+            capabilities: ["on_off", "brightness"],
+            scenes: [{ name: "Movie Mode", id: 1 }],
+          },
+        ],
+        heatedBedding: [heatedBedding],
+        curtains: [{ ...heatedBedding, controller: "window", zone: "curtain" }],
+        metrics: { port: 9090, bind: "127.0.0.1" },
+      };
+      expect(validateConfig(config)).toStrictEqual(config);
     });
   });
 
@@ -932,7 +1136,7 @@ describe("loadConfig", () => {
     rmSync(tmpDir, { recursive: true });
   });
 
-  function writeConfig(mqttLines: string): string {
+  function writeConfig(mqttLines: string, extraLines = ""): string {
     const configPath = path.join(tmpDir, "config.yaml");
     writeFileSync(
       configPath,
@@ -948,6 +1152,7 @@ devices:
   - name: "Light"
     topic: "light"
     capabilities: [on_off]
+${extraLines}
 `,
     );
     return configPath;
@@ -991,8 +1196,27 @@ devices:
       ].join("\n"),
     );
     const message = errorMessage(() => loadConfig(configPath));
-    expect(message).toContain('unknown mqtt field "user"');
+    expect(message).toContain('mqtt: unknown field "user"');
     expect(message).not.toContain("never-log-value");
+  });
+
+  test("rejects a misspelled metrics key in YAML without its value", () => {
+    const configPath = writeConfig(
+      '  url: "mqtt://localhost:1883"',
+      ["metrics:", "  port: 9090", '  bnd: "127.0.0.1"'].join("\n"),
+    );
+    const message = errorMessage(() => loadConfig(configPath));
+    expect(message).toBe(
+      'metrics: unknown field "bnd"; supported fields are port and bind',
+    );
+    expect(message).not.toContain("127.0.0.1");
+  });
+
+  test("loads the shipped example configuration", () => {
+    const config = loadConfig(
+      fileURLToPath(new URL("../config.yaml", import.meta.url)),
+    );
+    expect(config.devices.length).toBeGreaterThan(0);
   });
 
   test("rejects a bare username key", () => {

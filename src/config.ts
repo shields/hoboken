@@ -91,7 +91,39 @@ export interface Config {
 // An MQTT string, such as the username or password in a CONNECT packet, carries
 // a two-byte length.
 const MQTT_STRING_MAX_BYTES = 65535;
-const MQTT_FIELDS = new Set(["url", "username", "passwordFile"]);
+type Fields<T> = readonly (keyof T)[];
+const CONFIG_FIELDS: Fields<Config> = [
+  "bridge",
+  "mqtt",
+  "devices",
+  "heatedBedding",
+  "curtains",
+  "metrics",
+];
+const BRIDGE_FIELDS: Fields<BridgeConfig> = [
+  "name",
+  "mac",
+  "pincode",
+  "port",
+  "bind",
+];
+const MQTT_FIELDS: Fields<MqttConfig> = ["url", "username", "passwordFile"];
+const METRICS_FIELDS: Fields<MetricsConfig> = ["port", "bind"];
+const DEVICE_FIELDS: Fields<DeviceConfig> = [
+  "name",
+  "type",
+  "topic",
+  "capabilities",
+  "scenes",
+];
+const SCENE_FIELDS: Fields<SceneConfig> = ["name", "id"];
+const TUCSON_ENDPOINT_FIELDS: Fields<HeatedBeddingZoneConfig> = [
+  "name",
+  "prefix",
+  "controller",
+  "zone",
+];
+const FIELD_LIST = new Intl.ListFormat("en-US");
 const MAC_RE = /^[\dA-Fa-f]{2}(:[\dA-Fa-f]{2}){5}$/;
 const PIN_RE = /^\d{3}-\d{2}-\d{3}$/;
 // Userinfo as url.parse, which mqtt.js uses, finds it: after a scheme or
@@ -99,18 +131,36 @@ const PIN_RE = /^\d{3}-\d{2}-\d{3}$/;
 // capture group is the text before the userinfo.
 const MQTT_URL_USERINFO_RE = /^((?:[^/\\?#:]+:[/\\]{0,2}|[/\\]{2}))[^/\\?#]+@/;
 
+// The message omits values, which can be secrets. Callers run this before a
+// section's required-field checks so that a misspelled required field is named
+// rather than reported missing.
+function rejectUnknownFields(
+  section: string,
+  value: object,
+  allowed: readonly string[],
+): void {
+  const unknown = Object.keys(value).find((key) => !allowed.includes(key));
+  if (unknown !== undefined) {
+    throw new Error(
+      `${section}: unknown field ${JSON.stringify(unknown)}; supported fields are ${FIELD_LIST.format(allowed)}`,
+    );
+  }
+}
+
 export function validateConfig(data: unknown): Config {
   if (typeof data !== "object" || data === null) {
     throw new Error("Config must be an object");
   }
 
   const obj = data as Record<string, unknown>;
+  rejectUnknownFields("config", obj, CONFIG_FIELDS);
 
   if (typeof obj.bridge !== "object" || obj.bridge === null) {
     throw new Error("Missing required field: bridge");
   }
 
   const bridge = obj.bridge as Record<string, unknown>;
+  rejectUnknownFields("bridge", bridge, BRIDGE_FIELDS);
 
   if (typeof bridge.name !== "string" || bridge.name.length === 0) {
     throw new Error("bridge.name must be a non-empty string");
@@ -137,6 +187,10 @@ export function validateConfig(data: unknown): Config {
   }
 
   const mqtt = obj.mqtt as Record<string, unknown>;
+  if ("password" in mqtt) {
+    throw new Error("mqtt.password is not supported; use mqtt.passwordFile");
+  }
+  rejectUnknownFields("mqtt", mqtt, MQTT_FIELDS);
 
   if (typeof mqtt.url !== "string" || mqtt.url.length === 0) {
     throw new Error("mqtt.url must be a non-empty string");
@@ -160,17 +214,6 @@ export function validateConfig(data: unknown): Config {
     (typeof mqtt.passwordFile !== "string" || mqtt.passwordFile.length === 0)
   ) {
     throw new Error("mqtt.passwordFile must be a non-empty string");
-  }
-  if ("password" in mqtt) {
-    throw new Error("mqtt.password is not supported; use mqtt.passwordFile");
-  }
-  const unknownField = Object.keys(mqtt).find(
-    (field) => !MQTT_FIELDS.has(field),
-  );
-  if (unknownField !== undefined) {
-    throw new Error(
-      `mqtt: unknown mqtt field ${JSON.stringify(unknownField)}; supported fields are url, username, and passwordFile`,
-    );
   }
   if (mqtt.username !== undefined && MQTT_URL_USERINFO_RE.test(mqtt.url)) {
     throw new Error(
@@ -245,6 +288,7 @@ export function validateConfig(data: unknown): Config {
       throw new Error("metrics must be an object");
     }
     const m = obj.metrics as Record<string, unknown>;
+    rejectUnknownFields("metrics", m, METRICS_FIELDS);
     if (
       typeof m.port !== "number" ||
       !Number.isInteger(m.port) ||
@@ -296,13 +340,7 @@ function validateTucsonEndpoints(
       throw new TypeError(`${label} must be an object`);
     }
     const value = entry as Record<string, unknown>;
-    if (
-      Object.keys(value).some(
-        (field) => !["name", "prefix", "controller", "zone"].includes(field),
-      )
-    ) {
-      throw new Error(`${label}: unknown Tucson field`);
-    }
+    rejectUnknownFields(label, value, TUCSON_ENDPOINT_FIELDS);
     if (
       typeof value.name !== "string" ||
       value.name.trim().length === 0 ||
@@ -408,6 +446,7 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
   }
 
   const d = data as Record<string, unknown>;
+  rejectUnknownFields(`devices[${String(index)}]`, d, DEVICE_FIELDS);
 
   if (typeof d.name !== "string" || d.name.length === 0) {
     throw new Error(
@@ -512,6 +551,11 @@ function validateScene(
   }
 
   const s = data as Record<string, unknown>;
+  rejectUnknownFields(
+    `devices[${String(deviceIndex)}].scenes[${String(sceneIndex)}]`,
+    s,
+    SCENE_FIELDS,
+  );
 
   if (typeof s.name !== "string" || s.name.length === 0) {
     throw new Error(

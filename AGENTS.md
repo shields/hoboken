@@ -212,9 +212,18 @@ make lint test
   accompany userinfo in `mqtt.url`
 - `mqtt.passwordFile`: optional non-empty path; `mqtt.password` is rejected so
   the password never lives in config.yaml
-- `mqtt` accepts only `url`, `username`, and `passwordFile`; any other key is
-  rejected by name without its value, so a misspelled login cannot connect
-  anonymously
+- Unknown keys: every object the validator accepts rejects keys outside its
+  allowlist through one helper, `rejectUnknownFields`. The objects are the top
+  level (`bridge`, `mqtt`, `devices`, `heatedBedding`, `curtains`, `metrics`),
+  `bridge`, `mqtt`, `metrics`, each `devices` entry (`name`, `type`, `topic`,
+  `capabilities`, `scenes`), each `scenes` entry (`name`, `id`), and each
+  `heatedBedding` and `curtains` entry. The message gives the section path and the
+  JSON-escaped key, never a value, so a misspelled `mqtt.username` cannot
+  connect anonymously and a misspelled `metrics.bind` cannot leave the status
+  page on every interface. The check runs first in each section, so a
+  misspelled required field is named rather than reported missing, except that
+  `mqtt.password` is checked before it and keeps its own message. A new config
+  key must join its section's allowlist.
 - MQTT password: only from `mqtt.passwordFile` (strictly decoded UTF-8; a
   leading byte order mark and one trailing line ending, LF or CRLF, removed, so
   a lone trailing CR stays); the environment is never consulted, so a stray
@@ -232,7 +241,7 @@ make lint test
   accessory identities
 - Heated bedding routes cannot overlap device routes; wildcard device topics cannot
   accompany heated bedding
-- Heated bedding entries reject unknown fields and contain only logical MQTT names
+- Heated bedding entries contain only logical MQTT names
 
 ## Tucson curtains
 
