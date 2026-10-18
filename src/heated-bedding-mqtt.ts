@@ -60,6 +60,8 @@ export class HeatedBeddingMQTT {
   #stable: ReturnType<typeof setTimeout> | undefined;
   #retry: ReturnType<typeof setTimeout> | undefined;
   #stopPromise: Promise<void> | undefined;
+  #depth = 0;
+  #dirty = false;
 
   constructor(
     url: string,
@@ -80,7 +82,9 @@ export class HeatedBeddingMQTT {
         this.#publish(topic, payload, complete);
       },
       {
-        changed: () => this.#changed?.(),
+        changed: () => {
+          this.#notify();
+        },
         failed: () => {
           if (this.#client) this.#fail(this.#client, "mqtt_publish_failed");
         },
@@ -96,20 +100,45 @@ export class HeatedBeddingMQTT {
     return this.#ready && this.#client?.connected === true;
   }
 
+  // The source notifies before it rejects an invalid message and before the
+  // wrapper learns of a publication failure, so a batch holds notifications
+  // until the outermost event is done and its state is final.
+  #notify(): void {
+    if (this.#depth > 0) this.#dirty = true;
+    else this.#changed?.();
+  }
+
+  #batch(run: () => void): void {
+    this.#depth++;
+    try {
+      run();
+    } finally {
+      this.#depth--;
+    }
+    if (this.#depth > 0 || !this.#dirty) return;
+    this.#dirty = false;
+    this.#changed?.();
+  }
+
   #publish(
     topic: string,
     payload: HeatedBeddingPublication,
     complete: (error?: Error) => void,
   ): void {
+    const finish = (error?: Error): void => {
+      this.#batch(() => {
+        complete(error);
+      });
+    };
     if (!this.connected || !this.#client) {
-      complete(new Error("Heated bedding MQTT is unavailable"));
+      finish(new Error("Heated bedding MQTT is unavailable"));
       return;
     }
     this.#client.publish(
       topic,
       JSON.stringify(payload),
       { qos: 0, retain: false },
-      complete,
+      finish,
     );
     this.#published?.();
   }
@@ -180,7 +209,6 @@ export class HeatedBeddingMQTT {
         }, MAX_BACKOFF);
         this.#stable.unref();
         this.source.subscriptionsReady(generation);
-        this.#changed?.();
         this.#logger.info(
           { event: "mqtt_ready" },
           "Heated bedding MQTT subscribed",
@@ -191,25 +219,29 @@ export class HeatedBeddingMQTT {
       if (client !== this.#client || !this.#routes.has(topic)) return;
       if (this.#routes.get(topic) && packet.retain) return;
       this.#received?.(topic);
-      try {
-        if (payload.byteLength > MAX_PAYLOAD)
-          throw new RangeError("Heated bedding MQTT payload exceeds its limit");
-        const value: unknown = topic.endsWith("/availability")
-          ? payload.toString("utf8")
-          : JSON.parse(payload.toString("utf8"));
-        this.source.handle(generation, topic, value, packet.retain);
-      } catch (error: unknown) {
-        if (!(error instanceof RangeError || error instanceof SyntaxError))
-          throw error;
-        // SyntaxError text quotes the payload, so only RangeError's fixed text is logged.
-        this.#fail(client, "invalid_heated_bedding_message", {
-          topic,
-          reason:
-            error instanceof RangeError
-              ? error.message
-              : "Heated bedding MQTT payload is not valid JSON",
-        });
-      }
+      this.#batch(() => {
+        try {
+          if (payload.byteLength > MAX_PAYLOAD)
+            throw new RangeError(
+              "Heated bedding MQTT payload exceeds its limit",
+            );
+          const value: unknown = topic.endsWith("/availability")
+            ? payload.toString("utf8")
+            : JSON.parse(payload.toString("utf8"));
+          this.source.handle(generation, topic, value, packet.retain);
+        } catch (error: unknown) {
+          if (!(error instanceof RangeError || error instanceof SyntaxError))
+            throw error;
+          // SyntaxError text quotes the payload, so only RangeError's fixed text is logged.
+          this.#fail(client, "invalid_heated_bedding_message", {
+            topic,
+            reason:
+              error instanceof RangeError
+                ? error.message
+                : "Heated bedding MQTT payload is not valid JSON",
+          });
+        }
+      });
     });
     client.on("error", (error) => {
       const { code } = error as { code?: unknown };
@@ -242,30 +274,30 @@ export class HeatedBeddingMQTT {
     details: Record<string, unknown> = {},
   ): void {
     if (client !== this.#client) return;
-    this.#client = undefined;
-    this.#ready = false;
-    clearTimeout(this.#deadline);
-    this.#deadline = undefined;
-    clearTimeout(this.#stable);
-    this.source.disconnect();
-    client.end(true);
-    const delay = Math.min(
-      MAX_BACKOFF,
-      this.#backoff * (1 + 0.25 * this.#random()),
-    );
-    this.#backoff = Math.min(MAX_BACKOFF, this.#backoff * 2);
-    this.#logger.error(
-      { event, ...details, retry_ms: delay },
-      "Heated bedding MQTT unavailable",
-    );
-    this.#failed?.();
-    this.#changed?.();
-    if (this.#stopped) return;
-    this.#retry = setTimeout(() => {
-      this.#retry = undefined;
-      this.#attempt();
-    }, delay);
-    this.#retry.unref();
+    this.#batch(() => {
+      this.#client = undefined;
+      this.#ready = false;
+      clearTimeout(this.#deadline);
+      this.#deadline = undefined;
+      clearTimeout(this.#stable);
+      this.source.disconnect();
+      client.end(true);
+      const delay = Math.min(
+        MAX_BACKOFF,
+        this.#backoff * (1 + 0.25 * this.#random()),
+      );
+      this.#backoff = Math.min(MAX_BACKOFF, this.#backoff * 2);
+      this.#retry = setTimeout(() => {
+        this.#retry = undefined;
+        this.#attempt();
+      }, delay);
+      this.#retry.unref();
+      this.#logger.error(
+        { event, ...details, retry_ms: delay },
+        "Heated bedding MQTT unavailable",
+      );
+      this.#failed?.();
+    });
   }
 
   async stop(): Promise<void> {
@@ -275,11 +307,12 @@ export class HeatedBeddingMQTT {
     clearTimeout(this.#stable);
     clearTimeout(this.#retry);
     const client = this.#client;
-    this.#client = undefined;
-    this.#ready = false;
-    this.source.disconnect();
-    this.#changed?.();
     if (!client) return;
+    this.#batch(() => {
+      this.#client = undefined;
+      this.#ready = false;
+      this.source.disconnect();
+    });
     this.#stopPromise = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error("Heated bedding MQTT shutdown timed out"));

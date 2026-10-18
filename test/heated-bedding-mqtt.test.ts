@@ -583,3 +583,176 @@ describe("heated bedding MQTT owner", () => {
     explode = false;
   });
 });
+
+describe("heated bedding MQTT change notifications", () => {
+  interface Seen {
+    connected: boolean;
+    state: unknown;
+    pending: number;
+    errors: number;
+  }
+
+  let clients: TestMqttClient[];
+  let owner: HeatedBeddingMQTT;
+  let seen: Seen[];
+  let errors: number;
+  let constructed: boolean;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    clients = [];
+    seen = [];
+    constructed = false;
+    errors = 0;
+    owner = new HeatedBeddingMQTT("mqtt://localhost", [ZONE], {
+      connect: (_url, options) => {
+        const client = new TestMqttClient(options);
+        clients.push(client);
+        return client as unknown as MqttClient;
+      },
+      random: () => 0,
+      failed: () => {
+        errors++;
+      },
+      changed: () => {
+        if (!constructed) return;
+        seen.push({
+          connected: owner.connected,
+          state: owner.source.usableState(TOPIC),
+          pending: owner.source.pendingCount(TOPIC),
+          errors,
+        });
+      },
+    });
+    constructed = true;
+  });
+
+  afterEach(async () => {
+    await owner.stop();
+    jest.useRealTimers();
+  });
+
+  function subscribe(): TestMqttClient {
+    const client = clients.at(-1)!;
+    client.connected = true;
+    client.emit("connect", { sessionPresent: false });
+    return client;
+  }
+
+  function snapshot(client: TestMqttClient): void {
+    client.receive("tuya/bridge/availability", "online", true);
+    client.receive("tuya/bed/availability", "online", true);
+    client.receive(TOPIC, STATE, true);
+    client.receive("tuya/bridge/heartbeat", { session_id: "live" });
+  }
+
+  function ready(): TestMqttClient {
+    const client = subscribe();
+    snapshot(client);
+    client.acknowledge();
+    return client;
+  }
+
+  const DOWN = { connected: false, state: undefined, pending: 0, errors: 1 };
+
+  test("a subscription acknowledgement notifies once, with the connection ready", () => {
+    const client = subscribe();
+    snapshot(client);
+    seen.length = 0;
+    client.acknowledge();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ connected: true, errors: 0 });
+    expect(seen[0]!.state).toMatchObject(STATE);
+  });
+
+  test.each(["close", "error", "offline", "disconnect"])(
+    "a %s failure notifies once, with the state cleared and the error counted",
+    (event) => {
+      const client = ready();
+      seen.length = 0;
+      client.emit(event, new Error("network"));
+      expect(seen).toEqual([DOWN]);
+    },
+  );
+
+  test("a failure with a write outstanding notifies once with the write settled", async () => {
+    const client = ready();
+    const outcome = Promise.allSettled([
+      owner.source.writePreheat(TOPIC, true),
+    ]);
+    seen.length = 0;
+    client.emit("close");
+    expect(seen).toEqual([DOWN]);
+    expect((await outcome)[0].status).toBe("rejected");
+  });
+
+  test("a publication error notifies once, with the connection down", async () => {
+    const client = ready();
+    const outcome = Promise.allSettled([
+      owner.source.writePreheat(TOPIC, true),
+    ]);
+    seen.length = 0;
+    client.publications[0]!.complete(new Error("write failed"));
+    expect(seen).toEqual([DOWN]);
+    expect((await outcome)[0].status).toBe("rejected");
+  });
+
+  test("a successful publication does not notify", () => {
+    const client = ready();
+    void Promise.allSettled([owner.source.writePreheat(TOPIC, true)]);
+    seen.length = 0;
+    client.publications[0]!.complete();
+    expect(seen).toEqual([]);
+  });
+
+  test.each([
+    ["invalid JSON", "{"],
+    ["an oversize payload", "x".repeat(65537)],
+    ["an invalid state", { ...STATE, power: "invalid" }],
+  ])("%s notifies once, with the connection down", (_name, payload) => {
+    const client = ready();
+    seen.length = 0;
+    client.receive(TOPIC, payload);
+    expect(seen).toEqual([DOWN]);
+  });
+
+  test("an invalid availability message notifies once", () => {
+    const client = ready();
+    seen.length = 0;
+    client.receive("tuya/bed/availability", "maybe");
+    expect(seen).toEqual([DOWN]);
+  });
+
+  test("a valid message notifies once, with the connection still up", () => {
+    const client = ready();
+    seen.length = 0;
+    client.receive(TOPIC, { ...STATE, heat_level: 6 });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ connected: true, errors: 0 });
+  });
+
+  test("a rejected subscription notifies once", () => {
+    const client = subscribe();
+    seen.length = 0;
+    client.subscribed!(new Error("denied"));
+    expect(seen).toEqual([DOWN]);
+  });
+
+  test("shutdown notifies once, with the connection down and writes settled", async () => {
+    ready();
+    const outcome = Promise.allSettled([
+      owner.source.writePreheat(TOPIC, true),
+    ]);
+    seen.length = 0;
+    await owner.stop();
+    expect(seen).toEqual([{ ...DOWN, errors: 0 }]);
+    expect((await outcome)[0].status).toBe("rejected");
+  });
+
+  test("shutdown after the connection already failed does not notify", async () => {
+    ready().emit("close");
+    seen.length = 0;
+    await owner.stop();
+    expect(seen).toEqual([]);
+  });
+});
