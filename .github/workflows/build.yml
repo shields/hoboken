@@ -33,6 +33,14 @@ jobs:
         with:
           bun-version-file: package.json
 
+      # The runner image's default Node can change. The integration test must run
+      # on the Node major the production image ships, and make setup installs
+      # re2's native addon for the Node that make lint later loads it under.
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
       - name: Install dependencies
         run: make setup
 
@@ -43,13 +51,6 @@ jobs:
       # runs in the Docker step below).
       - name: Unit tests
         run: make test
-
-      # The runner image's default Node can change; the integration test must
-      # run on the Node major the production image ships.
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
 
       - name: Install MQTT broker build dependencies
         run: make test-broker-deps

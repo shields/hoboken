@@ -26,10 +26,10 @@ to collectively as heated bedding. Use short zone names such as "Bed Side A".
 ## Commands
 
 ```sh
-make setup                # Frozen dependencies and Lefthook pre-commit checks
+make setup                # Frozen dependencies, Renovate's re2, Lefthook pre-commit checks
 make fmt                  # ESLint fixes and Prettier for code and non-code files
 bun install               # Install dependencies
-make lint                 # TypeScript type checking (tsc --noEmit) and ESLint
+make lint                 # tsc --noEmit, ESLint, Renovate config validation, Prettier
 make test                 # Unit tests with coverage
 make test-broker-deps     # System packages for the pinned Mosquitto build
 make test-integration     # WLED and heated bedding round trips (Node.js)

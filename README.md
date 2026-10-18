@@ -252,17 +252,22 @@ of intersecting capabilities.
 - Node.js 24+ (runtime, for TypeScript type stripping)
 - Make (task runner)
 - A C compiler, CMake, OpenSSL headers, and cJSON headers for integration tests
+- A C++ toolchain and Python, only where re2 (Renovate's regex engine, used by
+  `make lint`) has no prebuilt binary for the platform and Node.js version
 
 ### Setup
 
 ```sh
-bun install
+make setup
 ```
+
+Run it under the Node.js that `make lint` will use, because it installs re2 for
+that Node.js version.
 
 ### Commands
 
 ```sh
-make lint    # TypeScript type checking and ESLint (strict + stylistic)
+make lint    # Type checking, ESLint, Renovate config validation, Prettier
 make test    # Run tests with coverage
 make run     # Run with Node.js
 ```

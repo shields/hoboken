@@ -20,11 +20,14 @@ TEST_BROKER_REVISION = 99fa50f30e325609394c324c8ff71cfbbe95d8ab
 TEST_BROKER_SOURCE = .build/mosquitto-source
 TEST_BROKER_BUILD = .build/mosquitto-build/$(TEST_BROKER_REVISION)
 TEST_BROKER_BIN = $(abspath $(TEST_BROKER_BUILD)/src/mosquitto)
+# Renovate falls back to RegExp, and still exits 0, when re2 is unusable.
+RE2_PROBE = import { re2 } from "renovate/dist/expose.js"; new (re2())(".*").exec("x")
 
 .PHONY: setup fmt lint test test-integration test-broker test-broker-deps test-screenshot golden-screenshot run demo
 
 setup:
 	bun install --frozen-lockfile
+	bun run --cwd node_modules/re2 install
 	bunx --no-install lefthook install
 
 fmt:
@@ -34,6 +37,8 @@ fmt:
 lint:
 	bun run tsc
 	bun run eslint .
+	@"$(NODE)" --input-type=module -e '$(RE2_PROBE)' || { echo "error: Renovate cannot load re2 under Node.js $$("$(NODE)" -v); run make setup with it first in PATH" >&2; exit 1; }
+	"$(NODE)" node_modules/.bin/renovate-config-validator --strict
 	$(PRETTIER) --check $(FORMAT_PATHS)
 
 test:

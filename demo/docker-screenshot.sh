@@ -25,7 +25,8 @@ if [[ -f .git ]]; then
   git_mounts=(-v "$git_common_dir:$git_common_dir:ro")
 fi
 
-# All npm deps are pure JS; host node_modules works in the container.
+# Everything the Bun suite loads is pure JS, so the host node_modules works in
+# the container.
 docker run --rm --ipc=host \
   -u "$(id -u):$(id -g)" \
   -e HOME=/tmp \
