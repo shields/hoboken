@@ -58,8 +58,8 @@ export interface MqttOptions {
 const CONNECT_TIMEOUT = 10000;
 const CLOSE_TIMEOUT = 2000;
 const MAX_PAYLOAD = 65536;
-const MIN_BACKOFF = 1000;
-const MAX_BACKOFF = 60000;
+export const MIN_BACKOFF = 1000;
+export const MAX_BACKOFF = 60000;
 const JITTER_FRACTION = 0.25;
 
 export class TucsonMQTT<S extends TucsonMQTTSource> {

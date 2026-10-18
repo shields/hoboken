@@ -41,6 +41,7 @@ import {
   type MQTTCredentials,
 } from "./config.ts";
 import { HeatedBeddingMQTT } from "./heated-bedding-mqtt.ts";
+import { MAX_BACKOFF, MIN_BACKOFF } from "./tucson-mqtt.ts";
 import { tucsonTopic } from "./tucson-profile.ts";
 import type { HeatedBeddingSource } from "./heated-bedding-source.ts";
 import {
@@ -199,15 +200,14 @@ export async function startBridge(
   if (config.devices.length) log.log(`Connecting to MQTT at ${sanitizedUrl}`);
 
   const mqttClient = config.devices.length
-    ? connect(
-        config.mqtt.url,
+    ? connect(config.mqtt.url, {
+        ...(credentials && credentialOptions(credentials)),
+        reconnectPeriod: MIN_BACKOFF,
         // mqtt.js stops reconnecting after the broker refuses a login unless
         // reconnectOnConnackError is set; with it, a corrected broker user
         // list recovers without a restart.
-        credentials
-          ? { ...credentialOptions(credentials), reconnectOnConnackError: true }
-          : undefined,
-      )
+        reconnectOnConnackError: true,
+      })
     : undefined;
 
   function mqttConnected(): boolean {
@@ -245,8 +245,14 @@ export async function startBridge(
     metricsServer?.notifyStateChange();
   });
 
+  // mqtt.js emits reconnect once per attempt however the previous one failed,
+  // so doubling here counts each failure once.
   mqttClient?.on("reconnect", () => {
     log.log("MQTT reconnecting");
+    mqttClient.options.reconnectPeriod = Math.min(
+      MAX_BACKOFF,
+      (mqttClient.options.reconnectPeriod ?? MIN_BACKOFF) * 2,
+    );
   });
 
   mqttClient?.on("offline", () => {
@@ -529,6 +535,7 @@ export async function startBridge(
 
   mqttClient?.on("connect", () => {
     log.log("MQTT connected");
+    mqttClient.options.reconnectPeriod = MIN_BACKOFF;
     cancelAllRetries();
     const topics = config.devices.flatMap((d) => {
       switch (d.type) {

@@ -81,12 +81,18 @@ Each module is independently testable with dependency injection:
   and passes the resulting `MQTTCredentials` to `startBridge`, which gives them
   to both MQTT clients, so the status page, metrics, and logs cannot reach the
   password. `validateConfig` stays pure and `startBridge` never reads the
-  environment, which keeps tests independent of the developer's shell. The main
-  client retries a refused login (`reconnectOnConnackError`) only when
-  credentials are configured; the heated bedding client already retries with
-  backoff. Both clients build their options with `credentialOptions`, which
-  empties mqtt.js's `auth` so userinfo in the broker URL cannot replace the
-  configured login.
+  environment, which keeps tests independent of the developer's shell. Both
+  clients build their options with `credentialOptions`, which empties mqtt.js's
+  `auth` so userinfo in the broker URL cannot replace the configured login.
+- **Main MQTT reconnect backoff**: the main client sets
+  `reconnectOnConnackError` in every configuration, because mqtt.js otherwise
+  never retries after a refused login, and starts `reconnectPeriod` at the
+  Tucson MQTT client's `MIN_BACKOFF`. Each `reconnect` event, which mqtt.js
+  emits once per attempt however that attempt fails, doubles
+  `client.options.reconnectPeriod` up to `MAX_BACKOFF`, and `connect` resets it
+  to `MIN_BACKOFF`. The doubled period is the wait after that attempt fails.
+  Counting `reconnect` rather than `error`, `close`, or `offline` counts a
+  failed attempt once.
 - **State cache**: `Map<string, Z2MState>` in bridge.ts, keyed by device topic.
 - **Dashboard browser support**: The status page targets modern browsers
   (Chrome/Edge 111+, Safari 18+). Features like the View Transitions API are

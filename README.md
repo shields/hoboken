@@ -137,10 +137,13 @@ qualification.
   so the broker delivers the last `/g` and `/c` values when the bridge subscribes.
   Without retain, the bridge has no way to learn the device's current state at
   startup.
-- **MQTT reconnect**: re-subscribes and refreshes state automatically
-- **MQTT credentials**: misconfiguration exits at startup. When `mqtt.username`
-  is set, a broker that refuses the login is reported as
-  `MQTT error: Connection refused: ...` and retried (see
+- **MQTT reconnect**: re-subscribes and refreshes state automatically. The
+  Zigbee2MQTT and WLED connection waits 1 second before its first retry,
+  doubles the wait after each failed attempt up to 60 seconds, and returns to 1
+  second once it connects.
+- **MQTT credentials**: misconfiguration exits at startup. A broker that
+  refuses the connection, with or without `mqtt.username`, is reported as
+  `MQTT error: Connection refused: ...` and retried with that backoff (see
   [MQTT authentication](#mqtt-authentication)).
 - **Config changes**: restart the container (no hot reload)
 
@@ -257,9 +260,8 @@ typically a ConfigMap.
 Credentials embedded in `mqtt.url` as `scheme://user:password@host` keep working
 when `mqtt.username`, `mqtt.passwordFile`, and `MQTT_PASSWORD` are all unset (an
 empty `MQTT_PASSWORD` counts as set), and are removed from the logs and the
-status page. Only `mqtt.username` makes the Zigbee2MQTT and WLED connection
-retry a login that the broker refuses. The configured password never appears in
-logs, the status page, metrics, or error messages. Rotating it takes a restart.
+status page. The configured password never appears in logs, the status page,
+metrics, or error messages. Rotating it takes a restart.
 Use `mqtts://` unless the broker is on a trusted network, because `mqtt://`
 sends the password unencrypted. `mqtt.passwordFile` can name any file that the
 container can read, so treat `config.yaml` as being as trusted as the container.
@@ -267,12 +269,14 @@ Do not set `DEBUG` to a pattern that matches `mqttjs:client` or
 `mqtt-packet:writeToStream`, such as `DEBUG=*`, `DEBUG=mqtt*`, or
 `DEBUG=mqttjs*`, which makes the MQTT library print the password.
 
-When `mqtt.username` is set and the broker refuses the login, the Zigbee2MQTT
-and WLED connection logs `MQTT error: Connection refused: ...`, counts it in
-`hoboken_mqtt_errors_total`, and keeps retrying. The heated bedding connection
+When the broker refuses the connection, with or without `mqtt.username`, the
+Zigbee2MQTT and WLED connection logs `MQTT error: Connection refused: ...`,
+counts it in `hoboken_mqtt_errors_total`, and keeps retrying. It waits 1 second
+before the first retry, doubles the wait after each failed attempt up to 60
+seconds, and returns to 1 second once it connects. The heated bedding connection
 logs an `mqtt_connection_error` event with the reason code, counts it in the
-same metric, and retries with backoff. Correcting the broker therefore takes
-effect without a restart.
+same metric, and retries with backoff over the same 1 to 60 second range.
+Correcting the broker therefore takes effect without a restart.
 
 Brokers that restrict topics per user must grant Hoboken these topics:
 
@@ -357,7 +361,8 @@ restricts each user's topics. It shows that both MQTT connections log in with a
 password read from a file, that Zigbee2MQTT and heated bedding writes and state
 get through the topic permissions, that the status page and metrics never carry
 the password, that `main.ts` exits without a password source, and that a login
-the broker first refuses is retried until the broker accepts it.
+the broker first refuses, with credentials or without, is retried until the
+broker accepts it.
 
 To qualify the complete controller path, run Tucson's `make homekit` target
 with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 26.

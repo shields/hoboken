@@ -76,6 +76,8 @@ class FakeHAPConnection extends EventEmitter {
   }
 }
 
+const MQTTJS_RECONNECT_PERIOD = 1000;
+
 // eslint-disable-next-line unicorn/prefer-event-target -- mocks mqtt.js EventEmitter API
 class MockMqttClient extends EventEmitter {
   connected = false;
@@ -93,13 +95,48 @@ class MockMqttClient extends EventEmitter {
     complete: (error?: Error) => void;
   }[] = [];
 
+  reconnecting = false;
+  reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
   constructor(options?: IClientOptions) {
     super();
     this.options = options;
+    this.on("connect", () => {
+      this.reconnecting = false;
+    });
   }
 
   connect(): this {
     return this;
+  }
+
+  // Like mqtt.js, which reads reconnectPeriod when it schedules an attempt
+  // before any of the application's close listeners run, and which emits
+  // offline only for the first loss in a row.
+  #scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    if (!this.reconnecting) {
+      this.reconnecting = true;
+      this.emit("offline");
+    }
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.emit("reconnect");
+    }, this.options?.reconnectPeriod ?? MQTTJS_RECONNECT_PERIOD);
+  }
+
+  lose(error?: Error): void {
+    this.connected = false;
+    if (error) this.emit("error", error);
+    this.#scheduleReconnect();
+    this.emit("close");
+  }
+
+  refuse(): void {
+    this.connected = false;
+    this.emit("error", new Error("Connection refused: Not authorized"));
+    if (this.options?.reconnectOnConnackError) this.#scheduleReconnect();
+    this.emit("close");
   }
 
   subscribe(
@@ -127,6 +164,8 @@ class MockMqttClient extends EventEmitter {
   }
 
   end(_force?: boolean, cb?: () => void): this {
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
     if (cb) cb();
     return this;
   }
@@ -576,7 +615,10 @@ describe("startBridge", () => {
       const legacy = mockClients[count]!;
       const heatedBedding = mockClients[count + 1]!;
       expect(legacy.url).toBe(config.mqtt.url);
-      expect(legacy.options).toBeUndefined();
+      expect(legacy.options).toStrictEqual({
+        reconnectPeriod: 1000,
+        reconnectOnConnackError: true,
+      });
       expect(heatedBedding.url).toBe(config.mqtt.url);
       expect(heatedBedding.options?.protocolVersion).toBe(5);
       expect("username" in heatedBedding.options!).toBe(false);
@@ -1950,6 +1992,7 @@ describe("startBridge with MQTT credentials", () => {
         username: "hoboken",
         password: PASSWORD,
         auth: "",
+        reconnectPeriod: 1000,
         reconnectOnConnackError: true,
       });
     } finally {
@@ -1970,6 +2013,7 @@ describe("startBridge with MQTT credentials", () => {
         username: "hoboken",
         password: PASSWORD,
         auth: "",
+        reconnectPeriod: 1000,
         reconnectOnConnackError: true,
       });
       expect(heatedBedding.url).toBe(config.mqtt.url);
@@ -2143,6 +2187,90 @@ describe("startBridge with MQTT credentials", () => {
       }
     },
   );
+});
+
+describe("main MQTT connection reconnects", () => {
+  const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000];
+  const brokerDown = () => {
+    mockClient.lose(
+      Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1883"), {
+        code: "ECONNREFUSED",
+      }),
+    );
+  };
+  const loginRefused = () => {
+    mockClient.refuse();
+  };
+  const connectionClosed = () => {
+    mockClient.lose();
+  };
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  async function startReconnectTest(credentials?: MQTTCredentials) {
+    const { shutdown } = await startBridge(testConfig(), credentials);
+    let attempts = 0;
+    mockClient.on("reconnect", () => {
+      attempts++;
+    });
+    jest.useFakeTimers();
+    return {
+      shutdown,
+      expectAttemptAfter(delay: number, fail: () => void) {
+        const before = attempts;
+        fail();
+        jest.advanceTimersByTime(delay - 1);
+        expect(attempts).toBe(before);
+        jest.advanceTimersByTime(1);
+        expect(attempts).toBe(before + 1);
+      },
+    };
+  }
+
+  test("an anonymous bridge passes only the reconnect options", async () => {
+    const { shutdown } = await startBridge(testConfig());
+    try {
+      expect(mockClient.options).toStrictEqual({
+        reconnectPeriod: 1000,
+        reconnectOnConnackError: true,
+      });
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test.each([
+    ["anonymous", undefined],
+    ["credentialed", CREDENTIALS],
+  ])(
+    "a %s bridge doubles the delay after each failed attempt up to 60 s",
+    async (_name, credentials) => {
+      const session = await startReconnectTest(credentials);
+      try {
+        const failures = [brokerDown, loginRefused, connectionClosed];
+        for (const [index, delay] of BACKOFF_MS.entries())
+          session.expectAttemptAfter(delay, failures[index % 3]!);
+      } finally {
+        await session.shutdown();
+      }
+    },
+  );
+
+  test("a successful connect resets the delay to 1 s", async () => {
+    const session = await startReconnectTest();
+    try {
+      for (const delay of BACKOFF_MS.slice(0, 4))
+        session.expectAttemptAfter(delay, loginRefused);
+      emitConnect();
+      session.expectAttemptAfter(1000, connectionClosed);
+      session.expectAttemptAfter(2000, brokerDown);
+      session.expectAttemptAfter(4000, loginRefused);
+    } finally {
+      await session.shutdown();
+    }
+  });
 });
 
 describe("startBridge with metrics", () => {

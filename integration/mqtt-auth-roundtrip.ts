@@ -662,75 +662,94 @@ describe(
       });
     });
 
-    describe("with a broker that first refuses the login", () => {
-      let root: string | undefined;
-      let refusing: TestBroker | undefined;
-      let accepting: TestBroker | undefined;
-      let retrying: Awaited<ReturnType<typeof startBridge>> | undefined;
+    for (const attempt of [
+      {
+        refused: "login",
+        mac: "0E:36:29:42:81:1A",
+        credentials: { username: "hoboken", password: HOBOKEN_SENTINEL },
+        accepted: AUTH,
+      },
+      {
+        refused: "anonymous connection",
+        mac: "0E:36:29:42:81:1B",
+        credentials: undefined,
+        accepted: undefined,
+      },
+    ] as const)
+      describe(`with a broker that first refuses the ${attempt.refused}`, () => {
+        let root: string | undefined;
+        let refusing: TestBroker | undefined;
+        let accepting: TestBroker | undefined;
+        let retrying: Awaited<ReturnType<typeof startBridge>> | undefined;
 
-      before(async () => {
-        assert(directory);
-        root = path.join(directory, "refused-login");
-        mkdirSync(root);
-        refusing = new TestBroker(brokerBinary(), root, await freePort(), {
-          users: { backend: BACKEND_PASSWORD },
-          acl: AUTH.acl,
-        });
-        await refusing.start();
-        retrying = await startBridge(
-          {
-            bridge: {
-              name: "MQTT auth retry",
-              mac: "0E:36:29:42:81:1A",
-              pincode: "031-45-154",
-              port: 0,
-            },
-            mqtt: { url: refusing.url },
-            devices: [
-              {
-                name: "Auth Light",
-                type: "z2m",
-                topic: Z2M_TOPIC,
-                capabilities: ["on_off"],
+        before(async () => {
+          assert(directory);
+          root = path.join(directory, `refused-${attempt.mac.slice(-2)}`);
+          mkdirSync(root);
+          refusing = new TestBroker(brokerBinary(), root, await freePort(), {
+            users: { backend: BACKEND_PASSWORD },
+            acl: AUTH.acl,
+          });
+          await refusing.start();
+          retrying = await startBridge(
+            {
+              bridge: {
+                name: "MQTT auth retry",
+                mac: attempt.mac,
+                pincode: "031-45-154",
+                port: 0,
               },
-            ],
-            metrics: { port: 0, bind: "127.0.0.1" },
-          },
-          { username: "hoboken", password: HOBOKEN_SENTINEL },
-        );
-      });
-
-      after(async () => {
-        try {
-          await retrying?.shutdown();
-        } finally {
-          try {
-            await refusing?.stop();
-          } finally {
-            await accepting?.stop();
-          }
-        }
-      });
-
-      test("a refused login is retried until the broker accepts it", async () => {
-        assert(root && refusing && retrying);
-        const port = retrying.metricsPort;
-        await poll(async () => {
-          const metrics = await scrape(port);
-          return (
-            (sample(metrics, "hoboken_mqtt_errors_total") ?? 0) >= 2 &&
-            sample(metrics, "hoboken_mqtt_connected") === 0
+              mqtt: { url: refusing.url },
+              devices: [
+                {
+                  name: "Auth Light",
+                  type: "z2m",
+                  topic: Z2M_TOPIC,
+                  capabilities: ["on_off"],
+                },
+              ],
+              metrics: { port: 0, bind: "127.0.0.1" },
+            },
+            attempt.credentials,
           );
         });
-        await refusing.stop();
-        accepting = new TestBroker(brokerBinary(), root, refusing.port, AUTH);
-        await accepting.start();
-        await poll(
-          async () =>
-            sample(await scrape(port), "hoboken_mqtt_connected") === 1,
-          20000,
-        );
+
+        after(async () => {
+          try {
+            await retrying?.shutdown();
+          } finally {
+            try {
+              await refusing?.stop();
+            } finally {
+              await accepting?.stop();
+            }
+          }
+        });
+
+        test("a refused connection is retried until the broker accepts it", async () => {
+          assert(root && refusing && retrying);
+          const port = retrying.metricsPort;
+          await poll(async () => {
+            const metrics = await scrape(port);
+            return (
+              (sample(metrics, "hoboken_mqtt_errors_total") ?? 0) >= 2 &&
+              sample(metrics, "hoboken_mqtt_connected") === 0
+            );
+          });
+          await refusing.stop();
+          accepting = new TestBroker(
+            brokerBinary(),
+            root,
+            refusing.port,
+            attempt.accepted,
+          );
+          await accepting.start();
+          await poll(
+            async () =>
+              sample(await scrape(port), "hoboken_mqtt_connected") === 1,
+            20000,
+          );
+        });
       });
-    });
   },
 );
