@@ -34,7 +34,7 @@ bun install               # Install dependencies
 make lint                 # tsc --noEmit, ESLint, Renovate config validation, Prettier
 make test                 # Unit tests with coverage
 make test-broker-deps     # System packages for the pinned Mosquitto build
-make test-integration     # WLED, heated bedding, and authenticated broker round trips (Node.js)
+make test-integration     # WLED, heated bedding, authenticated broker, and refused subscription round trips (Node.js)
 make test-screenshot      # Compare status page against golden file (Docker)
 make run                  # Run with Node.js
 make demo                 # Serve the status page with sample data
@@ -98,6 +98,17 @@ Each module is independently testable with dependency injection:
   to `MIN_BACKOFF`. The doubled period is the wait after that attempt fails.
   Counting `reconnect` rather than `error`, `close`, or `offline` counts a
   failed attempt once.
+- **Main MQTT subscription results**: the main client's connect handler passes
+  `subscribe` a callback, and the client sets `resubscribe: false`. With
+  mqtt.js's own resubscribe on, it re-sends the earlier subscriptions before the
+  handler runs and without a callback, so the handler's call has nothing left to
+  send and a refusal after a reconnect goes unreported. mqtt.js reports a SUBACK
+  failure code (bit 0x80) as an error whose `packet.granted` holds one code per
+  requested topic, while the grants argument still carries the requested QoS; a
+  grant of 128 without an error counts as a refusal too. Codes name topics only
+  when their count matches the request. A refusal logs the refused topics and
+  any other failure logs every requested topic, each as one `log.error` line and
+  one `mqttErrors` count per `subscribe` call. The connection stays up.
 - **State cache**: `Map<string, Z2MState>` in bridge.ts, keyed by device topic.
 - **Dashboard browser support**: The status page targets modern browsers
   (Chrome/Edge 111+, Safari 18+). Features like the View Transitions API are

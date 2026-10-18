@@ -32,7 +32,7 @@ import type { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { connect } from "mqtt";
+import { connect, type ISubscriptionGrant } from "mqtt";
 import { Registry } from "prom-client";
 import {
   credentialOptions,
@@ -77,6 +77,23 @@ const WRITE_BACK_SUPPRESSION_MS = 500;
 const GET_RETRY_INITIAL_MS = 2000;
 const GET_RETRY_MAX_MS = 1_024_000;
 const GET_JITTER_FRACTION = 0.25;
+const SUBACK_FAILURE = 0x80;
+
+// A SUBACK carries one code per requested topic, in request order, so its
+// codes name topics only when the counts agree.
+function deniedTopics(
+  grants: readonly ISubscriptionGrant[],
+  codes: readonly unknown[] = [],
+): string[] {
+  const aligned = codes.length === grants.length ? codes : [];
+  return grants
+    .filter(
+      ({ qos }, i) =>
+        qos >= SUBACK_FAILURE ||
+        (typeof aligned[i] === "number" && aligned[i] >= SUBACK_FAILURE),
+    )
+    .map(({ topic }) => topic);
+}
 
 export function buildStatusData(
   config: Config,
@@ -221,6 +238,9 @@ export async function startBridge(
         // reconnectOnConnackError is set; with it, a corrected broker user
         // list recovers without a restart.
         reconnectOnConnackError: true,
+        // mqtt.js resubscribes before the connect handler runs and discards
+        // the result, which would hide a denial after a reconnect.
+        resubscribe: false,
       })
     : undefined;
 
@@ -559,7 +579,16 @@ export async function startBridge(
           return [`${d.topic}/g`, `${d.topic}/c`];
       }
     });
-    mqttClient.subscribe(topics);
+    mqttClient.subscribe(topics, (error, grants = [], packet) => {
+      const denied = deniedTopics(grants, packet?.granted);
+      if (!error && denied.length === 0) return;
+      const refused = denied.length > 0;
+      const reason = error ? `: ${error.message}` : "";
+      log.error(
+        `MQTT subscription ${refused ? "refused" : "failed"} for ${(refused ? denied : topics).join(", ")}${reason}`,
+      );
+      metrics?.mqttErrors.inc();
+    });
 
     updateMetrics();
 

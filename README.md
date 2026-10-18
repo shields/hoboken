@@ -145,6 +145,10 @@ qualification.
   refuses the connection, with or without `mqtt.username`, is reported as
   `MQTT error: Connection refused: ...` and retried with that backoff (see
   [MQTT authentication](#mqtt-authentication)).
+- **MQTT subscriptions**: a broker that refuses a Zigbee2MQTT or WLED
+  subscription is reported as `MQTT subscription refused for ...` and counted;
+  the connection stays up and the refused devices report no state (see
+  [MQTT authentication](#mqtt-authentication)).
 - **Config changes**: restart the container (no hot reload)
 
 ### Metrics
@@ -298,6 +302,19 @@ cannot write without telling the sender, so a missing write permission shows up
 as a Zigbee2MQTT or WLED command that HomeKit reports as done while nothing
 happens.
 
+A broker that enforces read permissions when a client subscribes, such as EMQX,
+HiveMQ, or Mosquitto with its dynamic security plugin, refuses the subscription
+instead. The Zigbee2MQTT and WLED connection then logs
+`MQTT subscription refused for <topics>: ...`, naming only the topics the broker
+refused, counts one error in `hoboken_mqtt_errors_total` for the subscription,
+and keeps the connection open, so the topics the broker granted keep working
+while the refused devices report no state. Every reconnect subscribes again and
+reports a refusal again. The line says `failed` instead of `refused` and names
+every topic when the subscription ended without a usable answer from the broker,
+such as a connection that closed first. The heated bedding connection treats a
+refused subscription as a failed connection: it logs `mqtt_subscription_failed`,
+counts it in the same metric, and reconnects with backoff.
+
 ### MAC and PIN Generation
 
 The bridge MAC must be a locally-administered unicast address (bit 1 of the
@@ -350,8 +367,9 @@ make run     # Run with Node.js
 On Debian or Ubuntu, install the broker build packages with
 `make test-broker-deps`. Then run `make test-integration` on Node.js 26.
 The target builds the pinned Mosquitto release and runs the existing WLED
-tests, heated bedding tests over paired HAP HTTP and MQTT 5 connections, and an
-authenticated broker round trip.
+tests, heated bedding tests over paired HAP HTTP and MQTT 5 connections, an
+authenticated broker round trip, and a round trip with a broker that refuses
+subscriptions.
 Use `NODE=/path/to/node make test-integration` to select the runtime.
 
 Heated bedding integration covers reported state on both zones, fan-write
@@ -367,6 +385,12 @@ get through the topic permissions, that the status page and metrics never carry
 the password, that `main.ts` exits without a password source, and that a login
 the broker first refuses, with credentials or without, is retried until the
 broker accepts it.
+
+The refused-subscription round trip runs an in-process broker that refuses
+chosen topics. It shows that the bridge names only the refused topic, counts
+the refusal once, stays connected, keeps delivering the topic the broker
+granted, says nothing when a reconnect is granted, and reports a refusal that
+begins at a later reconnect.
 
 To qualify the complete controller path, run Tucson's `make homekit` target
 with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 26.

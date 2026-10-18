@@ -36,6 +36,7 @@ import {
 import type { Config, MQTTCredentials } from "../src/config.ts";
 import { HeatedBeddingSource } from "../src/heated-bedding-source.ts";
 import type {
+  ClientSubscribeCallback,
   IClientOptions,
   IClientPublishOptions,
   IClientSubscribeOptions,
@@ -78,17 +79,20 @@ class FakeHAPConnection extends EventEmitter {
 
 const MQTTJS_RECONNECT_PERIOD = 1000;
 
+type SubscribeComplete = ClientSubscribeCallback;
+type Suback = NonNullable<Parameters<ClientSubscribeCallback>[2]>;
+
 // eslint-disable-next-line unicorn/prefer-event-target -- mocks mqtt.js EventEmitter API
 class MockMqttClient extends EventEmitter {
   connected = false;
   url = "";
   subscriptions: string[][] = [];
+  subscribeCompletions: (SubscribeComplete | undefined)[] = [];
   published: { topic: string; message: string }[] = [];
   options: IClientOptions | undefined;
   heatedBeddingSubscriptions:
     Record<string, IClientSubscribeOptions> | undefined;
-  acknowledged:
-    ((error: Error | null, grants?: ISubscriptionGrant[]) => void) | undefined;
+  acknowledged: SubscribeComplete | undefined;
   heatedBeddingPublications: {
     topic: string;
     message: string;
@@ -141,10 +145,12 @@ class MockMqttClient extends EventEmitter {
 
   subscribe(
     topics: string[] | Record<string, IClientSubscribeOptions>,
-    complete?: (error: Error | null, grants?: ISubscriptionGrant[]) => void,
+    complete?: SubscribeComplete,
   ): this {
-    if (Array.isArray(topics)) this.subscriptions.push(topics);
-    else {
+    if (Array.isArray(topics)) {
+      this.subscriptions.push(topics);
+      this.subscribeCompletions.push(complete);
+    } else {
       this.heatedBeddingSubscriptions = topics;
       this.acknowledged = complete;
     }
@@ -621,6 +627,7 @@ describe("startBridge", () => {
       expect(legacy.options).toStrictEqual({
         reconnectPeriod: 1000,
         reconnectOnConnackError: true,
+        resubscribe: false,
       });
       expect(heatedBedding.url).toBe(config.mqtt.url);
       expect(heatedBedding.options?.protocolVersion).toBe(5);
@@ -1989,6 +1996,186 @@ function loginConfig(config: Config = testConfig()): Config {
   };
 }
 
+function captureConsole() {
+  const spies = (["log", "warn", "error"] as const).map((method) =>
+    jest.spyOn(console, method).mockImplementation(() => {
+      /* captured */
+    }),
+  );
+  return {
+    lines: () =>
+      spies.flatMap((spy) => spy.mock.calls.map((call) => call.join(" "))),
+    restore: () => {
+      for (const spy of spies) spy.mockRestore();
+    },
+  };
+}
+
+describe("startBridge subscription results", () => {
+  const LIVING_ROOM = "zigbee2mqtt/living_room";
+  const BEDROOM = "zigbee2mqtt/bedroom";
+  const granted: ISubscriptionGrant[] = [
+    { topic: LIVING_ROOM, qos: 0 },
+    { topic: BEDROOM, qos: 0 },
+  ];
+  let output: ReturnType<typeof captureConsole>;
+
+  beforeEach(() => {
+    output = captureConsole();
+  });
+
+  afterEach(() => {
+    output.restore();
+  });
+
+  function suback(...codes: number[]): Suback {
+    return { cmd: "suback", messageId: 1, granted: codes };
+  }
+
+  // mqtt.js rejects a SUBACK that carries a failure code, so its callback gets
+  // an error whose packet holds the codes and the requested qos in granted.
+  function refused(...codes: number[]): Error {
+    return Object.assign(new Error("Subscribe error: Unspecified error"), {
+      packet: suback(...codes),
+    });
+  }
+
+  function complete(
+    error: Error | null,
+    grants?: ISubscriptionGrant[],
+    packet?: Suback,
+  ): void {
+    const completion = mockClient.subscribeCompletions.at(-1);
+    expect(completion).toBeInstanceOf(Function);
+    completion?.(error, grants, packet);
+  }
+
+  async function connected() {
+    const handle = await startBridge(metricsConfig());
+    emitConnect();
+    return handle;
+  }
+
+  async function errorCount(port: number | undefined): Promise<number> {
+    const response = await fetch(`http://127.0.0.1:${String(port)}/metrics`);
+    const match = /^hoboken_mqtt_errors_total (\d+)$/m.exec(
+      await response.text(),
+    );
+    return Number(match?.[1]);
+  }
+
+  function failures(): string[] {
+    return output.lines().filter((line) => line.includes("subscription"));
+  }
+
+  test("a granted subscription logs nothing and counts nothing", async () => {
+    const { metricsPort, shutdown } = await connected();
+    try {
+      complete(null, granted, suback(0, 0));
+      expect(failures()).toEqual([]);
+      expect(await errorCount(metricsPort)).toBe(0);
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("a topic granted as 128 is named and counted", async () => {
+    const { metricsPort, shutdown } = await connected();
+    try {
+      complete(null, [granted[0]!, { topic: BEDROOM, qos: 128 }]);
+      expect(failures()).toHaveLength(1);
+      expect(failures()[0]).toContain("refused for zigbee2mqtt/bedroom");
+      expect(failures()[0]).not.toContain(LIVING_ROOM);
+      expect(await errorCount(metricsPort)).toBe(1);
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("a partly denied subscription names only the denied topic", async () => {
+    const { metricsPort, shutdown } = await connected();
+    try {
+      complete(refused(0, 128), granted, suback(0, 128));
+      expect(failures()).toHaveLength(1);
+      expect(failures()[0]).toContain(
+        "refused for zigbee2mqtt/bedroom: Subscribe error: Unspecified error",
+      );
+      expect(failures()[0]).not.toContain(LIVING_ROOM);
+      expect(await errorCount(metricsPort)).toBe(1);
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("a fully denied subscription names every topic and counts once", async () => {
+    const { metricsPort, shutdown } = await connected();
+    try {
+      complete(refused(128, 128), granted, suback(128, 128));
+      expect(failures()).toHaveLength(1);
+      expect(failures()[0]).toContain(
+        "refused for zigbee2mqtt/living_room, zigbee2mqtt/bedroom",
+      );
+      expect(await errorCount(metricsPort)).toBe(1);
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("an error without a broker reply names every requested topic", async () => {
+    const { metricsPort, shutdown } = await connected();
+    try {
+      complete(new Error("Connection closed"));
+      expect(failures()).toHaveLength(1);
+      expect(failures()[0]).toContain(
+        "failed for zigbee2mqtt/living_room, zigbee2mqtt/bedroom: Connection closed",
+      );
+      expect(await errorCount(metricsPort)).toBe(1);
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("a reply that does not match the request names every requested topic", async () => {
+    const { metricsPort, shutdown } = await connected();
+    try {
+      complete(refused(128), granted, suback(128));
+      expect(failures()).toHaveLength(1);
+      expect(failures()[0]).toContain(
+        "failed for zigbee2mqtt/living_room, zigbee2mqtt/bedroom",
+      );
+      expect(await errorCount(metricsPort)).toBe(1);
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("a denial leaves the connection up", async () => {
+    const { shutdown } = await connected();
+    const end = jest.spyOn(mockClient, "end");
+    try {
+      complete(refused(128, 128), granted, suback(128, 128));
+      expect(end).not.toHaveBeenCalled();
+      expect(mockClient.connected).toBe(true);
+    } finally {
+      await shutdown();
+    }
+  });
+
+  test("every connection reports the result of its own subscription", async () => {
+    const { metricsPort, shutdown } = await connected();
+    try {
+      complete(null, granted, suback(0, 0));
+      emitConnect();
+      expect(mockClient.subscribeCompletions).toHaveLength(2);
+      complete(refused(0, 128), granted, suback(0, 128));
+      expect(failures()).toHaveLength(1);
+      expect(await errorCount(metricsPort)).toBe(1);
+    } finally {
+      await shutdown();
+    }
+  });
+});
+
 describe("startBridge with MQTT credentials", () => {
   test("a devices-only bridge authenticates and retries a refused login", async () => {
     const count = mockClients.length;
@@ -2004,6 +2191,7 @@ describe("startBridge with MQTT credentials", () => {
         auth: "",
         reconnectPeriod: 1000,
         reconnectOnConnackError: true,
+        resubscribe: false,
       });
     } finally {
       await shutdown();
@@ -2025,6 +2213,7 @@ describe("startBridge with MQTT credentials", () => {
         auth: "",
         reconnectPeriod: 1000,
         reconnectOnConnackError: true,
+        resubscribe: false,
       });
       expect(heatedBedding.url).toBe(config.mqtt.url);
       expect(legacy.url).not.toContain(PASSWORD);
@@ -2131,21 +2320,6 @@ describe("startBridge with MQTT credentials", () => {
       expect(mockClients.length).toBe(count);
     },
   );
-
-  function captureConsole() {
-    const spies = (["log", "warn", "error"] as const).map((method) =>
-      jest.spyOn(console, method).mockImplementation(() => {
-        /* captured */
-      }),
-    );
-    return {
-      lines: () =>
-        spies.flatMap((spy) => spy.mock.calls.map((call) => call.join(" "))),
-      restore: () => {
-        for (const spy of spies) spy.mockRestore();
-      },
-    };
-  }
 
   test("the password never reaches logs, the status page, or metrics", async () => {
     const output = captureConsole();
@@ -2278,12 +2452,13 @@ describe("main MQTT connection reconnects", () => {
     };
   }
 
-  test("an anonymous bridge passes only the reconnect options", async () => {
+  test("an anonymous bridge passes only the reconnect and subscription options", async () => {
     const { shutdown } = await startBridge(testConfig());
     try {
       expect(mockClient.options).toStrictEqual({
         reconnectPeriod: 1000,
         reconnectOnConnackError: true,
+        resubscribe: false,
       });
     } finally {
       await shutdown();
