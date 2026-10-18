@@ -249,7 +249,7 @@ of intersecting capabilities.
 ### Prerequisites
 
 - [Bun](https://bun.sh/) (package manager and test runner)
-- Node.js 24+ (runtime, for TypeScript type stripping)
+- Node.js 26+ (runtime, for TypeScript type stripping)
 - Make (task runner)
 - A C compiler, CMake, OpenSSL headers, and cJSON headers for integration tests
 - A C++ toolchain and Python, only where re2 (Renovate's regex engine, used by
@@ -273,7 +273,7 @@ make run     # Run with Node.js
 ```
 
 On Debian or Ubuntu, install the broker build packages with
-`make test-broker-deps`. Then run `make test-integration` on Node.js 24.
+`make test-broker-deps`. Then run `make test-integration` on Node.js 26.
 The target builds the pinned Mosquitto release and runs the existing WLED
 tests plus heated bedding tests over paired HAP HTTP and MQTT 5 connections.
 Use `NODE=/path/to/node make test-integration` to select the runtime.
@@ -285,7 +285,7 @@ The simulated MQTT controller exercises the contract; actual Sunbeam, Home
 app, and Siri qualification still requires hardware.
 
 To qualify the complete controller path, run Tucson's `make homekit` target
-with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 24.
+with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 26.
 The `integration/tucson-roundtrip.ts` driver pairs through HAP HTTP and
 checks writes, controller-originated updates, and Tucson shutdown. Both
 repositories require their frozen dependencies; missing prerequisites fail
@@ -299,8 +299,8 @@ qualification.
 docker build -t hoboken .
 ```
 
-Multi-stage build: Bun installs deps, distroless Node.js 24 runs the app.
-Image: `gcr.io/distroless/nodejs24-debian13` (no shell, minimal attack surface).
+Multi-stage build: Bun installs deps, distroless Node.js 26 runs the app.
+Image: `gcr.io/distroless/nodejs26-debian13` (no shell, minimal attack surface).
 
 ### Kubernetes
 

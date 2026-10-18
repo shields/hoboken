@@ -9,7 +9,9 @@ to collectively as heated bedding. Use short zone names such as "Bed Side A".
 
 ## Toolchain
 
-- **Runtime**: Node.js 24 LTS with unflagged TypeScript type stripping
+- **Runtime**: Node.js 26 with unflagged TypeScript type stripping; the
+  production image, CI's `node-version`, and the Tucson qualification driver
+  must name the same major (`test/toolchain.test.ts`)
 - **Package manager**: Bun (`bun install`, `bun.lock`)
 - **Bun version**: `packageManager` in package.json, which CI installs; both
   Dockerfiles' `oven/bun` tags must match (`test/toolchain.test.ts`)
@@ -21,7 +23,7 @@ to collectively as heated bedding. Use short zone names such as "Bed Side A".
 - **Test runner**: Bun test (`bun test`, `bun test --coverage`)
 - **TypeScript 6.0**: type checking only (`noEmit`), `erasableSyntaxOnly`
 - **ESLint 10**: `typescript-eslint` with `strictTypeChecked` + `stylisticTypeChecked`
-- **Container**: `gcr.io/distroless/nodejs24-debian13`
+- **Container**: `gcr.io/distroless/nodejs26-debian13`
 
 ## Commands
 
@@ -41,7 +43,7 @@ make golden-screenshot    # Regenerate status page golden file (Docker)
 
 Follow the [shared TypeScript guide](https://github.com/shields/right-answers/blob/main/typescript.md)
 and its configuration baselines. TypeScript remains at 6.0.3 because the current
-typescript-eslint 8.71.1 peer range is `>=4.8.4 <6.1.0`, excluding TypeScript
+typescript-eslint 8.71.2 peer range is `>=4.8.4 <6.1.0`, excluding TypeScript
 7.0.2. Recheck compatibility before upgrading the compiler. ESLint 10 is supported
 by that parser release.
 

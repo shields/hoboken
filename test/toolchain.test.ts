@@ -45,3 +45,18 @@ test("package.json and Dockerfile.playwright pin the same Playwright release", a
   expect(version).toMatch(/^\d+\.\d+\.\d+$/);
   expect(await dockerPlaywrightVersion()).toBe(version);
 });
+
+test("the production image, CI, and the Tucson driver use one Node.js major", async () => {
+  const image = /^FROM gcr\.io\/distroless\/nodejs(\d+)-/m.exec(
+    await repoFile("Dockerfile").text(),
+  )?.[1];
+  expect(image).toMatch(/^\d+$/);
+  expect({
+    ci: /^\s*node-version: (\d+)$/m.exec(
+      await repoFile(".github/workflows/build.yml").text(),
+    )?.[1],
+    driver: /process\.versions\.node\.startsWith\("(\d+)\."\)/.exec(
+      await repoFile("integration/tucson-roundtrip.ts").text(),
+    )?.[1],
+  }).toEqual({ ci: image, driver: image });
+});

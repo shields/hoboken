@@ -40,8 +40,8 @@ async function poll(predicate: () => Promise<boolean>): Promise<void> {
 }
 
 assert(
-  process.versions.node.startsWith("24."),
-  "Qualification requires Node.js 24",
+  process.versions.node.startsWith("26."),
+  "Qualification requires Node.js 26",
 );
 const url = process.env.MQTT_TEST_URL;
 assert(url, "MQTT_TEST_URL must identify the qualification broker");
