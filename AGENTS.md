@@ -118,6 +118,14 @@ Each module is independently testable with dependency injection:
 - All HAP objects instantiated directly (no mocking hap-nodejs)
 - MQTT client is the only mock: use `bun:test` module mocking for `mqtt`
 - Use Bun's fake timers for scene auto-reset tests
+- **Timing**: never load the machine to provoke a race (CPU burners such as
+  `yes > /dev/null`, stress tools, floods of parallel runs). Make the ordering
+  deterministic instead: fake timers or an injected clock in unit tests; in
+  integration tests, have the simulated device or controller delay, drop, or
+  reorder the specific message (the heated bedding controller's `mode` drops or
+  rejects writes this way), and poll for the outcome with a deadline.
+- **Processes**: stop every process a test or probe starts before the command
+  returns.
 - Tests must pass: `make lint test`
 - **Screenshot golden file**: `demo/status-page.png` is a committed screenshot
   of the status page rendered from `demo/fixture.ts` inside a Docker container
