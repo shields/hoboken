@@ -34,7 +34,7 @@ bun install               # Install dependencies
 make lint                 # tsc --noEmit, ESLint, Renovate config validation, Prettier
 make test                 # Unit tests with coverage
 make test-broker-deps     # System packages for the pinned Mosquitto build
-make test-integration     # WLED, heated bedding, authenticated broker, refused subscription, and dropped session round trips (Node.js)
+make test-integration     # WLED, heated bedding, authenticated broker, refused subscription, dropped session, and malformed URL round trips (Node.js)
 make test-screenshot      # Compare status page against golden file (Docker)
 make run                  # Run with Node.js
 make demo                 # Serve the status page with sample data
@@ -51,7 +51,7 @@ by that parser release.
 
 Each module is independently testable with dependency injection:
 
-- `src/config.ts` — Config loading/validation, MQTT credential resolution, type definitions
+- `src/config.ts` — Config loading/validation, MQTT URL checks, MQTT credential resolution, type definitions
 - `src/convert.ts` — Pure value conversion functions (Z2M ↔ HomeKit)
 - `src/accessories.ts` — HAP accessory/scene creation, takes `PublishFn`/`GetStateFn`
 - `src/bridge.ts` — MQTT client, bridge wiring, state cache, lifecycle
@@ -89,6 +89,33 @@ Each module is independently testable with dependency injection:
   without credentials, and credentials without a configured username, so a
   library caller cannot connect anonymously or under the wrong name. The
   messages name the fields but never echo values.
+- **MQTT URL**: a URL that is not well formed cannot be reliably stripped of
+  its credentials, so no part of it is printed anywhere. `isMQTTURL` accepts a
+  URL only if mqtt.js can connect with it as written. Node's legacy
+  `url.parse`, which mqtt.js uses, must find a scheme that mqtt.js builds a
+  stream for (`mqtt`, `mqtts`, `tcp`, `ssl`, `tls`, `ws`, `wss`), a host, and a
+  port of 1 or more, and the WHATWG `URL` parser must find the same host. The
+  second check rejects what `url.parse` truncates without complaint, such as a
+  space, `;`, or `%` in the host, where mqtt.js would connect to the text
+  before it. A bare hostname fails because mqtt.js throws "Missing protocol".
+  mqtt.js would map an unknown scheme to `mqtt`, so the scheme list is stricter
+  than mqtt.js. `validateConfig`, `startBridge`, and the `HeatedBeddingMQTT`
+  constructor call `assertMQTTURL`, which throws "mqtt.url is not a valid MQTT
+  URL". The log line and status page use `displayMQTTURL`, which shows
+  "(not shown)" for a URL that does not pass; `startBridge` has already refused
+  such a URL, so that is a second layer. Both clients create and connect
+  through `withoutErrorMessage`, which replaces any error that mqtt.js or Node
+  throws synchronously, because Node quotes the URL in them, with "MQTT client
+  could not be started" and keeps only a string `code`. `isMQTTURL` runs the
+  legacy parser with `process.noDeprecation` set, because Node 22 and 24 emit
+  DEP0170 with the whole URL for a port that `url.parse` finds invalid but
+  `new URL` accepts, as in `mqtt:user:pw@host:1x`, and Node 24 emits DEP0169
+  for any `url.parse` call outside `node_modules`; Node 26 throws an error that
+  quotes the URL instead. A process emits each warning once, so
+  `test/mqtt-url-report.ts` checks the shared lists in `test/mqtt-urls.ts` in a
+  fresh process, which `config.test.ts` starts under Bun and
+  `integration/mqtt-url-rejection.ts` starts under Node. Every malformed URL in
+  those lists carries a secret, so any output that quotes part of one fails.
 - **Main MQTT reconnect backoff**: the main client sets
   `reconnectOnConnackError` in every configuration, because mqtt.js otherwise
   never retries after a refused login, and starts `reconnectPeriod` at the
@@ -212,7 +239,8 @@ make lint test
 - `bridge.pincode`: format `XXX-XX-XXX` (digits)
 - `bridge.port`: positive integer
 - `bridge.bind`: optional string (network interface name or IP for mDNS)
-- `mqtt.url`: non-empty string
+- `mqtt.url`: non-empty string that passes `isMQTTURL`, checked before
+  `mqtt.username`; the error never quotes the URL
 - `mqtt.username`: optional non-empty string of at most 65535 bytes; cannot
   accompany userinfo in `mqtt.url`
 - `mqtt.passwordFile`: optional non-empty path; `mqtt.password` is rejected so

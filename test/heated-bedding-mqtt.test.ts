@@ -25,6 +25,7 @@ import type {
 import pino from "pino";
 import type { MQTTCredentials } from "../src/config.ts";
 import { HeatedBeddingMQTT } from "../src/heated-bedding-mqtt.ts";
+import { INVALID_MQTT_URL, MALFORMED_MQTT_URLS, SECRET } from "./mqtt-urls.ts";
 
 const ZONE = {
   name: "Bed Side A",
@@ -1084,5 +1085,90 @@ describe("heated bedding MQTT change notifications", () => {
       hapStatus: HAPStatus.SERVICE_COMMUNICATION_FAILURE,
     });
     expect(owner.source.pendingCount(TOPIC)).toBe(0);
+  });
+});
+
+describe("heated bedding MQTT owner with an mqtt.url that is not well formed", () => {
+  const QUOTING_ERROR_MESSAGE = `The argument 'url' mqtt://user:${SECRET}@localhost:1x. Received 'Invalid port in url'`;
+  const REDACTED_MESSAGE = "MQTT client could not be started";
+  let clients: TestMqttClient[];
+  let owner: HeatedBeddingMQTT | undefined;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    clients = [];
+    owner = undefined;
+  });
+
+  afterEach(async () => {
+    await owner?.stop();
+    jest.useRealTimers();
+  });
+
+  function failure(create: () => unknown): Error & { code?: unknown } {
+    try {
+      create();
+    } catch (error) {
+      return error as Error;
+    }
+    throw new Error("expected the call to throw");
+  }
+
+  function createOwner(
+    url: string,
+    connect: (options: IClientOptions) => MqttClient,
+  ): HeatedBeddingMQTT {
+    return new HeatedBeddingMQTT(url, [ZONE], {
+      connect: (_url, options) => connect(options),
+    });
+  }
+
+  function recordingClient(options: IClientOptions): MqttClient {
+    const client = new TestMqttClient(options);
+    clients.push(client);
+    return client as unknown as MqttClient;
+  }
+
+  test.each(MALFORMED_MQTT_URLS)(
+    "refuses %j without connecting or quoting it",
+    (url) => {
+      expect(
+        failure(() => {
+          owner = createOwner(url, recordingClient);
+        }),
+      ).toStrictEqual(new Error(INVALID_MQTT_URL));
+      expect(clients).toHaveLength(0);
+    },
+  );
+
+  test.each([
+    [
+      "creating the client",
+      (options: IClientOptions) => {
+        recordingClient(options);
+        throw Object.assign(new Error(QUOTING_ERROR_MESSAGE), {
+          code: "ERR_INVALID_ARG_VALUE",
+        });
+      },
+    ],
+    [
+      "connecting the client",
+      (options: IClientOptions) => {
+        const client = new TestMqttClient(options);
+        client.connect = () => {
+          throw Object.assign(new Error(QUOTING_ERROR_MESSAGE), {
+            code: "ERR_INVALID_ARG_VALUE",
+          });
+        };
+        return client as unknown as MqttClient;
+      },
+    ],
+  ])("rethrows an error from %s without its message", (_step, connect) => {
+    const error = failure(() => {
+      owner = createOwner("mqtt://localhost", connect);
+    });
+    expect(error.message).toBe(REDACTED_MESSAGE);
+    expect(error.code).toBe("ERR_INVALID_ARG_VALUE");
+    expect(error.stack).not.toContain(SECRET);
   });
 });

@@ -145,8 +145,10 @@ qualification.
   that accepts the login and then drops the session, such as one that
   disconnects a client after a denied publish, is retried at the growing
   interval rather than every second.
-- **MQTT credentials**: misconfiguration exits at startup. A broker that
-  refuses the connection, with or without `mqtt.username`, is reported as
+- **MQTT URL and credentials**: a malformed `mqtt.url` and credential
+  misconfiguration exit at startup (see [MQTT URL](#mqtt-url) and
+  [MQTT authentication](#mqtt-authentication)). A broker that refuses the
+  connection, with or without `mqtt.username`, is reported as
   `MQTT error: Connection refused: ...` and retried with that backoff (see
   [MQTT authentication](#mqtt-authentication)).
 - **MQTT subscriptions**: a broker that refuses a Zigbee2MQTT or WLED
@@ -259,6 +261,27 @@ specific network interface. Without it, hap-nodejs advertises on all interfaces,
 which in Kubernetes with `hostNetwork: true` can cause mDNS to advertise a
 cluster-internal IP (e.g., `cni0`) instead of the LAN IP. Set `bind` to the
 host's LAN interface name (e.g., `eno1`) so HomeKit clients can reach the bridge.
+
+### MQTT URL
+
+`mqtt.url` names the broker as `scheme://host[:port]`, such as
+`mqtt://mosquitto:1883` or `mqtts://broker.example.com:8883`. The scheme is
+`mqtt`, `mqtts`, `tcp`, `ssl`, `tls`, `ws`, or `wss`, the host is required, and
+a port, if present, is 1 to 65535. A bare hostname does not work, because
+mqtt.js requires a scheme. Write a non-ASCII hostname in punycode.
+
+Hoboken refuses to start with `mqtt.url is not a valid MQTT URL` when the URL
+breaks these rules. The URL can carry credentials, and a URL that is not well
+formed cannot be reliably stripped of them, so no part of it appears in that
+error, the logs, the status page, the metrics, or a process warning. Hoboken
+parses the URL as mqtt.js does, with Node.js's legacy `url.parse`, and again
+with the WHATWG `URL` parser, and requires both to find the same host. That
+rejects what `url.parse` alone accepts and mqtt.js then connects with, such as
+a port that is not a number or a stray character in the host, where `url.parse`
+drops the rest of the host and mqtt.js connects to what remains. If mqtt.js
+still fails synchronously while it creates a client, Hoboken reports only
+`MQTT client could not be started` and the error code, because Node.js quotes the
+URL in those errors.
 
 ### MQTT authentication
 
@@ -389,7 +412,8 @@ On Debian or Ubuntu, install the broker build packages with
 The target builds the pinned Mosquitto release and runs the existing WLED
 tests, heated bedding tests over paired HAP HTTP and MQTT 5 connections, an
 authenticated broker round trip, a round trip with a broker that refuses
-subscriptions, and a round trip with a broker that drops every session.
+subscriptions, a round trip with a broker that drops every session, and a round
+trip with a malformed `mqtt.url`.
 Use `NODE=/path/to/node make test-integration` to select the runtime.
 
 Heated bedding integration covers reported state on both zones, fan-write
@@ -416,6 +440,14 @@ The dropped-session round trip runs an in-process broker that accepts every
 login and closes each session as soon as the bridge subscribes. It shows that
 the Zigbee2MQTT and WLED connection waits at least 1, 2, and 4 seconds before
 its next three attempts rather than retrying every second.
+
+The malformed-URL round trip starts `main.ts` with `mqtt.url` values that carry
+a password and are not well formed, such as a port that is not a number, a space
+in the host, a missing host, and a bare hostname. It shows that startup exits
+with `mqtt.url is not a valid MQTT URL` and that no output, including a Node.js
+deprecation warning, contains any part of the URL. It also shows that `startBridge`
+refuses the same URLs without a log line or a warning, and that a fresh Node.js
+process accepts every form that mqtt.js can use and raises no warning.
 
 To qualify the complete controller path, run Tucson's `make homekit` target
 with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 26.

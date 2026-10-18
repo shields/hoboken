@@ -81,7 +81,7 @@ export default defineConfig(
     },
   },
   {
-    files: ["integration/*-roundtrip.ts"],
+    files: ["integration/*-roundtrip.ts", "integration/mqtt-url-rejection.ts"],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/no-non-null-assertion": "off",

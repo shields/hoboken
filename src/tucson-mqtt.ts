@@ -19,7 +19,12 @@ import {
   type MqttClient,
 } from "mqtt";
 import pino, { type Logger } from "pino";
-import { credentialOptions, type MQTTCredentials } from "./config.ts";
+import {
+  assertMQTTURL,
+  credentialOptions,
+  withoutErrorMessage,
+  type MQTTCredentials,
+} from "./config.ts";
 
 export interface TucsonMQTTSource {
   connect: () => number;
@@ -91,6 +96,7 @@ export class TucsonMQTT<S extends TucsonMQTTSource> {
     createSource: SourceFactory<S>,
     options: MqttOptions = {},
   ) {
+    assertMQTTURL(url);
     this.#url = url;
     this.#credentials = options.credentials;
     this.#connect = options.connect ?? connect;
@@ -189,18 +195,23 @@ export class TucsonMQTT<S extends TucsonMQTTSource> {
 
   #attempt(): void {
     const generation = this.source.connect();
-    const client = this.#connect(this.#url, {
-      ...(this.#credentials && credentialOptions(this.#credentials)),
-      protocolVersion: 5,
-      clean: true,
-      properties: { sessionExpiryInterval: 0, maximumPacketSize: MAX_PAYLOAD },
-      reconnectPeriod: 0,
-      queueQoSZero: false,
-      resubscribe: false,
-      keepalive: 15,
-      connectTimeout: CONNECT_TIMEOUT,
-      manualConnect: true,
-    });
+    const client = withoutErrorMessage(() =>
+      this.#connect(this.#url, {
+        ...(this.#credentials && credentialOptions(this.#credentials)),
+        protocolVersion: 5,
+        clean: true,
+        properties: {
+          sessionExpiryInterval: 0,
+          maximumPacketSize: MAX_PAYLOAD,
+        },
+        reconnectPeriod: 0,
+        queueQoSZero: false,
+        resubscribe: false,
+        keepalive: 15,
+        connectTimeout: CONNECT_TIMEOUT,
+        manualConnect: true,
+      }),
+    );
     this.#client = client;
     this.#logger.info({ event: "mqtt_connecting" }, "Connecting Tucson MQTT");
     client.on("connect", (packet) => {
@@ -302,7 +313,7 @@ export class TucsonMQTT<S extends TucsonMQTTSource> {
       this.#fail(client, "mqtt_connection_timeout");
     }, CONNECT_TIMEOUT);
     this.#deadline.unref();
-    client.connect();
+    withoutErrorMessage(() => client.connect());
   }
 
   #fail(

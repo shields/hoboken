@@ -34,6 +34,7 @@ import {
   Service,
 } from "@homebridge/hap-nodejs";
 import type { Config, MQTTCredentials } from "../src/config.ts";
+import { INVALID_MQTT_URL, MALFORMED_MQTT_URLS, SECRET } from "./mqtt-urls.ts";
 import { HeatedBeddingSource } from "../src/heated-bedding-source.ts";
 import type {
   ClientSubscribeCallback,
@@ -181,9 +182,11 @@ class MockMqttClient extends EventEmitter {
 // No state leaks between tests.
 let mockClient: MockMqttClient;
 const mockClients: MockMqttClient[] = [];
+let connectFailure: Error | undefined;
 
 mock.module("mqtt", () => ({
   connect: (url: string, options?: IClientOptions) => {
+    if (connectFailure !== undefined) throw connectFailure;
     mockClient = new MockMqttClient(options);
     mockClient.url = url;
     mockClients.push(mockClient);
@@ -1270,13 +1273,6 @@ describe("startBridge", () => {
     // Accessory's own pair handler calls the callback; our listener only logs.
     // eslint-disable-next-line @typescript-eslint/no-empty-function
     server!.emit("pair", "AB:CD:EF:01:23:45", Buffer.from("key"), () => {});
-    await shutdown();
-  });
-
-  test("unparseable MQTT URL does not crash", async () => {
-    const cfg = testConfig();
-    cfg.mqtt.url = "not a valid url";
-    const { shutdown } = await startBridge(cfg);
     await shutdown();
   });
 
@@ -2380,9 +2376,8 @@ describe("startBridge with MQTT credentials", () => {
 
   test.each([
     ["mqtt://legacy:LEGACYPW@localhost:1883", "mqtt://localhost:1883"],
-    ["//legacy:LEGACYPW@broker", "//broker"],
-    ["mqtt:legacy:LEGACYPW@localhost:1883", "mqtt:localhost:1883"],
-    [String.raw`mqtt:\\legacy:LEGACYPW@broker`, String.raw`mqtt:\\broker`],
+    ["ws://legacy:LEGACYPW@localhost:9001/mqtt", "ws://localhost:9001/mqtt"],
+    ["mqtt://legacy:LEGACYPW@[::1]", "mqtt://[::1]"],
   ])(
     "credentials embedded in the URL %s stay out of logs and the status page",
     async (url, sanitized) => {
@@ -2402,6 +2397,101 @@ describe("startBridge with MQTT credentials", () => {
         const lines = output.lines();
         expect(lines.some((line) => line.includes(sanitized))).toBe(true);
         for (const line of lines) expect(line).not.toContain("LEGACYPW");
+      } finally {
+        output.restore();
+      }
+    },
+  );
+});
+
+describe("startBridge with an mqtt.url that is not well formed", () => {
+  const warnings: string[] = [];
+  const record = (warning: Error) => {
+    warnings.push(`${warning.name}: ${warning.message}`);
+  };
+
+  beforeEach(() => {
+    warnings.length = 0;
+    process.on("warning", record);
+  });
+
+  afterEach(() => {
+    process.off("warning", record);
+    connectFailure = undefined;
+  });
+
+  async function failureOf(config: Config): Promise<unknown> {
+    try {
+      await startBridge(config);
+    } catch (error) {
+      return error;
+    }
+    throw new Error("expected startBridge to reject");
+  }
+
+  test.each(MALFORMED_MQTT_URLS)(
+    "refuses %j before creating anything and quotes none of it",
+    async (url) => {
+      const output = captureConsole();
+      const count = mockClients.length;
+      try {
+        const failure = await failureOf({
+          ...metricsConfig(),
+          mqtt: { url },
+          heatedBedding: HEATED_BEDDING,
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(failure).toStrictEqual(new Error(INVALID_MQTT_URL));
+        expect(mockClients.length).toBe(count);
+        expect(output.lines()).toStrictEqual([]);
+        expect(warnings).toStrictEqual([]);
+      } finally {
+        output.restore();
+      }
+    },
+  );
+
+  test("refuses a bridge that has only heated bedding", async () => {
+    const count = mockClients.length;
+    const failure = await failureOf({
+      ...testConfig(),
+      mqtt: { url: `mqtt://user:${SECRET}@localhost:1x` },
+      devices: [],
+      heatedBedding: HEATED_BEDDING,
+    });
+    expect(failure).toStrictEqual(new Error(INVALID_MQTT_URL));
+    expect(mockClients.length).toBe(count);
+  });
+
+  test.each([
+    ["a bridge with devices", testConfig()],
+    [
+      "a bridge with only heated bedding",
+      { ...testConfig(), devices: [], heatedBedding: HEATED_BEDDING },
+    ],
+  ])(
+    "rethrows an error that mqtt.js throws for %s without its message",
+    async (_name, config) => {
+      const output = captureConsole();
+      connectFailure = Object.assign(
+        new Error(
+          `The argument 'url' mqtt://user:${SECRET}@localhost:1x. Received 'Invalid port in url'`,
+        ),
+        { code: "ERR_INVALID_ARG_VALUE" },
+      );
+      try {
+        const failure = await failureOf(config);
+
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toBe(
+          "MQTT client could not be started",
+        );
+        expect((failure as { code?: unknown }).code).toBe(
+          "ERR_INVALID_ARG_VALUE",
+        );
+        expect((failure as Error).stack).not.toContain(SECRET);
+        for (const line of output.lines()) expect(line).not.toContain(SECRET);
       } finally {
         output.restore();
       }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import { readFileSync } from "node:fs";
+import { parse as parseLegacyURL } from "node:url";
 import { parse } from "yaml";
 import { tucsonTopic } from "./tucson-profile.ts";
 import type { CurtainConfig } from "./curtain-source.ts";
@@ -130,6 +131,17 @@ const PIN_RE = /^\d{3}-\d{2}-\d{3}$/;
 // leading slashes, with backslashes as slashes and the "//" optional. The
 // capture group is the text before the userinfo.
 const MQTT_URL_USERINFO_RE = /^((?:[^/\\?#:]+:[/\\]{0,2}|[/\\]{2}))[^/\\?#]+@/;
+// The schemes for which mqtt.js builds a Node.js stream. It connects over mqtt
+// or mqtts for any other scheme, and rejects a URL without one.
+const MQTT_URL_PROTOCOLS = new Set([
+  "mqtt:",
+  "mqtts:",
+  "tcp:",
+  "ssl:",
+  "tls:",
+  "ws:",
+  "wss:",
+]);
 
 // The message omits values, which can be secrets. Callers run this before a
 // section's required-field checks so that a misspelled required field is named
@@ -195,6 +207,7 @@ export function validateConfig(data: unknown): Config {
   if (typeof mqtt.url !== "string" || mqtt.url.length === 0) {
     throw new Error("mqtt.url must be a non-empty string");
   }
+  assertMQTTURL(mqtt.url);
   if (
     mqtt.username !== undefined &&
     (typeof mqtt.username !== "string" || mqtt.username.length === 0)
@@ -579,6 +592,65 @@ export function loadConfig(path: string): Config {
 
 export function stripMQTTUserinfo(url: string): string {
   return url.replace(MQTT_URL_USERINFO_RE, "$1");
+}
+
+// The legacy parser can warn, or throw an error, that quotes the whole URL,
+// userinfo included, and warns once per process that it is deprecated.
+function parseLegacy(url: string) {
+  const suppressed = process.noDeprecation === true;
+  process.noDeprecation = true;
+  try {
+    return parseLegacyURL(url, true);
+  } finally {
+    process.noDeprecation = suppressed;
+  }
+}
+
+// True for a URL that mqtt.js connects with as written. It parses the URL as
+// mqtt.js does, with the legacy url.parse, and as a WHATWG URL. Both must find
+// the same host, which rejects what url.parse alone accepts: a port that is not
+// a number, which it drops, and characters that it ends a host at and moves
+// into the path. Neither the URL nor an error about it leaves this function.
+export function isMQTTURL(url: string): boolean {
+  try {
+    const strict = new URL(url);
+    const legacy = parseLegacy(url);
+    return (
+      legacy.protocol !== null &&
+      MQTT_URL_PROTOCOLS.has(legacy.protocol) &&
+      legacy.hostname !== null &&
+      legacy.hostname !== "" &&
+      Number(legacy.port ?? 1) >= 1 &&
+      new URL(`${legacy.protocol}//${legacy.host ?? ""}`).host ===
+        strict.host.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function assertMQTTURL(url: string): void {
+  if (!isMQTTURL(url)) throw new Error("mqtt.url is not a valid MQTT URL");
+}
+
+// A URL that does not parse cannot be reliably stripped of credentials.
+export function displayMQTTURL(url: string): string {
+  return isMQTTURL(url) ? stripMQTTUserinfo(url) : "(not shown)";
+}
+
+// Node and mqtt.js quote the URL, userinfo included, in the errors that they
+// throw for a URL that they reject.
+export function withoutErrorMessage<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error: unknown) {
+    const failure: Error & { code?: string } = new Error(
+      "MQTT client could not be started",
+    );
+    const code = (error as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === "string") failure.code = code;
+    throw failure;
+  }
 }
 
 function decodePasswordFile(bytes: Uint8Array): string {

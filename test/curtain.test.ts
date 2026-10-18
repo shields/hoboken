@@ -18,6 +18,8 @@ import { parseCurtainState, curtainMotion } from "../src/curtain-profile.ts";
 import { CurtainSource } from "../src/curtain-source.ts";
 import { createCurtainAccessory } from "../src/curtain-accessories.ts";
 import { validateConfig } from "../src/config.ts";
+import { CurtainMQTT } from "../src/curtain-mqtt.ts";
+import { INVALID_MQTT_URL, MALFORMED_MQTT_URLS, SECRET } from "./mqtt-urls.ts";
 
 const endpoint = {
   name: "Curtain",
@@ -206,5 +208,46 @@ describe("curtain configuration", () => {
     [[endpoint, endpoint]],
   ])("rejects invalid curtains %j", (curtains) => {
     expect(() => validateConfig({ ...config, curtains })).toThrow();
+  });
+});
+
+describe("curtain MQTT owner", () => {
+  function failure(create: () => unknown): Error & { code?: unknown } {
+    try {
+      create();
+    } catch (error) {
+      return error as Error;
+    }
+    throw new Error("expected the call to throw");
+  }
+
+  test.each(MALFORMED_MQTT_URLS)(
+    "refuses %j without connecting or quoting it",
+    (url) => {
+      const connect = jest.fn();
+      expect(
+        failure(() => new CurtainMQTT(url, [endpoint], { connect })),
+      ).toStrictEqual(new Error(INVALID_MQTT_URL));
+      expect(connect).not.toHaveBeenCalled();
+    },
+  );
+
+  test("rethrows an error from creating the client without its message", () => {
+    const error = failure(
+      () =>
+        new CurtainMQTT("mqtt://localhost", [endpoint], {
+          connect: () => {
+            throw Object.assign(
+              new Error(
+                `The argument 'url' mqtt://user:${SECRET}@localhost:1x`,
+              ),
+              { code: "ERR_INVALID_ARG_VALUE" },
+            );
+          },
+        }),
+    );
+    expect(error.message).toBe("MQTT client could not be started");
+    expect(error.code).toBe("ERR_INVALID_ARG_VALUE");
+    expect(error.stack).not.toContain(SECRET);
   });
 });

@@ -35,8 +35,10 @@ import { fileURLToPath } from "node:url";
 import { connect, type ISubscriptionGrant } from "mqtt";
 import { Registry } from "prom-client";
 import {
+  assertMQTTURL,
   credentialOptions,
-  stripMQTTUserinfo,
+  displayMQTTURL,
+  withoutErrorMessage,
   type Config,
   type MQTTCredentials,
 } from "./config.ts";
@@ -170,6 +172,7 @@ export async function startBridge(
   credentials?: MQTTCredentials,
 ): Promise<BridgeHandle> {
   checkCredentials(config.mqtt, credentials);
+  assertMQTTURL(config.mqtt.url);
   const stateCache = new Map<string, RawState>();
   const lastColorPublish = new Map<string, number>();
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -228,21 +231,23 @@ export async function startBridge(
     metrics = createMetrics(metricsRegister);
   }
 
-  const sanitizedUrl = stripMQTTUserinfo(config.mqtt.url);
+  const sanitizedUrl = displayMQTTURL(config.mqtt.url);
   if (config.devices.length) log.log(`Connecting to MQTT at ${sanitizedUrl}`);
 
   const mqttClient = config.devices.length
-    ? connect(config.mqtt.url, {
-        ...(credentials && credentialOptions(credentials)),
-        reconnectPeriod: MIN_BACKOFF,
-        // mqtt.js stops reconnecting after the broker refuses a login unless
-        // reconnectOnConnackError is set; with it, a corrected broker user
-        // list recovers without a restart.
-        reconnectOnConnackError: true,
-        // mqtt.js resubscribes before the connect handler runs and discards
-        // the result, which would hide a denial after a reconnect.
-        resubscribe: false,
-      })
+    ? withoutErrorMessage(() =>
+        connect(config.mqtt.url, {
+          ...(credentials && credentialOptions(credentials)),
+          reconnectPeriod: MIN_BACKOFF,
+          // mqtt.js stops reconnecting after the broker refuses a login unless
+          // reconnectOnConnackError is set; with it, a corrected broker user
+          // list recovers without a restart.
+          reconnectOnConnackError: true,
+          // mqtt.js resubscribes before the connect handler runs and discards
+          // the result, which would hide a denial after a reconnect.
+          resubscribe: false,
+        }),
+      )
     : undefined;
 
   function mqttConnected(): boolean {

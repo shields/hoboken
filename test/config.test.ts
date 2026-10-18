@@ -12,19 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
+import {
+  assertMQTTURL,
   credentialOptions,
+  displayMQTTURL,
+  isMQTTURL,
   loadConfig,
   resolveMQTTCredentials,
   stripMQTTUserinfo,
   validateConfig,
+  withoutErrorMessage,
 } from "../src/config.ts";
 import type { Config, MqttConfig } from "../src/config.ts";
+import { spawnSync } from "node:child_process";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import {
+  INVALID_MQTT_URL,
+  MALFORMED_MQTT_URLS,
+  SECRET,
+  VALID_MQTT_URLS,
+  type UrlReport,
+} from "./mqtt-urls.ts";
 
 const PASSWORD = "correct-horse-9f3a";
 const MQTT_URL = "mqtt://localhost:1883";
@@ -488,6 +507,79 @@ describe("validateConfig", () => {
     );
   });
 
+  describe("mqtt.url", () => {
+    function withURL(url: string) {
+      return { ...validConfig(), mqtt: { url } };
+    }
+
+    test.each(VALID_MQTT_URLS)("accepts %j", (url) => {
+      expect(validateConfig(withURL(url)).mqtt).toStrictEqual({ url });
+    });
+
+    test.each(MALFORMED_MQTT_URLS)(
+      "rejects %j without quoting any of it",
+      (url) => {
+        let failure: unknown;
+        try {
+          validateConfig(withURL(url));
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toStrictEqual(new Error(INVALID_MQTT_URL));
+        expect((failure as Error).cause).toBeUndefined();
+      },
+    );
+
+    test.each([
+      "mqtt:user@broker:1883",
+      "mqtt:user:pw@broker:1883",
+      "//user:pw@broker",
+      String.raw`mqtt:\\user:pw@broker:1883`,
+      String.raw`mqtt:/\user:pw@broker:1883`,
+      String.raw`mqtt:\/user:pw@broker:1883`,
+      String.raw`\\user:pw@broker`,
+    ])("rejects %j before checking it against mqtt.username", (url) => {
+      const data = { ...validConfig(), mqtt: { url, username: "hoboken" } };
+      expect(() => validateConfig(data)).toThrow(new Error(INVALID_MQTT_URL));
+    });
+
+    describe("in a fresh process", () => {
+      let stderr: string;
+      let report: UrlReport;
+
+      beforeAll(() => {
+        const result = spawnSync(
+          process.execPath,
+          [fileURLToPath(new URL("mqtt-url-report.ts", import.meta.url))],
+          {
+            encoding: "utf8",
+            env: Object.fromEntries(
+              Object.entries(process.env).filter(([key]) => key !== "DEBUG"),
+            ),
+          },
+        );
+        expect(result.status).toBe(0);
+        stderr = result.stderr;
+        report = JSON.parse(result.stdout) as UrlReport;
+      });
+
+      test("accepts every valid form and rejects every malformed one", () => {
+        expect(report.rejectedValid).toStrictEqual([]);
+        expect(report.acceptedMalformed).toStrictEqual([]);
+      });
+
+      test("mqtt.js builds a client for every valid form but a bare hostname", () => {
+        expect(report.mqttJsRejectedValid).toStrictEqual([]);
+        expect(report.mqttJsBareHostname).toBe("Missing protocol");
+      });
+
+      test("raises no process warning and prints nothing", () => {
+        expect(report.warnings).toStrictEqual([]);
+        expect(stderr).toBe("");
+      });
+    });
+  });
+
   describe("mqtt credentials", () => {
     function withMQTT(mqtt: Record<string, unknown>) {
       return { ...validConfig(), mqtt: { url: MQTT_URL, ...mqtt } };
@@ -613,13 +705,7 @@ describe("validateConfig", () => {
       "mqtt://user@broker",
       "mqtt://:pw@broker",
       "mqtts://user:pw@broker/path",
-      "//user:pw@broker",
-      "mqtt:user@broker:1883",
-      "mqtt:user:pw@broker:1883",
-      String.raw`mqtt:\\user:pw@broker:1883`,
-      String.raw`mqtt:/\user:pw@broker:1883`,
-      String.raw`mqtt:\/user:pw@broker:1883`,
-      String.raw`\\user:pw@broker`,
+      "mqtt://u:p@ss@broker",
     ])("rejects mqtt.username combined with URL credentials: %s", (url) => {
       const data = withMQTT({ url, username: "hoboken" });
       expect(() => validateConfig(data)).toThrow(
@@ -1561,5 +1647,90 @@ describe("stripMQTTUserinfo", () => {
     "not a valid url",
   ])("leaves %s unchanged", (url) => {
     expect(stripMQTTUserinfo(url)).toBe(url);
+  });
+});
+
+describe("assertMQTTURL", () => {
+  test.each(VALID_MQTT_URLS)("accepts %j", (url) => {
+    expect(isMQTTURL(url)).toBe(true);
+    expect(() => {
+      assertMQTTURL(url);
+    }).not.toThrow();
+  });
+
+  test.each(MALFORMED_MQTT_URLS)("rejects %j without quoting it", (url) => {
+    expect(isMQTTURL(url)).toBe(false);
+    expect(() => {
+      assertMQTTURL(url);
+    }).toThrow(new Error(INVALID_MQTT_URL));
+  });
+});
+
+describe("displayMQTTURL", () => {
+  test.each([
+    ["mqtt://user:pw@broker:1883", "mqtt://broker:1883"],
+    ["mqtt://user@broker", "mqtt://broker"],
+    ["mqtts://user:pw@broker/path", "mqtts://broker/path"],
+    ["mqtt://u:p@ss@broker", "mqtt://broker"],
+    ["ws://user:pw@broker:9001/mqtt", "ws://broker:9001/mqtt"],
+    ["mqtt://broker:1883", "mqtt://broker:1883"],
+    ["mqtt://[::1]:1883", "mqtt://[::1]:1883"],
+    ["mqtt://broker:1883/a@b", "mqtt://broker:1883/a@b"],
+  ])("shows %s as %s", (url, expected) => {
+    expect(displayMQTTURL(url)).toBe(expected);
+  });
+
+  test.each(MALFORMED_MQTT_URLS)("shows %j as a placeholder", (url) => {
+    expect(displayMQTTURL(url)).toBe("(not shown)");
+  });
+});
+
+describe("withoutErrorMessage", () => {
+  function failureOf(fn: () => unknown): Error & { code?: unknown } {
+    try {
+      withoutErrorMessage(fn);
+    } catch (error) {
+      return error as Error;
+    }
+    throw new Error("expected the call to throw");
+  }
+
+  test("returns the result of the operation", () => {
+    expect(withoutErrorMessage(() => 42)).toBe(42);
+  });
+
+  test("keeps only the code of an error that quotes the URL", () => {
+    const quoted = Object.assign(
+      new Error(`The argument 'url' mqtt://user:${SECRET}@h:1x`, {
+        cause: new Error(SECRET),
+      }),
+      { code: "ERR_INVALID_ARG_VALUE" },
+    );
+    const failure = failureOf(() => {
+      throw quoted;
+    });
+    expect(failure).not.toBe(quoted);
+    expect(failure.message).toBe("MQTT client could not be started");
+    expect(failure.code).toBe("ERR_INVALID_ARG_VALUE");
+    expect(failure.cause).toBeUndefined();
+    expect(failure.stack).not.toContain(SECRET);
+  });
+
+  test.each([
+    `mqtt://user:${SECRET}@h`,
+    42,
+    null,
+    undefined,
+    { code: 5 },
+    Object.assign(new Error(SECRET), { code: { url: SECRET } }),
+    new Error(SECRET),
+  ])("drops everything but a string code from the thrown %j", (thrown) => {
+    const failure = failureOf(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- mqtt.js and Node can throw anything.
+      throw thrown;
+    });
+    expect(failure.message).toBe("MQTT client could not be started");
+    expect("code" in failure).toBe(false);
+    expect(failure.stack).not.toContain(SECRET);
   });
 });
