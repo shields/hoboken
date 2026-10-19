@@ -203,7 +203,7 @@ bridge:
 mqtt:
   url: "mqtt://mosquitto:1883"
   # username: "hoboken" # optional: broker login; needs passwordFile
-  # passwordFile: "/run/secrets/mqtt_password" # needs username
+  # passwordFile: "/secrets/mqtt_password" # needs username
 
 # metrics:
 #   port: 9090
@@ -500,8 +500,9 @@ reconciled automatically.
 - `strategy: Recreate` — single instance (MAC uniqueness)
 - PVC at `/persist` — pairing data survives restarts
 - ConfigMap at `/config/config.yaml`
-- Optional Secret for the MQTT password: mount it read-only and name its file
-  in `mqtt.passwordFile`
+- Optional Secret for the MQTT password: mount it read-only, but not at `/run`,
+  `/var/run`, `/run/secrets`, or `/var/run/secrets`, and name its file in
+  `mqtt.passwordFile`
 
 ### Pairing with Apple Home
 

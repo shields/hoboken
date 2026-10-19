@@ -63,9 +63,9 @@ spec:
               readOnly: true
             - name: persist
               mountPath: /persist
-            # Uncomment when mqtt.passwordFile is /run/secrets/mqtt_password:
+            # Uncomment when mqtt.passwordFile is /secrets/mqtt_password:
             # - name: secrets
-            #   mountPath: /run/secrets
+            #   mountPath: /secrets
             #   readOnly: true
       volumes:
         - name: config
@@ -75,8 +75,13 @@ spec:
           persistentVolumeClaim:
             claimName: hoboken-persist
         # Uncomment with the secrets volumeMount above. The key mqtt_password
-        # becomes /run/secrets/mqtt_password, and fsGroup lets the container
-        # user read it at mode 0440.
+        # becomes /secrets/mqtt_password, and fsGroup lets the container user
+        # read it at mode 0440. A volume at /run, /var/run, /run/secrets, or
+        # /var/run/secrets can stop the container from starting: the
+        # ServiceAccount token mounts at
+        # /var/run/secrets/kubernetes.io/serviceaccount, and /var/run links to
+        # /run in Debian, so that mount point would lie inside the read-only
+        # volume.
         # - name: secrets
         #   secret:
         #     secretName: hoboken-mqtt # kubectl create secret generic hoboken-mqtt --from-file=mqtt_password
