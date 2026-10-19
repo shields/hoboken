@@ -647,7 +647,10 @@ interface MQTTEndpoint {
 // because a "/", "?", or "#" in a password ends the authority early, and both
 // parsers then read the username, or the part of the password after an "@", as
 // the host: that cannot be told from a path, query, or fragment that holds an
-// "@". Neither the URL nor an error about it leaves this function.
+// "@". A control character in the host is refused because the comparison cannot
+// see it: WHATWG percent-encodes one in the host of a non-special scheme and
+// strips a leading or trailing one from the whole URL. Neither the URL nor an
+// error about it leaves this function.
 function parseMQTTURL(url: string): MQTTEndpoint | undefined {
   try {
     const strict = new URL(url);
@@ -661,6 +664,7 @@ function parseMQTTURL(url: string): MQTTEndpoint | undefined {
       Number(legacy.port ?? 1) >= 1 &&
       !(WEBSOCKET_PROTOCOLS.has(protocol) && hostname.includes(":")) &&
       !`${legacy.path ?? ""}${legacy.hash ?? ""}`.includes("@") &&
+      !/\p{Cc}/u.test(host) &&
       new URL(`${protocol}//${host}`).host === strict.host.toLowerCase()
       ? { protocol, host }
       : undefined;

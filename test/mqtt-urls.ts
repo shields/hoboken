@@ -82,6 +82,19 @@ export const MALFORMED_MQTT_URLS = [
   `mqtt://user:${SECRET}@ho^st`,
   `mqtt://user:${SECRET}@ho|st`,
   `mqtt://user:${SECRET}@ho<st>`,
+  // A control character in the host, or before the "//", where url.parse reads
+  // it as the host.
+  `mqtt://user:${SECRET}@ho\u{1}st:1883`,
+  `mqtts://user:${SECRET}@ho\u{7}st`,
+  `tcp://user:${SECRET}@ho\u{19}st:1883`,
+  `ssl://user:${SECRET}@ho\u{2}st:8883`,
+  `tls://user:${SECRET}@ho\u{8}st`,
+  `ssl://user:${SECRET}@ho\u{1B}st:8883`,
+  `tls://user:${SECRET}@ho\u{7F}st`,
+  `mqtt:\u{1}//user:${SECRET}@broker:1883`,
+  `mqtts:\u{1B}//user:${SECRET}@broker:8883`,
+  "mqtt:\u{1}//broker:1883",
+  "mqtts:\u{1B}//broker",
   // A host that is not ASCII, which url.parse writes in punycode and a WHATWG
   // URL of this scheme does not.
   `mqtt://user:${SECRET}@bröker`,
