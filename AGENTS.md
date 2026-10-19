@@ -81,14 +81,13 @@ Each module is independently testable with dependency injection:
 - **MQTT credentials**: `Config` holds only `mqtt.username` and the password
   file path. `main.ts` calls `resolveMQTTCredentials(config.mqtt)` and passes
   the resulting `MQTTCredentials` to `startBridge`, which gives them to both
-  MQTT clients, so the status page, metrics, and logs cannot reach the
-  password. `validateConfig` stays pure and `startBridge` never reads the
-  environment, which keeps tests independent of the developer's shell. Both
-  clients build their options with `credentialOptions`, which empties mqtt.js's
-  `auth` so userinfo in the broker URL cannot replace the configured login.
-  `startBridge` rejects, before creating any client or server, credentials
-  whose username differs from `config.mqtt.username`, a configured username
-  without credentials, credentials without a configured username, and a
+  MQTT clients, so the status page, metrics, and logs cannot reach the password.
+  `validateConfig` stays pure and `startBridge` takes credentials only as an
+  argument. Both clients build their options with `credentialOptions`, which
+  empties mqtt.js's `auth` so userinfo in the broker URL cannot replace the
+  configured login. `startBridge` rejects, before creating any client or server,
+  credentials whose username differs from `config.mqtt.username`, a configured
+  username without credentials, credentials without a configured username, and a
   password file without a username, so a library caller cannot connect
   anonymously or under the wrong name. The messages name the fields but never
   echo values.

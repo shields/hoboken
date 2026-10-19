@@ -348,9 +348,10 @@ counts it in `hoboken_mqtt_errors_total`, and keeps retrying. It waits 1 second
 before the first retry and doubles the wait with each further attempt up to 60
 seconds. The wait returns to 1 second only after a connection has stayed up for
 60 seconds. The heated bedding connection logs an `mqtt_connection_error` event
-with the reason code, counts it in the same metric, and retries with backoff
-over the same 1 to 60 second range. Correcting the broker therefore takes
-effect without a restart.
+with the reason code, counts it in the same metric, and retries with the same
+doubling waits, each shortened at random by up to 25 percent: the first retry
+comes 0.75 to 1 second after the failure and the longest waits are 45 to 60
+seconds. Correcting the broker therefore takes effect without a restart.
 
 Brokers that restrict topics per user must grant Hoboken these topics:
 
@@ -461,8 +462,8 @@ begins at a later reconnect.
 
 The dropped-session round trip runs an in-process broker that accepts every
 login and closes each session as soon as the bridge subscribes. It shows that
-the Zigbee2MQTT and WLED connection waits at least 1, 2, and 4 seconds before
-its next three attempts rather than retrying every second.
+the Zigbee2MQTT and WLED connection waits at least one, two, and four seconds
+before its next three attempts rather than retrying every second.
 
 The malformed-URL round trip starts `main.ts` with `mqtt.url` values that carry
 a password and are not well formed, such as a port that is not a number, a space
