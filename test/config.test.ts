@@ -568,7 +568,7 @@ describe("validateConfig", () => {
         expect(report.acceptedMalformed).toStrictEqual([]);
       });
 
-      test("mqtt.js builds a client for every valid form but a bare hostname", () => {
+      test("mqtt.js's stream builders accept every valid form, and a bare hostname fails", () => {
         expect(report.mqttJSRejectedValid).toStrictEqual([]);
         expect(report.mqttJSBareHostname).toBe("Missing protocol");
       });

@@ -137,9 +137,12 @@ Each module is independently testable with dependency injection:
   `url.parse` call outside `node_modules`. A process emits each warning once, so
   `test/mqtt-url-report.ts` checks the shared lists in `test/mqtt-urls.ts` in a
   fresh process, which `config.test.ts` starts under Bun and
-  `integration/mqtt-url-rejection.ts` starts under Node. Every malformed URL in
-  those lists that has a place for credentials carries a secret there, so any
-  output that quotes part of one fails.
+  `integration/mqtt-url-rejection.ts` starts under Node. It also creates and
+  connects an mqtt.js client for every valid URL with `net.createConnection`,
+  `tls.connect`, and the `createWebsocket` option stubbed, so that the stream
+  builders run and no socket opens; `manualConnect` alone never runs them. Every
+  malformed URL in those lists that has a place for credentials carries a
+  secret there, so any output that quotes part of one fails.
 - **Main MQTT reconnect backoff**: the main client sets
   `reconnectOnConnackError` in every configuration, because mqtt.js otherwise
   never retries after a refused login, and starts `reconnectPeriod` at the

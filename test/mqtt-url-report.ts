@@ -14,8 +14,10 @@
 
 // Runs in a fresh process because Node warns about a deprecated url.parse call
 // and about an invalid port once per process, and a test process may already
-// have used them.
+// have used them, and because it replaces net.createConnection and tls.connect.
 
+import net from "node:net";
+import tls from "node:tls";
 import { connect } from "mqtt";
 import { validateConfig } from "../src/config.ts";
 import {
@@ -28,6 +30,21 @@ const warnings: string[] = [];
 process.on("warning", (warning) => {
   warnings.push(`${warning.name}: ${warning.message}`);
 });
+
+// With this set, mqtt.js's tcp and tls builders go to a SOCKS proxy and never
+// reach the stubs below.
+delete process.env.MQTTJS_SOCKS_PROXY;
+
+// The calls that open a socket throw this, so that each stream builder runs to
+// its last step and no connection is made.
+const OPENS_SOCKET = new Error("mqtt.js opens a socket");
+
+function opensSocket(): never {
+  throw OPENS_SOCKET;
+}
+
+Object.assign(net, { connect: opensSocket, createConnection: opensSocket });
+Object.assign(tls, { connect: opensSocket });
 
 function validates(url: string): boolean {
   try {
@@ -51,11 +68,19 @@ function validates(url: string): boolean {
 
 function mqttJSError(url: string): string | undefined {
   try {
-    connect(url, { manualConnect: true });
+    connect(url, {
+      manualConnect: true,
+      // A WebSocket constructor throws for an address that does not parse.
+      createWebsocket: (address: string) => {
+        if (!URL.canParse(address)) throw new SyntaxError("Invalid URL");
+        return opensSocket();
+      },
+    }).connect();
   } catch (error: unknown) {
+    if (error === OPENS_SOCKET) return undefined;
     return error instanceof Error ? error.message : String(error);
   }
-  return undefined;
+  throw new Error("mqtt.js built a stream without reaching a socket");
 }
 
 const report: URLReport = {
