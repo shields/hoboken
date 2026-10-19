@@ -625,11 +625,13 @@ export function loadConfig(path: string): Config {
 // makes noDeprecation read-only, and already true, under --no-deprecation.
 function parseLegacy(url: string) {
   if (process.noDeprecation === true) return parseLegacyURL(url, true);
+  const previous = process.noDeprecation;
   process.noDeprecation = true;
   try {
     return parseLegacyURL(url, true);
   } finally {
-    process.noDeprecation = false;
+    if (previous === undefined) delete process.noDeprecation;
+    else process.noDeprecation = previous;
   }
 }
 

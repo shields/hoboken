@@ -1713,6 +1713,20 @@ describe("isMQTTURL while Node.js ignores deprecations", () => {
     expect(isMQTTURL(MQTT_URL)).toBe(true);
     expect(process.noDeprecation).toBe(false);
   });
+
+  test("leaves noDeprecation absent when it was absent", () => {
+    Reflect.deleteProperty(process, "noDeprecation");
+    expect(isMQTTURL(MQTT_URL)).toBe(true);
+    expect(Object.hasOwn(process, "noDeprecation")).toBe(false);
+  });
+
+  test("puts back a truthy value other than true", () => {
+    Reflect.set(process, "noDeprecation", 1);
+    expect(isMQTTURL(MQTT_URL)).toBe(true);
+    expect(
+      Object.getOwnPropertyDescriptor(process, "noDeprecation")?.value,
+    ).toBe(1);
+  });
 });
 
 describe("displayMQTTURL", () => {
