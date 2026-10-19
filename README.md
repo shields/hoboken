@@ -281,8 +281,11 @@ parses the URL as mqtt.js does, with Node.js's legacy `url.parse`, and again
 with the WHATWG `URL` parser, and requires both to find the same host. That
 rejects what `url.parse` alone accepts, such as a port above 65535 or a stray
 character in the host, where `url.parse` drops the rest of the host and mqtt.js
-connects to what remains. If mqtt.js
-still fails synchronously while it creates a client, Hoboken reports only
+connects to what remains. It also rejects an `@` in the path, query, or
+fragment, because a password with an unencoded `/`, `?`, or `#` ends the host
+there and leaves the username, or part of the password, as the host; write `%40`
+for an `@` that belongs in a path or query. If mqtt.js still fails
+synchronously while it creates a client, Hoboken reports only
 `MQTT client could not be started` and the error code, because Node.js quotes the
 URL in those errors.
 
@@ -313,14 +316,14 @@ or `passwd`. The error names the key but not its value. Keep the password out of
 
 Credentials embedded in `mqtt.url` as `scheme://user:password@host` keep working
 when `mqtt.username` and `mqtt.passwordFile` are both unset. Percent-encode any
-`/`, `?`, or `#` in them. The logs and the status page show only the
-scheme, host, and port of `mqtt.url`, never its credentials, path, or query. A
-YAML error or warning in `config.yaml`, such as a syntax error, an unresolved
-tag, or a key that is a list or a mapping, stops startup and is reported by its
-code, line, and column without the text of the line, which can hold such
-credentials. An alias with no anchor is reported without a position. The
-configured password never appears in logs, the status page, metrics, or error
-messages. Rotating it takes a restart.
+`/`, `?`, or `#` in them; Hoboken refuses a URL that has an `@` after its host.
+The logs and the status page show only the scheme, host, and port of `mqtt.url`,
+never its credentials, path, or query. A YAML error or warning in `config.yaml`,
+such as a syntax error, an unresolved tag, or a key that is a list or a mapping,
+stops startup and is reported by its code, line, and column without the text of
+the line, which can hold such credentials. An alias with no anchor is reported
+without a position. The configured password never appears in logs, the status
+page, metrics, or error messages. Rotating it takes a restart.
 Use `mqtts://` unless the broker is on a trusted network, because `mqtt://`
 sends the password unencrypted. `mqtt.passwordFile` can name any file that the
 container can read, so treat `config.yaml` as being as trusted as the container.

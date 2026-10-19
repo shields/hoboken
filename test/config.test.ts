@@ -715,12 +715,8 @@ describe("validateConfig", () => {
     });
 
     test.each([
-      "mqtt://broker:1883/a@b",
-      "mqtt://broker:1883?x=a@b",
-      "mqtt://broker:1883#a@b",
-      "mqtt://broker:1883/a//b@c",
-      "ws://broker:9001/mqtt?next=//x@y",
-      "mqtt://broker:1883#//x@y",
+      "mqtt://broker:1883/a%40b",
+      "ws://broker:9001/mqtt?next=%40x",
       "mqtt://[::1]:1883",
       "mqtt://@broker",
     ])("accepts a URL without userinfo: %s", (url) => {
@@ -1729,26 +1725,43 @@ describe("displayMQTTURL", () => {
     ["MQTT://Broker:1883", "mqtt://broker:1883"],
     ["mqtt://broker:1883", "mqtt://broker:1883"],
     ["mqtt://[::1]:1883", "mqtt://[::1]:1883"],
-    ["mqtt://broker:1883/a@b", "mqtt://broker:1883"],
+    ["mqtt://broker:1883/a%40b", "mqtt://broker:1883"],
     ["wss://broker/mqtt?token=a%20b", "wss://broker"],
   ])("shows %s as %s", (url, expected) => {
     expect(displayMQTTURL(url)).toBe(expected);
   });
 
-  // A password that begins with "/", "?", or "#", or with digits and one of
-  // them, ends the authority early, so the parsers read the username as the
-  // host and the rest of the userinfo as a path, query, or fragment.
-  test.each([
-    [`mqtt://hoboken:#${SECRET}@broker:1883`, "mqtt://hoboken"],
-    [`mqtt://hoboken:/${SECRET}@broker:1883`, "mqtt://hoboken"],
-    [`mqtt://hoboken:?${SECRET}@broker:1883`, "mqtt://hoboken"],
-    [`mqtt://hoboken:2024/${SECRET}@broker:1883`, "mqtt://hoboken:2024"],
-    [`mqtt://ho#boken:${SECRET}@broker`, "mqtt://ho"],
-    [String.raw`ws://CORP\svc:${SECRET}@broker:9001/mqtt`, "ws://corp"],
-    [`wss://broker/mqtt?token=${SECRET}`, "wss://broker"],
-  ])("shows only the host of %j", (url, expected) => {
-    expect(isMQTTURL(url)).toBe(true);
-    expect(displayMQTTURL(url)).toBe(expected);
+  test("shows only the host of a URL with a token in its query", () => {
+    expect(displayMQTTURL(`wss://broker/mqtt?token=${SECRET}`)).toBe(
+      "wss://broker",
+    );
+  });
+
+  test("shows the broker alone for every accepted URL that has userinfo", () => {
+    const alphabet = ["@", ":", "/", "?", "#", "\\", "%", "2", "q"];
+    const passwords = [""];
+    for (let start = 0, length = 0; length < 4; length++) {
+      const end = passwords.length;
+      for (const prefix of passwords.slice(start, end)) {
+        for (const character of alphabet) passwords.push(prefix + character);
+      }
+      start = end;
+    }
+    const leaks: string[] = [];
+    let accepted = 0;
+    for (const scheme of ["mqtt", "ws"]) {
+      for (const user of ["hoboken", ""]) {
+        for (const password of passwords) {
+          const url = `${scheme}://${user}:${password}@broker:1883`;
+          if (!isMQTTURL(url)) continue;
+          accepted++;
+          if (displayMQTTURL(url) !== `${scheme}://broker:1883`)
+            leaks.push(url);
+        }
+      }
+    }
+    expect(accepted).toBeGreaterThan(0);
+    expect(leaks).toStrictEqual([]);
   });
 
   test.each(MALFORMED_MQTT_URLS)("shows %j as a placeholder", (url) => {

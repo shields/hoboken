@@ -100,30 +100,34 @@ Each module is independently testable with dependency injection:
   port of 1 or more, and the WHATWG `URL` parser must find the same host. The
   second check rejects what `url.parse` truncates without complaint, such as a
   space, `;`, or `%` in the host, where mqtt.js would connect to the text
-  before it. A bare hostname fails because mqtt.js throws "Missing protocol".
-  mqtt.js would map an unknown scheme to `mqtt`, so the scheme list is stricter
-  than mqtt.js. A `ws` or `wss` URL with an IPv6 address fails too, because
-  mqtt.js writes its host without brackets and `new WebSocket` rejects the
-  result. `validateConfig`, `startBridge`, and the `HeatedBeddingMQTT`
+  before it. `url.parse` must also find no `@` in the path or fragment. A `/`,
+  `?`, or `#` in a password ends the authority early, and both parsers then
+  agree on a wrong host, the username or the text between a later `@` and the
+  delimiter, which mqtt.js would resolve, connect to with the partial
+  credentials, and quote in `MQTT error` lines. Such a URL cannot be told from
+  a path, query, or fragment that holds an `@`, so both are refused; `%40`
+  writes an `@` there. A bare hostname fails because mqtt.js throws "Missing
+  protocol". mqtt.js would map an unknown scheme to `mqtt`, so the scheme list
+  is stricter than mqtt.js. A `ws` or `wss` URL with an IPv6 address fails too,
+  because mqtt.js writes its host without brackets and `new WebSocket` rejects
+  the result. `validateConfig`, `startBridge`, and the `HeatedBeddingMQTT`
   constructor call `assertMQTTURL`, which throws "mqtt.url is not a valid MQTT
   URL". The log line and status page use `displayMQTTURL`, which shows only the
   scheme, host, and port, or "(not shown)" for a URL that does not pass;
   `startBridge` has already refused such a URL, so that is a second layer. It
-  never shows the path, query, or fragment, because a password that begins with
-  `/`, `?`, or `#` ends the authority early and leaves the rest of the userinfo
-  there, where no userinfo pattern finds it. `loadConfig` stops on a YAML error
-  or warning, such as an unresolved tag, and reports it by code, line, and
-  column only, because the parser's messages quote the offending line. It parses
-  with `stringKeys`, so a key that is a list or a mapping is a parse error
-  rather than a process warning and an unknown-field message that quote it, and
-  it replaces the error that converting the document throws for an alias with no
-  anchor, which names the alias, with one that has no `cause`, because Node
-  prints the cause of an uncaught error. Both clients create and connect through
-  `withoutErrorMessage`, which replaces any error that mqtt.js or Node throws
-  synchronously, because Node quotes the URL in them, with "MQTT client could
-  not be started" and keeps only a string `code`. `isMQTTURL` runs the legacy
-  parser with `process.noDeprecation` set, except that Node has already set it,
-  read-only, under `--no-deprecation`.
+  never shows the path, query, or fragment, which can carry a token.
+  `loadConfig` stops on a YAML error or warning, such as an unresolved tag, and
+  reports it by code, line, and column only, because the parser's messages
+  quote the offending line. It parses with `stringKeys`, so a key that is a list
+  or a mapping is a parse error rather than a process warning and an
+  unknown-field message that quote it, and it replaces the error that converting
+  the document throws for an alias with no anchor, which names the alias, with
+  one that has no `cause`, because Node prints the cause of an uncaught error.
+  Both clients create and connect through `withoutErrorMessage`, which replaces
+  any error that mqtt.js or Node throws synchronously, because Node quotes the
+  URL in them, with "MQTT client could not be started" and keeps only a string
+  `code`. `isMQTTURL` runs the legacy parser with `process.noDeprecation` set,
+  except that Node has already set it, read-only, under `--no-deprecation`.
   Node 22 and 24 emit DEP0170 with the whole URL for a port that `url.parse`
   finds invalid but `new URL` accepts, as in `mqtt:user:pw@host:1x`; Node 26
   throws an error that quotes the URL instead. Node 24 and 26 emit DEP0169,

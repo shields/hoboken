@@ -641,8 +641,11 @@ interface MQTTEndpoint {
 // mqtt.js parses with the legacy url.parse, so the URL is parsed that way and
 // again as a WHATWG URL. Both must find the same host, which rejects what
 // url.parse alone accepts: a port above 65535, and characters that it ends a
-// host at and moves into the path. Neither the URL nor an error about it leaves
-// this function.
+// host at and moves into the path. An "@" after the authority is refused too,
+// because a "/", "?", or "#" in a password ends the authority early, and both
+// parsers then read the username, or the part of the password after an "@", as
+// the host: that cannot be told from a path, query, or fragment that holds an
+// "@". Neither the URL nor an error about it leaves this function.
 function parseMQTTURL(url: string): MQTTEndpoint | undefined {
   try {
     const strict = new URL(url);
@@ -655,6 +658,7 @@ function parseMQTTURL(url: string): MQTTEndpoint | undefined {
       hostname !== "" &&
       Number(legacy.port ?? 1) >= 1 &&
       !(WEBSOCKET_PROTOCOLS.has(protocol) && hostname.includes(":")) &&
+      !`${legacy.path ?? ""}${legacy.hash ?? ""}`.includes("@") &&
       new URL(`${protocol}//${host}`).host === strict.host.toLowerCase()
       ? { protocol, host }
       : undefined;
@@ -671,9 +675,8 @@ export function assertMQTTURL(url: string): void {
   if (!isMQTTURL(url)) throw new Error("mqtt.url is not a valid MQTT URL");
 }
 
-// Only the scheme, host, and port, because a password that begins with "/",
-// "?", or "#" ends the authority early and leaves the rest of the userinfo in
-// the path, query, or fragment.
+// Only the scheme, host, and port, because the path, query, and fragment can
+// carry a token.
 export function displayMQTTURL(url: string): string {
   const endpoint = parseMQTTURL(url);
   return endpoint ? `${endpoint.protocol}//${endpoint.host}` : "(not shown)";

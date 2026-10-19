@@ -57,12 +57,8 @@ export const VALID_MQTT_URLS = [
   "mqtt://user:p%40ss@broker",
   "mqtts://user:pw@broker/path",
   "mqtt://user:pw@[::1]:1883/some/path?x=1#fragment",
-  "mqtt://broker:1883/a@b",
-  "mqtt://broker:1883?x=a@b",
-  "mqtt://broker:1883#a@b",
-  "mqtt://broker:1883/a//b@c",
-  "ws://broker:9001/mqtt?next=//x@y",
-  "mqtt://broker:1883#//x@y",
+  "mqtt://broker:1883/a%40b",
+  "ws://broker:9001/mqtt?next=%40x",
 ];
 
 // Each that has a place for credentials carries SECRET there, so that a
@@ -111,6 +107,23 @@ export const MALFORMED_MQTT_URLS = [
   `mqtt://user:${SECRET}@::1`,
   `mqtt://us%er:${SECRET}@broker`,
   `mqtt://user:${SECRET}%zz@broker`,
+  // An "@" after the authority: userinfo that a "/", "?", or "#" in the
+  // password ended early, which both parsers read as a host, or a URL that
+  // cannot be told from it.
+  `mqtt://hoboken:#${SECRET}@broker:1883`,
+  `mqtt://hoboken:/${SECRET}@broker:1883`,
+  `mqtt://hoboken:?${SECRET}@broker:1883`,
+  `mqtt://hoboken:2024/${SECRET}@broker:1883`,
+  `mqtt://ho#boken:${SECRET}@broker`,
+  `mqtt://svc:Abc@${SECRET}#1@broker.example.com:1883`,
+  String.raw`ws://CORP\svc:${SECRET}@broker:9001/mqtt`,
+  `mqtt://user:${SECRET}@broker:1883/a@b`,
+  "mqtt://broker:1883/a@b",
+  "mqtt://broker:1883?x=a@b",
+  "mqtt://broker:1883#a@b",
+  "mqtt://broker:1883/a//b@c",
+  "ws://broker:9001/mqtt?next=//x@y",
+  "mqtt://broker:1883#//x@y",
   // An IPv6 address in a ws or wss URL, which mqtt.js cannot connect to.
   `ws://user:${SECRET}@[::1]:9001/mqtt`,
   `wss://user:${SECRET}@[2001:db8::1]/mqtt`,
