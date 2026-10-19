@@ -2305,6 +2305,7 @@ describe("startBridge with MQTT credentials", () => {
   ])(
     "refuses %s before creating any client or server",
     async (_name, login, credentials, message) => {
+      const output = captureConsole();
       const count = mockClients.length;
       const config: Config = {
         ...metricsConfig(),
@@ -2312,14 +2313,20 @@ describe("startBridge with MQTT credentials", () => {
         curtains: CURTAINS,
       };
       Object.assign(config.mqtt, login);
-      let failure: unknown;
       try {
-        await startBridge(config, credentials);
-      } catch (error) {
-        failure = error;
+        let failure: unknown;
+        try {
+          await startBridge(config, credentials);
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toStrictEqual(new Error(message));
+        expect(mockClients.length).toBe(count);
+        // The metrics and HAP servers log when they start.
+        expect(output.lines()).toStrictEqual([]);
+      } finally {
+        output.restore();
       }
-      expect(failure).toStrictEqual(new Error(message));
-      expect(mockClients.length).toBe(count);
     },
   );
 
@@ -2349,39 +2356,43 @@ describe("startBridge with MQTT credentials", () => {
     const controller = new AbortController();
     try {
       const { metricsPort, shutdown } = await startBridge(config, CREDENTIALS);
-      const legacy = mockClients[count]!;
-      expect(legacy.options?.password).toBe(PASSWORD);
+      let bodies: string[];
+      try {
+        const legacy = mockClients[count]!;
+        expect(legacy.options?.password).toBe(PASSWORD);
 
-      legacy.connected = true;
-      legacy.emit("connect");
-      legacy.connected = false;
-      legacy.emit("error", new Error("Connection refused: Not authorized"));
-      legacy.emit("close");
-      legacy.emit("offline");
-      legacy.emit("reconnect");
+        legacy.connected = true;
+        legacy.emit("connect");
+        legacy.connected = false;
+        legacy.emit("error", new Error("Connection refused: Not authorized"));
+        legacy.emit("close");
+        legacy.emit("offline");
+        legacy.emit("reconnect");
 
-      const base = `http://127.0.0.1:${String(metricsPort)}`;
-      const pages = await Promise.all(
-        ["/", "/metrics", "/healthz", "/readyz"].map(
-          async (route) => await (await fetch(`${base}${route}`)).text(),
-        ),
-      );
-      const nextEvent = await openEvents(metricsPort!, controller.signal);
-      const bodies = [
-        ...pages,
-        await nextEvent(),
-        JSON.stringify(
-          buildStatusData(
-            config,
-            new Map(),
-            { url: config.mqtt.url, connected: true },
-            [],
-            "version",
+        const base = `http://127.0.0.1:${String(metricsPort)}`;
+        const pages = await Promise.all(
+          ["/", "/metrics", "/healthz", "/readyz"].map(
+            async (route) => await (await fetch(`${base}${route}`)).text(),
           ),
-        ),
-      ];
-      controller.abort();
-      await shutdown();
+        );
+        const nextEvent = await openEvents(metricsPort!, controller.signal);
+        bodies = [
+          ...pages,
+          await nextEvent(),
+          JSON.stringify(
+            buildStatusData(
+              config,
+              new Map(),
+              { url: config.mqtt.url, connected: true },
+              [],
+              "version",
+            ),
+          ),
+        ];
+      } finally {
+        controller.abort();
+        await shutdown();
+      }
 
       for (const body of bodies) {
         expect(body).not.toBe("");
@@ -2389,9 +2400,8 @@ describe("startBridge with MQTT credentials", () => {
       }
       const lines = output.lines();
       expect(lines.some((line) => line.includes("MQTT error"))).toBe(true);
-      for (const line of lines) expect(line).not.toContain(PASSWORD);
+      expect(lines.filter((line) => line.includes(PASSWORD))).toStrictEqual([]);
     } finally {
-      controller.abort();
       output.restore();
     }
   });
@@ -2408,17 +2418,23 @@ describe("startBridge with MQTT credentials", () => {
         const config = metricsConfig();
         config.mqtt.url = url;
         const { metricsPort, shutdown } = await startBridge(config);
-        const page = await (
-          await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
-        ).text();
-        await shutdown();
+        let page: string;
+        try {
+          page = await (
+            await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
+          ).text();
+        } finally {
+          await shutdown();
+        }
 
         expect(mockClient.url).toBe(url);
         expect(page).toContain(sanitized);
         expect(page).not.toContain("LEGACYPW");
         const lines = output.lines();
         expect(lines.some((line) => line.includes(sanitized))).toBe(true);
-        for (const line of lines) expect(line).not.toContain("LEGACYPW");
+        expect(lines.filter((line) => line.includes("LEGACYPW"))).toStrictEqual(
+          [],
+        );
       } finally {
         output.restore();
       }
@@ -2462,11 +2478,14 @@ describe("startBridge with an mqtt.url that is not well formed", () => {
           mqtt: { url },
           heatedBedding: HEATED_BEDDING,
         });
+        // A bridge that an earlier test started logs its mDNS advertisement
+        // when the event loop turns, so the lines are read before it does.
+        const lines = output.lines();
         await new Promise((resolve) => setImmediate(resolve));
 
         expect(failure).toStrictEqual(new Error(INVALID_MQTT_URL));
         expect(mockClients.length).toBe(count);
-        expect(output.lines()).toStrictEqual([]);
+        expect(lines).toStrictEqual([]);
         expect(warnings).toStrictEqual([]);
       } finally {
         output.restore();
@@ -2513,7 +2532,9 @@ describe("startBridge with an mqtt.url that is not well formed", () => {
           "ERR_INVALID_ARG_VALUE",
         );
         expect((failure as Error).stack).not.toContain(SECRET);
-        for (const line of output.lines()) expect(line).not.toContain(SECRET);
+        expect(
+          output.lines().filter((line) => line.includes(SECRET)),
+        ).toStrictEqual([]);
       } finally {
         output.restore();
       }
