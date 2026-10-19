@@ -309,11 +309,25 @@ export class TucsonMQTT<S extends TucsonMQTTSource> {
     client.on("disconnect", () => {
       this.#fail(client, "mqtt_server_disconnect");
     });
-    withoutErrorMessage(() => client.connect());
+    // mqtt.js arms its own connack timer for the same duration inside
+    // connect(), and the timer armed first reports the timeout.
     this.#deadline = setTimeout(() => {
       this.#fail(client, "mqtt_connection_timeout");
     }, CONNECT_TIMEOUT);
     this.#deadline.unref();
+    try {
+      withoutErrorMessage(() => client.connect());
+    } catch (error: unknown) {
+      clearTimeout(this.#deadline);
+      this.#deadline = undefined;
+      this.#client = undefined;
+      try {
+        client.end(true);
+      } catch {
+        // end() throws when connect() failed before it created a stream.
+      }
+      throw error;
+    }
   }
 
   #fail(

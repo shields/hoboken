@@ -25,6 +25,7 @@ import type {
 import pino from "pino";
 import type { MQTTCredentials } from "../src/config.ts";
 import { HeatedBeddingMQTT } from "../src/heated-bedding-mqtt.ts";
+import { MAX_BACKOFF } from "../src/tucson-mqtt.ts";
 import { INVALID_MQTT_URL, MALFORMED_MQTT_URLS, SECRET } from "./mqtt-urls.ts";
 
 const ZONE = {
@@ -470,6 +471,34 @@ describe("heated bedding MQTT owner", () => {
       expect(owner.connected).toBe(false);
     },
   );
+
+  test("the connection deadline fires before the connack timer that mqtt.js arms in connect()", async () => {
+    await owner.stop();
+    owner = new HeatedBeddingMQTT("mqtt://localhost", [ZONE], {
+      connect: (_url, options) => {
+        const client = new TestMqttClient(options);
+        client.connect = () => {
+          setTimeout(() => {
+            client.emit("error", new Error("connack timeout"));
+          }, options.connectTimeout);
+          return client;
+        };
+        return client as unknown as MqttClient;
+      },
+      logger: pino(
+        { base: null },
+        {
+          write: (text: string) => {
+            logs.push(text);
+          },
+        },
+      ),
+    });
+    jest.advanceTimersByTime(10000);
+    expect(JSON.parse(logs.at(-1)!)).toMatchObject({
+      event: "mqtt_connection_timeout",
+    });
+  });
 
   function expectRetry(delay: number): void {
     const attempts = clients.length;
@@ -1129,6 +1158,17 @@ describe("heated bedding MQTT owner with an mqtt.url that is not well formed", (
     return client as unknown as MqttClient;
   }
 
+  function throwingClient(options: IClientOptions): MqttClient {
+    const client = new TestMqttClient(options);
+    client.connect = () => {
+      throw Object.assign(new Error(QUOTING_ERROR_MESSAGE), {
+        code: "ERR_INVALID_ARG_VALUE",
+      });
+    };
+    clients.push(client);
+    return client as unknown as MqttClient;
+  }
+
   test.each(MALFORMED_MQTT_URLS)(
     "refuses %j without connecting or quoting it",
     (url) => {
@@ -1151,18 +1191,7 @@ describe("heated bedding MQTT owner with an mqtt.url that is not well formed", (
         });
       },
     ],
-    [
-      "connecting the client",
-      (options: IClientOptions) => {
-        const client = new TestMqttClient(options);
-        client.connect = () => {
-          throw Object.assign(new Error(QUOTING_ERROR_MESSAGE), {
-            code: "ERR_INVALID_ARG_VALUE",
-          });
-        };
-        return client as unknown as MqttClient;
-      },
-    ],
+    ["connecting the client", throwingClient],
   ])(
     "rethrows an error from %s without its message and leaves no timer",
     (_step, connect) => {
@@ -1175,4 +1204,45 @@ describe("heated bedding MQTT owner with an mqtt.url that is not well formed", (
       expect(jest.getTimerCount()).toBe(0);
     },
   );
+
+  // mqtt.js builds its stream before it writes CONNECT, so the stream can
+  // still report after connect() throws.
+  test.each(["close", "error", "offline", "disconnect"])(
+    "does not retry after the abandoned client reports %s",
+    (event) => {
+      failure(() => {
+        owner = createOwner("mqtt://localhost", throwingClient);
+      });
+      clients[0]!.emit(
+        event,
+        event === "error" ? new Error("network") : undefined,
+      );
+      jest.advanceTimersByTime(MAX_BACKOFF);
+      expect(clients).toHaveLength(1);
+      expect(jest.getTimerCount()).toBe(0);
+    },
+  );
+
+  test("ends the abandoned client", () => {
+    failure(() => {
+      owner = createOwner("mqtt://localhost", throwingClient);
+    });
+    expect(clients[0]!.ended).toBe(1);
+  });
+
+  test("rethrows the connect error when the abandoned client has no stream to end", () => {
+    const error = failure(() => {
+      owner = createOwner("mqtt://localhost", (options) => {
+        const client = throwingClient(options) as unknown as TestMqttClient;
+        client.end = () => {
+          throw new TypeError(
+            "Cannot read properties of undefined (reading 'on')",
+          );
+        };
+        return client as unknown as MqttClient;
+      });
+    });
+    expect(error.message).toBe(REDACTED_MESSAGE);
+    expect(error.code).toBe("ERR_INVALID_ARG_VALUE");
+  });
 });
