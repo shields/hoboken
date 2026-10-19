@@ -100,9 +100,10 @@ heatedBedding:
 ```
 
 Match these logical names to Tucson's configuration. A bridge with only heated bedding
-can omit `devices` or set it to `[]`. Controller/zone pairs must be unique
-even across prefixes, because they determine accessory identities. Display
-names and prefixes can change without changing those identities. Heated bedding
+can omit `devices` or set it to `[]`. Entry identities must be unique even
+across prefixes, because they determine accessory identities; a single zone's
+identity is its controller and zone. Display names and prefixes can change
+without changing those identities. Heated bedding
 configuration contains only `name`, `prefix`, `controller`, and `zone` or
 `zones`, and any other field fails startup; Tucson owns controller credentials,
 protocol versions, and device connections.
@@ -149,11 +150,15 @@ off cancels preheat on every zone.
 A group write goes to each zone through the same confirmed path as that zone's
 own accessory, so writes to the group and to a zone's accessory that are in
 flight together stay consistent. The write succeeds only when every zone's
-command is confirmed. Otherwise it returns the HomeKit error that the first
-failing zone, in the order listed, returned, and the bridge logs a
-`group_write_failed` event for each failing zone. Zones whose commands were
-confirmed keep their change. A group is unavailable ("No Response") while any
-of its zones is, and refuses writes without sending any command.
+command is confirmed, and it returns the group's state as it is when the last
+zone settles, including any change a zone's own accessory made in between.
+Otherwise it returns the HomeKit error that the first failing zone, in the
+order listed, returned, and the bridge logs a `group_write_failed` event for
+each failing zone. Zones whose commands were confirmed keep their change. A
+group is unavailable ("No Response") while any of its zones is, and refuses
+writes without sending any command. A zone that becomes unavailable after it
+confirmed, before the last zone settles, fails the write with a communication
+failure and is logged the same way.
 
 The fan's Active control changes power. RotationSpeed zero turns power off
 and preserves the selected level; positive values select levels 1–10 in

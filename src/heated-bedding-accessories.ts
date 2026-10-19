@@ -35,6 +35,7 @@ import type {
   HeatedBeddingConfig,
   HeatedBeddingGroupConfig,
   HeatedBeddingSource,
+  UsableHeatedBeddingState,
 } from "./heated-bedding-source.ts";
 
 export interface HeatedBeddingAccessories {
@@ -65,35 +66,49 @@ function groupControl(
   logger: Logger,
 ): Control {
   const topics = heatedBeddingTopics(config);
+  const memberStates = (): (UsableHeatedBeddingState | undefined)[] =>
+    topics.map((topic) => source.usableState(topic));
+  const logFailure = (index: number, err: unknown): void => {
+    logger.error(
+      {
+        event: "group_write_failed",
+        group: config.name,
+        topic: topics[index],
+        err,
+      },
+      "Heated bedding group write failed",
+    );
+  };
   const fanOut = async (
     send: (topic: string) => Promise<HeatedBeddingSummary>,
   ): Promise<HeatedBeddingSummary> => {
     for (const topic of topics) source.getState(topic);
     const outcomes = await Promise.allSettled(topics.map(send));
-    const states: HeatedBeddingSummary[] = [];
     let failure: { reason: unknown } | undefined;
     for (const [index, outcome] of outcomes.entries()) {
-      if (outcome.status === "fulfilled") {
-        states.push(outcome.value);
-      } else {
-        logger.error(
-          {
-            event: "group_write_failed",
-            group: config.name,
-            topic: topics[index],
-            err: outcome.reason,
-          },
-          "Heated bedding group write failed",
-        );
+      if (outcome.status === "rejected") {
+        logFailure(index, outcome.reason);
         failure ??= { reason: outcome.reason };
       }
     }
     if (failure) throw failure.reason;
-    return aggregateHeatedBeddingStates(states);
+    // The response becomes the characteristic's value without a notification,
+    // and a member can change after it confirms and before the last one does,
+    // so it must describe every member as they are now.
+    const states = memberStates();
+    const live = states.filter((state) => state !== undefined);
+    if (live.length < topics.length) {
+      const error = new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      for (const [index, state] of states.entries()) {
+        if (!state) logFailure(index, error);
+      }
+      throw error;
+    }
+    return aggregateHeatedBeddingStates(live);
   };
   return {
     usable: () => {
-      const states = topics.map((topic) => source.usableState(topic));
+      const states = memberStates();
       return states.every((state) => state !== undefined)
         ? aggregateHeatedBeddingStates(states)
         : undefined;

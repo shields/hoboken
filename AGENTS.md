@@ -98,7 +98,13 @@ Each module is independently testable with dependency injection:
   other group write sends the per-zone write to all members. A group write
   resolves only when every member does; each failure is logged once with the
   zone's topic as `group_write_failed`, the first failure in the listed order
-  supplies the HAP error, and members that succeeded are not rolled back. The
+  supplies the HAP error, and members that succeeded are not rolled back. A
+  successful write responds with the aggregate of every member's `usableState`
+  read after the last member settles, never the states the members resolved with,
+  because HAP stores the response as the characteristic's value without a
+  notification and a member can change between two members' confirmations. A
+  member that is not usable at that point fails the write with
+  `SERVICE_COMMUNICATION_FAILURE` and is logged like any failure. The
   `changed` observer updates the group's accessories like any zone's. The
   source gets the distinct zones of all entries (`heatedBeddingZoneConfigs`),
   because it rejects a repeated zone. The status page lists a group as its

@@ -15,6 +15,7 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import {
   Characteristic,
+  CharacteristicEventTypes,
   HAPStatus,
   Perms,
   Service,
@@ -963,6 +964,29 @@ describe("heated bedding group accessories", () => {
       await Promise.all(crowd);
     });
 
+    test("a member that becomes unusable after it confirms fails the write when the last member settles", async () => {
+      ready();
+      const write = Promise.allSettled([Q(bed).speed.handleSetRequest(50)]);
+      flush();
+      await confirm(0);
+      report(LEFT_TOPIC, { power: null });
+      await confirm(1);
+      expect(await write).toEqual([
+        { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+      ]);
+      expect(logs).toMatchObject([
+        {
+          event: "group_write_failed",
+          group: "Bed",
+          topic: LEFT_TOPIC,
+          err: { hapStatus: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+        },
+      ]);
+      expect(Q(bed).speed.statusCode).toBe(
+        HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+      );
+    });
+
     test("a cancelled session fails the write for every member", async () => {
       ready();
       const write = Promise.allSettled([Q(bed).speed.handleSetRequest(50)]);
@@ -1175,6 +1199,78 @@ describe("heated bedding group accessories", () => {
       expect(Q(left).speed.value).toBe(50);
       expect(Q(right).speed.value).toBe(90);
       expect(Q(bed).speed.value).toBe(90);
+    });
+
+    test("a group speed response includes a zone write that lands between two members' confirmations", async () => {
+      ready();
+      const group = Q(bed).speed.handleSetRequest(50);
+      flush();
+      await confirm(0);
+      const zone = Q(left).speed.handleSetRequest(90);
+      flush();
+      await confirm(2);
+      await confirm(1);
+      expect(await zone).toBe(90);
+      expect(await group).toBe(90);
+      expect(Q(left).speed.value).toBe(90);
+      expect(Q(right).speed.value).toBe(50);
+      expect(Q(bed).speed.value).toBe(90);
+      expect(Q(bed).speed.statusCode).toBe(HAPStatus.SUCCESS);
+    });
+
+    test("a group Active response includes a zone switched on between two members' confirmations", async () => {
+      ready();
+      report(LEFT_TOPIC, { power: true });
+      report(RIGHT_TOPIC, { power: true });
+      const group = Q(bed).active.handleSetRequest(
+        Characteristic.Active.INACTIVE,
+      );
+      flush();
+      await confirm(1);
+      const zone = Q(right).active.handleSetRequest(
+        Characteristic.Active.ACTIVE,
+      );
+      flush();
+      await confirm(2);
+      await confirm(0);
+      expect(await zone).toBe(Characteristic.Active.ACTIVE);
+      expect(await group).toBe(Characteristic.Active.ACTIVE);
+      expect(Q(left).active.value).toBe(Characteristic.Active.INACTIVE);
+      expect(Q(right).active.value).toBe(Characteristic.Active.ACTIVE);
+      expect(Q(bed).active.value).toBe(Characteristic.Active.ACTIVE);
+    });
+
+    test("a group preheat response includes a zone preheat that lands between two members' confirmations", async () => {
+      ready();
+      const group = Q(bed).preheat.handleSetRequest(false);
+      await confirm(0);
+      const zone = Q(left).preheat.handleSetRequest(true);
+      await confirm(2);
+      await confirm(1);
+      expect(await zone).toBe(true);
+      expect(await group).toBe(true);
+      expect(Q(bed).preheat.value).toBe(true);
+    });
+
+    test("a later change of the group is announced after a write that overlapped a zone's", async () => {
+      ready();
+      const group = Q(bed).speed.handleSetRequest(50);
+      flush();
+      await confirm(0);
+      void Q(left).speed.handleSetRequest(90);
+      flush();
+      await confirm(2);
+      await confirm(1);
+      await group;
+      const changes: { oldValue: unknown; newValue: unknown }[] = [];
+      Q(bed).speed.on(
+        CharacteristicEventTypes.CHANGE,
+        ({ oldValue, newValue }) => changes.push({ oldValue, newValue }),
+      );
+      void Q(left).speed.handleSetRequest(50);
+      flush();
+      await confirm(3);
+      expect(changes).toEqual([{ oldValue: 90, newValue: 50 }]);
     });
 
     test("group and zone preheat writes each follow reported state", async () => {
