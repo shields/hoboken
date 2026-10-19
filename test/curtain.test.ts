@@ -25,9 +25,8 @@ const endpoint = {
   name: "Curtain",
   prefix: "tuya",
   controller: "window",
-  zone: "curtain",
 };
-const topic = "tuya/window/curtain";
+const topic = "tuya/window";
 const baseline = {
   session_id: "s",
   current_position: 20,
@@ -37,7 +36,9 @@ const baseline = {
 
 function harness() {
   const sent: { target_position?: number; request_id: string }[] = [];
-  const source = new CurtainSource([endpoint], (_topic, payload, complete) => {
+  const topics: string[] = [];
+  const source = new CurtainSource([endpoint], (topic, payload, complete) => {
+    topics.push(topic);
     sent.push(payload);
     complete();
   });
@@ -63,7 +64,7 @@ function harness() {
     false,
   );
   report();
-  return { source, sent, report, result, generation };
+  return { source, sent, topics, report, result, generation };
 }
 
 afterEach(() => jest.useRealTimers());
@@ -98,6 +99,32 @@ describe("curtain profile", () => {
 });
 
 describe("curtain source and accessory", () => {
+  test("uses the controller's own topics, with no zone", async () => {
+    const h = harness();
+    expect(h.source.topics()).toEqual([
+      { topic: "tuya/bridge/availability", live: false },
+      { topic: "tuya/bridge/heartbeat", live: true },
+      { topic: "tuya/window/availability", live: false },
+      { topic: "tuya/window", live: false },
+      { topic: "tuya/window/result", live: true },
+    ]);
+    const write = h.source.writePosition(topic, 90);
+    expect(h.topics).toEqual(["tuya/window/set"]);
+    h.source.disconnect();
+    expect(await Promise.allSettled([write])).toMatchObject([
+      { status: "rejected" },
+    ]);
+  });
+  test("derives the accessory identity from the controller alone", () => {
+    const h = harness();
+    const uuid = (config: typeof endpoint) =>
+      createCurtainAccessory(config, h.source).accessory.UUID;
+    expect(uuid({ ...endpoint, name: "Renamed", prefix: "other" })).toBe(
+      uuid(endpoint),
+    );
+    expect(uuid({ ...endpoint, controller: "door" })).not.toBe(uuid(endpoint));
+    h.source.disconnect();
+  });
   test("confirms a target before arrival", async () => {
     const h = harness();
     const accessory = createCurtainAccessory(endpoint, h.source);
@@ -195,11 +222,6 @@ describe("curtain configuration", () => {
   test("allows curtains alone", () => {
     expect(validateConfig(config).devices).toEqual([]);
     expect(validateConfig(config).curtains).toEqual([endpoint]);
-  });
-  test("rejects collisions with bedding", () => {
-    expect(() =>
-      validateConfig({ ...config, heatedBedding: [endpoint] }),
-    ).toThrow();
   });
   test.each([
     [null],

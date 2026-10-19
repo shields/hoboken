@@ -200,9 +200,7 @@ const HEATED_BEDDING = [
   { name: "Bed Side A", prefix: "tuya", controller: "bed", zone: "side_a" },
   { name: "Bed Side B", prefix: "tuya", controller: "bed", zone: "side_b" },
 ];
-const CURTAINS = [
-  { name: "Curtain", prefix: "tuya", controller: "window", zone: "curtain" },
-];
+const CURTAINS = [{ name: "Curtain", prefix: "tuya", controller: "window" }];
 const HEATED_BEDDING_STATE = {
   session_id: "live",
   power: false,
@@ -320,14 +318,8 @@ async function openEvents(
 
 describe("startBridge", () => {
   test("curtain-only bridge exposes reported positions, confirmed targets, diagnostics, and recovery", async () => {
-    const curtain = {
-      name: "Curtain",
-      prefix: "tuya",
-      controller: "window",
-      zone: "curtain",
-    };
-    const topic = "tuya/window/curtain";
-    const config = { ...metricsConfig(), devices: [], curtains: [curtain] };
+    const topic = "tuya/window";
+    const config = { ...metricsConfig(), devices: [], curtains: CURTAINS };
     expect(
       buildStatusData(
         config,
@@ -343,6 +335,11 @@ describe("startBridge", () => {
       Service.WindowCovering,
     )!;
     try {
+      expect(
+        bridge.bridgedAccessories[0]!.getService(
+          Service.AccessoryInformation,
+        )!.getCharacteristic(Characteristic.SerialNumber).value,
+      ).toBe("window/curtain");
       const unavailable = await (
         await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
       ).text();
@@ -806,21 +803,14 @@ describe("startBridge", () => {
       ...testConfig(),
       devices: [],
       heatedBedding: HEATED_BEDDING,
-      curtains: [
-        {
-          name: "Curtain",
-          prefix: "tuya",
-          controller: "window",
-          zone: "curtain",
-        },
-      ],
+      curtains: CURTAINS,
     });
     const bedding = mockClients[count]!;
     const curtain = mockClients[count + 1]!;
     readyHeatedBedding(bedding);
     readyHeatedBedding(curtain);
     heatedBeddingMessage(curtain, "tuya/window/availability", "online");
-    heatedBeddingMessage(curtain, "tuya/window/curtain", {
+    heatedBeddingMessage(curtain, "tuya/window", {
       session_id: "live",
       current_position: 70,
       target_position: 0,

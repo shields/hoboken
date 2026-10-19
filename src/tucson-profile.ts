@@ -20,12 +20,15 @@ export type TucsonResult =
       error_code: string;
     };
 
-export function tucsonTopic(zone: {
+export function tucsonTopic(endpoint: {
   prefix: string;
   controller: string;
-  zone: string;
+  zone?: string;
 }): string {
-  return `${zone.prefix}/${zone.controller}/${zone.zone}`;
+  const controller = `${endpoint.prefix}/${endpoint.controller}`;
+  return endpoint.zone === undefined
+    ? controller
+    : `${controller}/${endpoint.zone}`;
 }
 
 export function object(value: unknown): Record<string, unknown> {

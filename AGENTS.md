@@ -344,19 +344,35 @@ make lint test
   prefix. A zone name has no comma, so a group's never equals a single zone's.
   A group's zones may also be configured as entries of their own, and groups
   may overlap, but a controller/zone pair keeps one prefix across every entry
-- Heated bedding routes cannot overlap device routes; wildcard device topics cannot
-  accompany heated bedding. An entry's routes are those of each of its zones,
-  and a zone shared by entries has the same owner in each, so it is no overlap
+- Heated bedding and curtain routes cannot overlap device routes or each other;
+  wildcard device topics cannot accompany either. A heated bedding entry's routes
+  are those of each of its zones, and a zone shared by entries has the same owner
+  in each, so it is no overlap. A curtain owns its controller's topic, so a
+  controller that has both heated bedding and a curtain overlaps on its
+  availability route
 - Heated bedding entries contain only logical MQTT names
 
 ## Tucson curtains
 
-- `curtains` entries use `name`, `prefix`, `controller`, and `zone`, like a
-  single-zone `heatedBedding` entry; groups with `zones` apply only to heated
-  bedding. A curtain-only configuration may omit `devices`.
+- `curtains` entries use `name`, `prefix`, and `controller`. A curtain is a
+  single-endpoint controller (a Tucson profile with `endpoint_count` 1), so it
+  has no zone: state is on `<prefix>/<controller>`, commands on
+  `<prefix>/<controller>/set`, refresh requests on `.../get`, results on
+  `.../result`, and availability on `.../availability`. "Zone" is the Sunbeam
+  product's term and stays with heated bedding; a `zone` or `zones` key on a
+  curtain is an unknown field. The accessory identity (`curtainIdentity`) is
+  the controller alone and unique across prefixes. `bridge` and `availability`
+  are reserved controller names. A controller named `availability` would carry
+  state on `<prefix>/availability`, which a client that reads every topic ending
+  in `/availability` as an availability message cannot parse as state, and one
+  named `bridge` would put its availability on the prefix's own
+  `<prefix>/bridge/availability` route. A curtain-only configuration may omit
+  `devices`.
 - `tucson-source.ts`, `tucson-mqtt.ts`, and `tucson-profile.ts` own the shared
   MQTT session, request/result, and wire-validation behavior. Bedding and
-  curtain modules supply state parsing and accessory behavior.
+  curtain modules supply state parsing and accessory behavior. An endpoint is a
+  zone of a multi-endpoint controller or, without a `zone`, the whole controller
+  (`tucsonTopic`).
 - Curtains expose only target position writes. Do not add start/stop commands
   or `HoldPosition` without a separate request.
 - Report current position from the device. Infer movement from reported

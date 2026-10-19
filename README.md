@@ -306,7 +306,7 @@ the value.
 | each `devices` entry       | `name`, `type`, `topic`, `capabilities`, `scenes`                   |
 | each `scenes` entry        | `name`, `id`                                                        |
 | each `heatedBedding` entry | `name`, `prefix`, `controller`, `zone`, `zones`                     |
-| each `curtains` entry      | `name`, `prefix`, `controller`, `zone`                              |
+| each `curtains` entry      | `name`, `prefix`, `controller`                                      |
 
 ### Bind Interface
 
@@ -417,8 +417,9 @@ Brokers that restrict topics per user must grant Hoboken these topics:
   zone's `<prefix>/<controller>/<zone>` and `<prefix>/<controller>/<zone>/result`;
   write each zone's `<prefix>/<controller>/<zone>/set`. A group needs the topics
   of each of its zones and no others.
-- Curtains: the same topics as heated bedding, for each curtain's controller and
-  zone.
+- Curtains: read `<prefix>/bridge/availability`, `<prefix>/bridge/heartbeat`,
+  `<prefix>/<controller>/availability`, `<prefix>/<controller>`, and
+  `<prefix>/<controller>/result`; write `<prefix>/<controller>/set`.
 
 With an `acl_file`, Mosquitto accepts a subscription to a topic that the user
 cannot read and then delivers nothing, so a missing read permission shows up as
@@ -606,21 +607,25 @@ connection close events.
 
 ### Tucson curtains
 
-The optional `curtains` configuration presents Tucson endpoints as HomeKit
-window coverings:
+The optional `curtains` configuration presents single-endpoint Tucson
+controllers as HomeKit window coverings:
 
 ```yaml
 curtains:
   - name: Living Room Curtain
     prefix: tuya
     controller: living_room
-    zone: curtain
 ```
 
 A curtain-only bridge may omit `devices` or set it to `[]`. Each entry uses the
 same logical topic naming rules as `heatedBedding`; routes must not overlap.
-An entry names one `zone`; groups of zones apply only to heated bedding. No
-Tuya credentials belong in Hoboken.
+A curtain is a single-endpoint controller, so its state is on
+`<prefix>/<controller>` (`tuya/living_room` above) and its commands, results, and
+availability are under it, without a zone. Zones are Sunbeam's term and apply
+only to heated bedding, so a `zone` or `zones` key on a curtain is an unknown
+field. A controller name identifies the accessory, so it is unique across
+prefixes, and `bridge` and `availability` are reserved. No Tuya credentials
+belong in Hoboken.
 
 Set `TargetPosition` from zero (closed) to 100 (open). `CurrentPosition` comes
 from device reports. `PositionState` uses reported motion when available and

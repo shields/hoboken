@@ -43,10 +43,17 @@ export interface HeatedBeddingSummary {
   preheat: boolean;
 }
 
-export {
-  tucsonTopic as heatedBeddingTopic,
-  type TucsonResult as HeatedBeddingResult,
-} from "./tucson-profile.ts";
+export type { TucsonResult as HeatedBeddingResult } from "./tucson-profile.ts";
+
+// The zone is required, because tucsonTopic returns the controller's own topic
+// for an endpoint without one, which a group entry would silently receive.
+export function heatedBeddingTopic(zone: {
+  prefix: string;
+  controller: string;
+  zone: string;
+}): string {
+  return tucsonTopic(zone);
+}
 
 type HeatedBeddingZoneSelection =
   { zone: string } | { zones: readonly string[] };

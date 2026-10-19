@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import { CurtainMQTT } from "./curtain-mqtt.ts";
+import { curtainIdentity } from "./curtain-profile.ts";
 import type { CurtainSource } from "./curtain-source.ts";
 import {
   createCurtainAccessory,
@@ -575,7 +576,7 @@ export async function startBridge(
         curtain.accessory,
         "Hoboken",
         "Curtain",
-        `${configCurtain.controller}/${configCurtain.zone}/curtain`,
+        `${curtainIdentity(configCurtain)}/curtain`,
         version,
       );
       bridge.addBridgedAccessory(curtain.accessory);

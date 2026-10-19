@@ -59,8 +59,8 @@ const CURTAIN = {
   name: "Window Curtain",
   prefix: PREFIX,
   controller: "window",
-  zone: "curtain",
 };
+const CURTAIN_TOPIC = `${PREFIX}/${CURTAIN.controller}`;
 const AUTH: BrokerAuth = {
   users: { hoboken: HOBOKEN_SENTINEL, backend: BACKEND_PASSWORD },
   acl: [
@@ -76,10 +76,10 @@ const AUTH: BrokerAuth = {
       `topic read ${PREFIX}/${controller}/${zone}/result`,
       `topic write ${PREFIX}/${controller}/${zone}/set`,
     ]),
-    `topic read ${PREFIX}/${CURTAIN.controller}/availability`,
-    `topic read ${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}`,
-    `topic read ${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}/result`,
-    `topic write ${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}/set`,
+    `topic read ${CURTAIN_TOPIC}/availability`,
+    `topic read ${CURTAIN_TOPIC}`,
+    `topic read ${CURTAIN_TOPIC}/result`,
+    `topic write ${CURTAIN_TOPIC}/set`,
     "user backend",
     "topic readwrite #",
     "",
@@ -398,7 +398,7 @@ describe(
             `${Z2M_TOPIC}/set`,
             "zigbee2mqtt/ungranted/set",
             `${PREFIX}/bed/+/set`,
-            `${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}/set`,
+            `${CURTAIN_TOPIC}/set`,
           ],
           { qos: 0, rap: true },
         );
@@ -567,21 +567,16 @@ describe(
 
       test("curtains report state and carry a confirmed target write under the ACL", async () => {
         await poll(connected);
-        const topic = `${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}`;
         await publish(`${PREFIX}/bridge/availability`, "online", true);
-        await publish(
-          `${PREFIX}/${CURTAIN.controller}/availability`,
-          "online",
-          true,
-        );
+        await publish(`${CURTAIN_TOPIC}/availability`, "online", true);
         const state = {
           session_id: session,
           current_position: 20,
           target_position: 20,
           motion: null,
         };
-        states.set(topic, state);
-        await publish(topic, state, true);
+        states.set(CURTAIN_TOPIC, state);
+        await publish(CURTAIN_TOPIC, state, true);
         await publish(`${PREFIX}/bridge/heartbeat`, { session_id: session });
         await poll(async () => (await value(curtainCurrent)) === 20);
 
@@ -590,7 +585,7 @@ describe(
         assert.equal(commands.length, count + 1);
         const latest = commands.at(-1);
         assert(latest);
-        assert.equal(latest.topic, `${topic}/set`);
+        assert.equal(latest.topic, `${CURTAIN_TOPIC}/set`);
         assert.deepEqual(latest.command, {
           request_id: latest.command.request_id,
           target_position: 80,

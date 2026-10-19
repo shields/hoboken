@@ -14,13 +14,17 @@
 
 import { randomUUID } from "node:crypto";
 import { HAPStatus, HapStatusError } from "@homebridge/hap-nodejs";
-import { parseTucsonHeartbeat, parseTucsonResult } from "./tucson-profile.ts";
+import {
+  parseTucsonHeartbeat,
+  parseTucsonResult,
+  tucsonTopic,
+} from "./tucson-profile.ts";
 
 export interface TucsonEndpointConfig {
   name: string;
   prefix: string;
   controller: string;
-  zone: string;
+  zone?: string;
 }
 
 export type TucsonPublish<C extends object> = (
@@ -34,8 +38,8 @@ export interface TucsonProfile<S, C> {
   matches: (command: C, state: S) => boolean;
 }
 
-// How a window of writes that only asks a zone to resume interacts with the
-// zone's power.
+// How a window of writes that only asks an endpoint to resume interacts with
+// its power.
 export interface TucsonResume<S, C, W> {
   only: (writes: readonly W[]) => boolean;
   powered: (state: S) => boolean;
@@ -47,12 +51,12 @@ interface Prefix<S, W> {
   session: string | undefined;
   heartbeat: number | undefined;
   timer: ReturnType<typeof setTimeout> | undefined;
-  zones: Zone<S, W>[];
+  endpoints: Endpoint<S, W>[];
 }
 
 interface Controller<S, W> {
   online: boolean;
-  zones: Zone<S, W>[];
+  endpoints: Endpoint<S, W>[];
 }
 
 interface Waiter<S> {
@@ -67,7 +71,7 @@ interface WriteWindow<S, W> {
   timer: ReturnType<typeof setTimeout>;
 }
 
-interface Zone<S, W> {
+interface Endpoint<S, W> {
   topic: string;
   prefix: Prefix<S, W>;
   controller: Controller<S, W>;
@@ -78,7 +82,7 @@ interface Zone<S, W> {
 }
 
 interface Pending<S, C, W> {
-  zone: Zone<S, W>;
+  endpoint: Endpoint<S, W>;
   command: C;
   sequence: number;
   session: string;
@@ -91,7 +95,7 @@ interface Pending<S, C, W> {
 type Route<S, W> =
   | { kind: "bridge" | "heartbeat"; prefix: Prefix<S, W> }
   | { kind: "controller"; controller: Controller<S, W> }
-  | { kind: "state" | "result"; zone: Zone<S, W> };
+  | { kind: "state" | "result"; endpoint: Endpoint<S, W> };
 
 export interface SourceOptions {
   clock?: () => number;
@@ -111,7 +115,7 @@ export class TucsonSource<
   W = never,
 > {
   #profile: TucsonProfile<S, C>;
-  #zones = new Map<string, Zone<S, W>>();
+  #endpoints = new Map<string, Endpoint<S, W>>();
   #prefixes = new Map<string, Prefix<S, W>>();
   #controllers = new Map<string, Controller<S, W>>();
   #routes = new Map<string, Route<S, W>>();
@@ -145,7 +149,7 @@ export class TucsonSource<
           session: undefined,
           heartbeat: undefined,
           timer: undefined,
-          zones: [],
+          endpoints: [],
         };
         this.#prefixes.set(config.prefix, prefix);
         this.#route(`${config.prefix}/bridge/availability`, {
@@ -160,15 +164,15 @@ export class TucsonSource<
       const controllerTopic = `${config.prefix}/${config.controller}`;
       let controller = this.#controllers.get(controllerTopic);
       if (!controller) {
-        controller = { online: false, zones: [] };
+        controller = { online: false, endpoints: [] };
         this.#controllers.set(controllerTopic, controller);
         this.#route(`${controllerTopic}/availability`, {
           kind: "controller",
           controller,
         });
       }
-      const topic = `${controllerTopic}/${config.zone}`;
-      const zone: Zone<S, W> = {
+      const topic = tucsonTopic(config);
+      const endpoint: Endpoint<S, W> = {
         topic,
         prefix,
         controller,
@@ -177,11 +181,11 @@ export class TucsonSource<
         callers: 0,
         published: 0,
       };
-      this.#route(topic, { kind: "state", zone });
-      this.#route(`${topic}/result`, { kind: "result", zone });
-      this.#zones.set(topic, zone);
-      prefix.zones.push(zone);
-      controller.zones.push(zone);
+      this.#route(topic, { kind: "state", endpoint });
+      this.#route(`${topic}/result`, { kind: "result", endpoint });
+      this.#endpoints.set(topic, endpoint);
+      prefix.endpoints.push(endpoint);
+      controller.endpoints.push(endpoint);
     }
   }
 
@@ -191,10 +195,10 @@ export class TucsonSource<
     this.#routes.set(topic, route);
   }
 
-  #zone(topic: string): Zone<S, W> {
-    const zone = this.#zones.get(topic);
-    if (!zone) throw new RangeError("Unknown Tucson zone");
-    return zone;
+  #endpoint(topic: string): Endpoint<S, W> {
+    const endpoint = this.#endpoints.get(topic);
+    if (!endpoint) throw new RangeError("Unknown Tucson endpoint");
+    return endpoint;
   }
 
   connect(): number {
@@ -223,9 +227,9 @@ export class TucsonSource<
     }
     for (const controller of this.#controllers.values())
       controller.online = false;
-    for (const zone of this.#zones.values()) {
-      zone.state = undefined;
-      this.#cancel(zone);
+    for (const endpoint of this.#endpoints.values()) {
+      endpoint.state = undefined;
+      this.#cancel(endpoint);
     }
     // TucsonMQTT connects only a disconnected source and relies on
     // connect() staying silent, so no observer can stop it before it has a
@@ -241,16 +245,16 @@ export class TucsonSource<
   }
 
   usableState(topic: string): S | undefined {
-    const zone = this.#zone(topic);
-    const state = zone.state;
+    const endpoint = this.#endpoint(topic);
+    const state = endpoint.state;
     return !this.#connected ||
       !this.#subscribed ||
-      !zone.prefix.online ||
-      !zone.controller.online ||
-      zone.prefix.heartbeat === undefined ||
-      this.#clock() - zone.prefix.heartbeat >= HEARTBEAT_TIMEOUT ||
+      !endpoint.prefix.online ||
+      !endpoint.controller.online ||
+      endpoint.prefix.heartbeat === undefined ||
+      this.#clock() - endpoint.prefix.heartbeat >= HEARTBEAT_TIMEOUT ||
       !state ||
-      state.session_id !== zone.prefix.session
+      state.session_id !== endpoint.prefix.session
       ? undefined
       : state;
   }
@@ -263,7 +267,7 @@ export class TucsonSource<
   }
 
   pendingCount(topic: string): number {
-    return this.#zone(topic).callers;
+    return this.#endpoint(topic).callers;
   }
 
   handle(
@@ -281,7 +285,7 @@ export class TucsonSource<
         if (!route.prefix.online) {
           clearTimeout(route.prefix.timer);
           route.prefix.heartbeat = undefined;
-          for (const zone of route.prefix.zones) this.#cancel(zone);
+          for (const endpoint of route.prefix.endpoints) this.#cancel(endpoint);
         }
         this.#changed?.();
         if (payload !== "online" && payload !== "offline")
@@ -291,7 +295,8 @@ export class TucsonSource<
       case "controller": {
         route.controller.online = payload === "online";
         if (!route.controller.online) {
-          for (const zone of route.controller.zones) this.#cancel(zone);
+          for (const endpoint of route.controller.endpoints)
+            this.#cancel(endpoint);
         }
         this.#changed?.();
         if (payload !== "online" && payload !== "offline")
@@ -302,14 +307,14 @@ export class TucsonSource<
         if (retained) return;
         const session = parseTucsonHeartbeat(payload);
         if (session !== route.prefix.session) {
-          for (const zone of route.prefix.zones) this.#cancel(zone);
+          for (const endpoint of route.prefix.endpoints) this.#cancel(endpoint);
         }
         route.prefix.session = session;
         route.prefix.heartbeat = this.#clock();
         clearTimeout(route.prefix.timer);
         route.prefix.timer = setTimeout(() => {
           route.prefix.heartbeat = undefined;
-          for (const zone of route.prefix.zones) this.#cancel(zone);
+          for (const endpoint of route.prefix.endpoints) this.#cancel(endpoint);
           this.#changed?.();
         }, HEARTBEAT_TIMEOUT);
         route.prefix.timer.unref();
@@ -317,16 +322,16 @@ export class TucsonSource<
         break;
       }
       case "state": {
-        route.zone.state = undefined;
+        route.endpoint.state = undefined;
         try {
-          route.zone.state = this.#profile.parse(payload);
+          route.endpoint.state = this.#profile.parse(payload);
         } catch (error: unknown) {
-          this.#cancel(route.zone);
+          this.#cancel(route.endpoint);
           this.#changed?.();
           throw error;
         }
         for (const [id, pending] of this.#pending) {
-          if (pending.zone === route.zone) this.#confirm(id, pending);
+          if (pending.endpoint === route.endpoint) this.#confirm(id, pending);
         }
         this.#changed?.();
         break;
@@ -335,7 +340,7 @@ export class TucsonSource<
         if (retained) return;
         const result = parseTucsonResult(payload);
         const pending = this.#pending.get(result.request_id);
-        if (pending?.zone !== route.zone) return;
+        if (pending?.endpoint !== route.endpoint) return;
         if (result.outcome === "confirmed") {
           pending.confirmed = true;
           this.#confirm(result.request_id, pending);
@@ -356,13 +361,13 @@ export class TucsonSource<
     }
   }
 
-  #admit(topic: string): Zone<S, W> {
+  #admit(topic: string): Endpoint<S, W> {
     this.getState(topic);
-    const zone = this.#zone(topic);
-    if (zone.callers >= MAX_CALLERS)
+    const endpoint = this.#endpoint(topic);
+    if (endpoint.callers >= MAX_CALLERS)
       throw new HapStatusError(HAPStatus.RESOURCE_BUSY);
-    zone.callers++;
-    return zone;
+    endpoint.callers++;
+    return endpoint;
   }
 
   protected async writeCoalesced(
@@ -371,21 +376,21 @@ export class TucsonSource<
     coalesce: (writes: readonly W[]) => C,
     resume?: TucsonResume<S, C, W>,
   ): Promise<S> {
-    const zone = this.#admit(topic);
+    const endpoint = this.#admit(topic);
     return new Promise((resolve, reject) => {
       const waiter: Waiter<S> = { resolve, reject };
-      if (zone.window) {
-        zone.window.writes.push(write);
-        zone.window.waiters.push(waiter);
+      if (endpoint.window) {
+        endpoint.window.writes.push(write);
+        endpoint.window.waiters.push(waiter);
       } else {
         const window: WriteWindow<S, W> = {
           writes: [write],
           waiters: [waiter],
           deadline: this.#clock() + WRITE_TIMEOUT,
           timer: setTimeout(() => {
-            zone.window = undefined;
+            endpoint.window = undefined;
             this.#send(
-              zone,
+              endpoint,
               coalesce(window.writes),
               window.waiters,
               window.deadline,
@@ -394,16 +399,16 @@ export class TucsonSource<
           }, COALESCE_DELAY),
         };
         window.timer.unref();
-        zone.window = window;
+        endpoint.window = window;
       }
     });
   }
 
   protected async writeCommand(topic: string, command: C): Promise<S> {
-    const zone = this.#admit(topic);
+    const endpoint = this.#admit(topic);
     return new Promise((resolve, reject) => {
       this.#send(
-        zone,
+        endpoint,
         command,
         [{ resolve, reject }],
         this.#clock() + WRITE_TIMEOUT,
@@ -412,21 +417,21 @@ export class TucsonSource<
   }
 
   #send(
-    zone: Zone<S, W>,
+    endpoint: Endpoint<S, W>,
     command: C,
     waiters: Waiter<S>[],
     deadline: number,
     resume?: TucsonResume<S, C, W>,
   ): void {
     try {
-      this.#dispatch(zone, command, waiters, deadline, resume);
+      this.#dispatch(endpoint, command, waiters, deadline, resume);
     } catch (error: unknown) {
-      this.#reject(zone, waiters, error);
+      this.#reject(endpoint, waiters, error);
     }
   }
 
   #dispatch(
-    zone: Zone<S, W>,
+    endpoint: Endpoint<S, W>,
     command: C,
     waiters: Waiter<S>[],
     deadline: number,
@@ -434,16 +439,16 @@ export class TucsonSource<
   ): void {
     if (this.#clock() >= deadline) {
       this.#reject(
-        zone,
+        endpoint,
         waiters,
         new HapStatusError(HAPStatus.OPERATION_TIMED_OUT),
       );
       return;
     }
-    const state = this.usableState(zone.topic);
+    const state = this.usableState(endpoint.topic);
     if (!state) {
       this.#reject(
-        zone,
+        endpoint,
         waiters,
         new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE),
       );
@@ -455,14 +460,14 @@ export class TucsonSource<
       let inFlight: Pending<S, C, W> | undefined;
       for (const pending of this.#pending.values()) {
         if (
-          pending.zone === zone &&
+          pending.endpoint === endpoint &&
           resume.power(pending.command) !== undefined
         )
           inFlight = pending;
       }
       if (inFlight ? resume.power(inFlight.command) : resume.powered(state)) {
         if (inFlight) inFlight.waiters.push(...waiters);
-        else this.#resolve(zone, waiters, state);
+        else this.#resolve(endpoint, waiters, state);
         return;
       }
     }
@@ -471,9 +476,9 @@ export class TucsonSource<
       throw new Error("Duplicate generated Tucson request ID");
     }
     const pending: Pending<S, C, W> = {
-      zone,
+      endpoint,
       command,
-      sequence: zone.published + 1,
+      sequence: endpoint.published + 1,
       waiters,
       deadline,
       session: state.session_id,
@@ -491,7 +496,7 @@ export class TucsonSource<
     const generation = this.#generation;
     try {
       this.#publish(
-        `${zone.topic}/set`,
+        `${endpoint.topic}/set`,
         { ...command, request_id: id },
         (error) => {
           if (!(error && generation === this.#generation)) {
@@ -507,7 +512,7 @@ export class TucsonSource<
       clearTimeout(pending.timer);
       throw error;
     }
-    zone.published = pending.sequence;
+    endpoint.published = pending.sequence;
   }
 
   #confirm(id: string, pending: Pending<S, C, W>): void {
@@ -520,7 +525,7 @@ export class TucsonSource<
       return;
     }
     if (!pending.confirmed) return;
-    const state = this.usableState(pending.zone.topic);
+    const state = this.usableState(pending.endpoint.topic);
     if (!state) {
       this.#finish(
         id,
@@ -529,48 +534,52 @@ export class TucsonSource<
       );
       return;
     }
-    // A newer write to this zone, or a firmware side effect of one such as
+    // A newer write to this endpoint, or a firmware side effect of one such as
     // preheat's level 10, can replace this write's values before its
     // confirmed result arrives.
     if (
       state.session_id !== pending.session ||
-      (pending.sequence === pending.zone.published &&
+      (pending.sequence === pending.endpoint.published &&
         !this.#profile.matches(pending.command, state))
     )
       return;
     this.#pending.delete(id);
     clearTimeout(pending.timer);
-    this.#resolve(pending.zone, pending.waiters, state);
+    this.#resolve(pending.endpoint, pending.waiters, state);
   }
 
-  #resolve(zone: Zone<S, W>, waiters: Waiter<S>[], state: S): void {
-    zone.callers -= waiters.length;
+  #resolve(endpoint: Endpoint<S, W>, waiters: Waiter<S>[], state: S): void {
+    endpoint.callers -= waiters.length;
     for (const waiter of waiters) waiter.resolve(state);
   }
 
-  #reject(zone: Zone<S, W>, waiters: Waiter<S>[], error: unknown): void {
-    zone.callers -= waiters.length;
+  #reject(
+    endpoint: Endpoint<S, W>,
+    waiters: Waiter<S>[],
+    error: unknown,
+  ): void {
+    endpoint.callers -= waiters.length;
     for (const waiter of waiters) waiter.reject(error);
   }
 
   #finish(id: string, pending: Pending<S, C, W>, error: HapStatusError): void {
     this.#pending.delete(id);
     clearTimeout(pending.timer);
-    this.#reject(pending.zone, pending.waiters, error);
+    this.#reject(pending.endpoint, pending.waiters, error);
   }
 
-  #cancel(zone: Zone<S, W>): void {
-    if (zone.window) {
-      clearTimeout(zone.window.timer);
+  #cancel(endpoint: Endpoint<S, W>): void {
+    if (endpoint.window) {
+      clearTimeout(endpoint.window.timer);
       this.#reject(
-        zone,
-        zone.window.waiters,
+        endpoint,
+        endpoint.window.waiters,
         new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE),
       );
-      zone.window = undefined;
+      endpoint.window = undefined;
     }
     for (const [id, pending] of this.#pending) {
-      if (pending.zone === zone)
+      if (pending.endpoint === endpoint)
         this.#finish(
           id,
           pending,

@@ -30,7 +30,9 @@ import {
   type TucsonResume,
 } from "./tucson-source.ts";
 
-export type HeatedBeddingZoneConfig = TucsonEndpointConfig;
+export interface HeatedBeddingZoneConfig extends TucsonEndpointConfig {
+  zone: string;
+}
 
 export interface HeatedBeddingGroupConfig {
   name: string;

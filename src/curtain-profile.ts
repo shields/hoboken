@@ -25,6 +25,10 @@ export interface CurtainCommand {
   target_position: number;
 }
 
+export function curtainIdentity(config: { controller: string }): string {
+  return config.controller;
+}
+
 export function parseCurtainState(value: unknown): CurtainState | undefined {
   const data = object(value);
   const session = identifier(data.session_id, "session_id");

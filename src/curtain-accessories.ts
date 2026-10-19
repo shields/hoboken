@@ -23,7 +23,7 @@ import {
   uuid,
 } from "@homebridge/hap-nodejs";
 import { tucsonTopic } from "./tucson-profile.ts";
-import { curtainMotion } from "./curtain-profile.ts";
+import { curtainIdentity, curtainMotion } from "./curtain-profile.ts";
 import type { CurtainSource, CurtainConfig } from "./curtain-source.ts";
 
 export interface CurtainAccessory {
@@ -38,9 +38,7 @@ export function createCurtainAccessory(
   const topic = tucsonTopic(config);
   const accessory = new Accessory(
     config.name,
-    uuid.generate(
-      JSON.stringify(["hoboken:curtain", config.controller, config.zone]),
-    ),
+    uuid.generate(JSON.stringify(["hoboken:curtain", curtainIdentity(config)])),
   );
   accessory.category = Categories.WINDOW_COVERING;
   const service = accessory.addService(Service.WindowCovering, config.name);

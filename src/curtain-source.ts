@@ -20,12 +20,15 @@ import {
 } from "./curtain-profile.ts";
 import {
   TucsonSource,
-  type TucsonEndpointConfig,
   type TucsonPublish,
   type SourceOptions,
 } from "./tucson-source.ts";
 
-export type CurtainConfig = TucsonEndpointConfig;
+export interface CurtainConfig {
+  name: string;
+  prefix: string;
+  controller: string;
+}
 
 export class CurtainSource extends TucsonSource<CurtainState, CurtainCommand> {
   constructor(

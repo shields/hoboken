@@ -87,6 +87,7 @@ describe("validateConfig", () => {
   };
 
   const sideB = { ...heatedBedding, name: "Bed Side B", zone: "side_b" };
+  const curtain = { name: "Window", prefix: "tuya", controller: "window" };
   const group = {
     name: "Bed",
     prefix: "tuya",
@@ -387,42 +388,6 @@ describe("validateConfig", () => {
       );
     });
 
-    test("curtains are single zones, so a curtain entry cannot list zones", () => {
-      const { name, prefix, controller } = heatedBedding;
-      expect(
-        errorMessage(() =>
-          validateConfig({
-            ...validConfig(),
-            curtains: [{ name, prefix, controller, zones: group.zones }],
-          }),
-        ),
-      ).toBe(
-        'curtains[0]: unknown field "zones"; supported fields are name, prefix, controller, and zone',
-      );
-    });
-
-    test("a curtain without a zone is told to name a zone", () => {
-      const { name, prefix, controller } = heatedBedding;
-      expect(
-        errorMessage(() =>
-          validateConfig({
-            ...validConfig(),
-            curtains: [{ name, prefix, controller }],
-          }),
-        ),
-      ).toBe("curtains[0].zone must be a valid Tucson zone name");
-    });
-
-    test("rejects a curtain on a zone that a group lists", () => {
-      expect(() =>
-        validateConfig({
-          ...validConfig(),
-          heatedBedding: [group],
-          curtains: [{ ...sideB, name: "Curtain" }],
-        }),
-      ).toThrow("Duplicate Tucson endpoint");
-    });
-
     test("rejects an unknown field without its value", () => {
       const message = errorMessage(() =>
         validateConfig(groupConfig({ ...group, topic: "never-log-value" })),
@@ -431,6 +396,168 @@ describe("validateConfig", () => {
         'heatedBedding[0]: unknown field "topic"; supported fields are name, prefix, controller, zone, and zones',
       );
       expect(message).not.toContain("never-log-value");
+    });
+  });
+
+  describe("curtains", () => {
+    test.each([
+      ["zone", "side_a"],
+      ["zones", group.zones],
+    ])("a curtain entry has no %s", (key, value) => {
+      expect(
+        errorMessage(() =>
+          validateConfig({
+            ...validConfig(),
+            curtains: [{ ...curtain, [key]: value }],
+          }),
+        ),
+      ).toBe(
+        `curtains[0]: unknown field "${key}"; supported fields are name, prefix, and controller`,
+      );
+    });
+
+    test("accepts a curtain with only a name, prefix, and controller", () => {
+      expect(
+        validateConfig({ ...validConfig(), curtains: [curtain] }).curtains,
+      ).toStrictEqual([curtain]);
+    });
+
+    test.each(["name", "prefix", "controller"])(
+      "a curtain requires its %s",
+      (field) => {
+        expect(
+          errorMessage(() =>
+            validateConfig({
+              ...validConfig(),
+              curtains: [{ ...curtain, [field]: undefined }],
+            }),
+          ),
+        ).toContain(`curtains[0].${field} must be`);
+      },
+    );
+
+    test.each([
+      { ...curtain, controller: "bridge" },
+      { ...curtain, controller: "availability" },
+    ])("rejects reserved curtain identities: %j", (entry) => {
+      expect(
+        errorMessage(() =>
+          validateConfig({ ...validConfig(), curtains: [entry] }),
+        ),
+      ).toBe("curtains[0]: reserved Tucson topic");
+    });
+
+    test.each([curtain, { ...curtain, prefix: "another/prefix" }])(
+      "rejects duplicate curtain identities across prefixes: %j",
+      (second) => {
+        expect(
+          errorMessage(() =>
+            validateConfig({
+              ...validConfig(),
+              curtains: [curtain, second],
+            }),
+          ),
+        ).toBe("curtains[1]: duplicate Tucson identity");
+      },
+    );
+
+    test("a curtain controller may share a name with a bedding controller under another prefix", () => {
+      const elsewhere = { ...curtain, controller: "bed", prefix: "another" };
+      expect(
+        validateConfig({
+          ...validConfig(),
+          heatedBedding: [heatedBedding],
+          curtains: [elsewhere],
+        }).curtains,
+      ).toStrictEqual([elsewhere]);
+    });
+
+    test("rejects a curtain on a controller that also has heated bedding", () => {
+      expect(
+        errorMessage(() =>
+          validateConfig({
+            ...validConfig(),
+            heatedBedding: [group],
+            curtains: [{ ...curtain, controller: "bed" }],
+          }),
+        ),
+      ).toBe(
+        'Tucson topic "tuya/bed/availability" is used by both controller tuya/bed and curtain tuya/bed',
+      );
+    });
+
+    test.each(["result", "set", "get"])(
+      "rejects a curtain whose %s route is a bedding zone's state topic",
+      (zone) => {
+        const topic = `tuya/bed/${zone}`;
+        expect(
+          errorMessage(() =>
+            validateConfig({
+              ...validConfig(),
+              heatedBedding: [{ ...heatedBedding, zone }],
+              curtains: [{ ...curtain, prefix: "tuya/bed", controller: zone }],
+            }),
+          ),
+        ).toBe(
+          `Tucson topic "${topic}" is used by both zone ${topic} and curtain ${topic}`,
+        );
+      },
+    );
+
+    test("rejects a curtain whose state topic is a bedding zone's", () => {
+      expect(
+        errorMessage(() =>
+          validateConfig({
+            ...validConfig(),
+            heatedBedding: [group],
+            curtains: [
+              { ...curtain, prefix: "tuya/bed", controller: "side_a" },
+            ],
+          }),
+        ),
+      ).toBe(
+        'Tucson topic "tuya/bed/side_a" is used by both zone tuya/bed/side_a and curtain tuya/bed/side_a',
+      );
+    });
+
+    test.each(["result", "set", "get"])(
+      "rejects a curtain whose controller is another curtain's %s route",
+      (controller) => {
+        const topic = `tuya/window/${controller}`;
+        expect(() =>
+          validateConfig({
+            ...validConfig(),
+            curtains: [
+              curtain,
+              { ...curtain, prefix: "tuya/window", controller },
+            ],
+          }),
+        ).toThrow(`Tucson topic "${topic}"`);
+      },
+    );
+
+    test.each([
+      "tuya/bridge/availability",
+      "tuya/bridge/heartbeat",
+      "tuya/window",
+      "tuya/window/availability",
+      "tuya/window/result",
+      "tuya/window/set",
+      "tuya/window/get",
+    ])("rejects a device on the curtain route %s", (topic) => {
+      const data = validConfig();
+      data.devices[0]!.topic = topic;
+      expect(() => validateConfig({ ...data, curtains: [curtain] })).toThrow(
+        "collides with a Tucson topic",
+      );
+    });
+
+    test("rejects wildcard device topics beside a curtain", () => {
+      const data = validConfig();
+      data.devices[0]!.topic = "tuya/#";
+      expect(() => validateConfig({ ...data, curtains: [curtain] })).toThrow(
+        "wildcard device topics cannot accompany Tucson endpoints",
+      );
     });
   });
 
@@ -1067,12 +1194,12 @@ describe("validateConfig", () => {
       })),
       ...[0, 1].map((index) => ({
         path: `curtains[${String(index)}]`,
-        fields: "name, prefix, controller, and zone",
-        required: "zone",
+        fields: "name, prefix, and controller",
+        required: "controller",
         build: (changes: Record<string, unknown>) => {
           const entries: unknown[] = [
-            heatedBedding,
-            { ...heatedBedding, controller: "bed2" },
+            curtain,
+            { ...curtain, controller: "window2" },
           ].slice(0, index + 1);
           entries[index] = patched(
             entries[index] as Record<string, unknown>,
@@ -1159,7 +1286,7 @@ describe("validateConfig", () => {
           },
         ],
         heatedBedding: [heatedBedding, group],
-        curtains: [{ ...heatedBedding, controller: "window", zone: "curtain" }],
+        curtains: [curtain],
         metrics: { port: 9090, bind: "127.0.0.1" },
       };
       expect(validateConfig(config)).toStrictEqual(config);

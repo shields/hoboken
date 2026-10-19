@@ -19,8 +19,10 @@ import {
   heatedBeddingIdentity,
   heatedBeddingTopics,
 } from "./heated-bedding-profile.ts";
+import { curtainIdentity } from "./curtain-profile.ts";
 import { tucsonTopic } from "./tucson-profile.ts";
 import type { CurtainConfig } from "./curtain-source.ts";
+import type { TucsonEndpointConfig } from "./tucson-source.ts";
 import type {
   HeatedBeddingConfig,
   HeatedBeddingGroupConfig,
@@ -145,7 +147,6 @@ const CURTAIN_FIELDS: Fields<CurtainConfig> = {
   name: true,
   prefix: true,
   controller: true,
-  zone: true,
 };
 const TUCSON_NAME_RE = /^[a-z][a-z0-9_]{0,63}$/;
 const MAC_RE = /^[\dA-Fa-f]{2}(:[\dA-Fa-f]{2}){5}$/;
@@ -260,26 +261,16 @@ export function validateConfig(data: unknown): Config {
   const heatedBedding =
     obj.heatedBedding === undefined
       ? undefined
-      : validateTucsonEndpoints(obj.heatedBedding, "heatedBedding");
+      : validateHeatedBedding(obj.heatedBedding);
   const curtains =
-    obj.curtains === undefined
-      ? undefined
-      : validateTucsonEndpoints(obj.curtains, "curtains");
-  const endpoints = [...(heatedBedding ?? []), ...(curtains ?? [])];
-  // Each section rejects duplicate identities of its own, and heated bedding
-  // entries may share zones, so only a curtain on a bedding zone remains.
-  const beddingTopics = new Set(
-    (heatedBedding ?? []).flatMap((entry) => heatedBeddingTopics(entry)),
-  );
-  if (
-    (curtains ?? []).some((curtain) => beddingTopics.has(tucsonTopic(curtain)))
-  )
-    throw new Error("Duplicate Tucson endpoint");
+    obj.curtains === undefined ? undefined : validateCurtains(obj.curtains);
+  const hasEndpoints =
+    (heatedBedding?.length ?? 0) + (curtains?.length ?? 0) > 0;
   const rawDevices =
-    obj.devices === undefined && endpoints.length ? [] : obj.devices;
+    obj.devices === undefined && hasEndpoints ? [] : obj.devices;
   if (
     !Array.isArray(rawDevices) ||
-    (rawDevices.length === 0 && !endpoints.length)
+    (rawDevices.length === 0 && !hasEndpoints)
   ) {
     throw new Error("devices must be a non-empty array");
   }
@@ -287,7 +278,8 @@ export function validateConfig(data: unknown): Config {
   const devices = rawDevices.map((d: unknown, i: number) =>
     validateDevice(d, i),
   );
-  if (endpoints.length) validateTucsonTopics(devices, endpoints);
+  if (hasEndpoints)
+    validateTucsonTopics(devices, heatedBedding ?? [], curtains ?? []);
 
   const topics = new Set<string>();
   for (const device of devices) {
@@ -367,118 +359,149 @@ export function validateConfig(data: unknown): Config {
   };
 }
 
-function validateTucsonEndpoints(
+function validateEntries<T>(
   data: unknown,
-  field: "heatedBedding",
-): HeatedBeddingConfig[];
-function validateTucsonEndpoints(
-  data: unknown,
-  field: "curtains",
-): CurtainConfig[];
-function validateTucsonEndpoints(
-  data: unknown,
-  field: "heatedBedding" | "curtains",
-): HeatedBeddingConfig[] {
+  field: string,
+  fields: Readonly<Record<string, true>>,
+  validate: (value: Record<string, unknown>, label: string) => T,
+): T[] {
   if (!Array.isArray(data)) throw new TypeError(`${field} must be an array`);
-  const identities = new Set<string>();
-  const prefixes = new Map<string, string>();
   return data.map((entry: unknown, index: number) => {
     const label = `${field}[${String(index)}]`;
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       throw new TypeError(`${label} must be an object`);
     }
     const value = entry as Record<string, unknown>;
-    rejectUnknownFields(
-      label,
-      value,
-      field === "heatedBedding" ? HEATED_BEDDING_FIELDS : CURTAIN_FIELDS,
+    rejectUnknownFields(label, value, fields);
+    return validate(value, label);
+  });
+}
+
+function validateEndpointBase(
+  value: Record<string, unknown>,
+  label: string,
+): Pick<TucsonEndpointConfig, "name" | "prefix" | "controller"> {
+  if (
+    typeof value.name !== "string" ||
+    value.name.trim().length === 0 ||
+    value.name.length > 256 ||
+    value.name.includes("\0")
+  ) {
+    throw new Error(
+      `${label}.name must be a non-empty display name of at most 256 characters`,
     );
-    if (
-      typeof value.name !== "string" ||
-      value.name.trim().length === 0 ||
-      value.name.length > 256 ||
-      value.name.includes("\0")
-    ) {
-      throw new Error(
-        `${label}.name must be a non-empty display name of at most 256 characters`,
-      );
-    }
-    if (
-      typeof value.prefix !== "string" ||
-      value.prefix.length > 256 ||
-      !/^[a-z][a-z0-9_]*(\/[a-z][a-z0-9_]*)*$/.test(value.prefix)
-    ) {
-      throw new Error(`${label}.prefix must be a valid Tucson topic prefix`);
-    }
-    if (
-      typeof value.controller !== "string" ||
-      !TUCSON_NAME_RE.test(value.controller)
-    ) {
-      throw new Error(
-        `${label}.controller must be a valid Tucson controller name`,
-      );
-    }
-    if (
-      field === "heatedBedding" &&
-      (value.zone === undefined) === (value.zones === undefined)
-    ) {
-      throw new Error(`${label}: exactly one of zone or zones is required`);
-    }
-    const base = {
-      name: value.name,
-      prefix: value.prefix,
-      controller: value.controller,
-    };
-    let result: HeatedBeddingConfig;
-    if (value.zones === undefined) {
-      if (typeof value.zone !== "string" || !TUCSON_NAME_RE.test(value.zone)) {
-        throw new Error(`${label}.zone must be a valid Tucson zone name`);
+  }
+  if (
+    typeof value.prefix !== "string" ||
+    value.prefix.length > 256 ||
+    !/^[a-z][a-z0-9_]*(\/[a-z][a-z0-9_]*)*$/.test(value.prefix)
+  ) {
+    throw new Error(`${label}.prefix must be a valid Tucson topic prefix`);
+  }
+  if (
+    typeof value.controller !== "string" ||
+    !TUCSON_NAME_RE.test(value.controller)
+  ) {
+    throw new Error(
+      `${label}.controller must be a valid Tucson controller name`,
+    );
+  }
+  return {
+    name: value.name,
+    prefix: value.prefix,
+    controller: value.controller,
+  };
+}
+
+function validateHeatedBedding(data: unknown): HeatedBeddingConfig[] {
+  const identities = new Set<string>();
+  const prefixes = new Map<string, string>();
+  return validateEntries(
+    data,
+    "heatedBedding",
+    HEATED_BEDDING_FIELDS,
+    (value, label) => {
+      const base = validateEndpointBase(value, label);
+      if ((value.zone === undefined) === (value.zones === undefined)) {
+        throw new Error(`${label}: exactly one of zone or zones is required`);
       }
-      result = { ...base, zone: value.zone };
-    } else {
-      if (!Array.isArray(value.zones) || value.zones.length < 2) {
-        throw new Error(
-          `${label}.zones must be an array of at least two Tucson zone names`,
-        );
-      }
-      const zones = value.zones.map((zone: unknown, zoneIndex: number) => {
-        if (typeof zone !== "string" || !TUCSON_NAME_RE.test(zone)) {
+      let result: HeatedBeddingConfig;
+      if (value.zones === undefined) {
+        if (
+          typeof value.zone !== "string" ||
+          !TUCSON_NAME_RE.test(value.zone)
+        ) {
+          throw new Error(`${label}.zone must be a valid Tucson zone name`);
+        }
+        result = { ...base, zone: value.zone };
+      } else {
+        if (!Array.isArray(value.zones) || value.zones.length < 2) {
           throw new Error(
-            `${label}.zones[${String(zoneIndex)}] must be a valid Tucson zone name`,
+            `${label}.zones must be an array of at least two Tucson zone names`,
           );
         }
-        return zone;
-      });
-      if (new Set(zones).size !== zones.length) {
-        throw new Error(`${label}.zones must not repeat a zone`);
+        const zones = value.zones.map((zone: unknown, zoneIndex: number) => {
+          if (typeof zone !== "string" || !TUCSON_NAME_RE.test(zone)) {
+            throw new Error(
+              `${label}.zones[${String(zoneIndex)}] must be a valid Tucson zone name`,
+            );
+          }
+          return zone;
+        });
+        if (new Set(zones).size !== zones.length) {
+          throw new Error(`${label}.zones must not repeat a zone`);
+        }
+        result = { ...base, zones };
       }
-      result = { ...base, zones };
-    }
-    const names = "zones" in result ? result.zones : [result.zone];
-    if (result.controller === "bridge" || names.includes("availability")) {
+      const names = "zones" in result ? result.zones : [result.zone];
+      if (result.controller === "bridge" || names.includes("availability")) {
+        throw new Error(`${label}: reserved Tucson topic`);
+      }
+      const identity = heatedBeddingIdentity(result);
+      if (identities.has(identity))
+        throw new Error(`${label}: duplicate Tucson identity`);
+      identities.add(identity);
+      for (const zone of names) {
+        const key = `${result.controller}/${zone}`;
+        const known = prefixes.get(key);
+        if (known !== undefined && known !== result.prefix) {
+          throw new Error(
+            `${label}: Tucson zone "${key}" is configured with more than one prefix`,
+          );
+        }
+        prefixes.set(key, result.prefix);
+      }
+      return result;
+    },
+  );
+}
+
+function validateCurtains(data: unknown): CurtainConfig[] {
+  const identities = new Set<string>();
+  return validateEntries(data, "curtains", CURTAIN_FIELDS, (value, label) => {
+    const curtain = validateEndpointBase(value, label);
+    // A controller named "availability" would put its state on
+    // <prefix>/availability, which the Tucson client reads as an availability
+    // message, and one named "bridge" would put its availability on the
+    // prefix's own <prefix>/bridge/availability route.
+    if (
+      curtain.controller === "bridge" ||
+      curtain.controller === "availability"
+    ) {
       throw new Error(`${label}: reserved Tucson topic`);
     }
-    const identity = heatedBeddingIdentity(result);
+    const identity = curtainIdentity(curtain);
     if (identities.has(identity))
       throw new Error(`${label}: duplicate Tucson identity`);
     identities.add(identity);
-    for (const zone of names) {
-      const key = `${result.controller}/${zone}`;
-      const known = prefixes.get(key);
-      if (known !== undefined && known !== result.prefix) {
-        throw new Error(
-          `${label}: Tucson zone "${key}" is configured with more than one prefix`,
-        );
-      }
-      prefixes.set(key, result.prefix);
-    }
-    return result;
+    return curtain;
   });
 }
 
 function validateTucsonTopics(
   devices: DeviceConfig[],
-  endpoints: HeatedBeddingConfig[],
+  heatedBedding: readonly HeatedBeddingConfig[],
+  curtains: readonly CurtainConfig[],
 ): void {
   const owners = new Map<string, string>();
   const claim = (route: string, owner: string): void => {
@@ -490,23 +513,34 @@ function validateTucsonTopics(
     }
     owners.set(route, owner);
   };
-  for (const entry of endpoints) {
-    const { prefix, controller } = entry;
+  const claimPrefix = (prefix: string): void => {
     claim(`${prefix}/bridge/availability`, `prefix ${prefix}`);
     claim(`${prefix}/bridge/heartbeat`, `prefix ${prefix}`);
+  };
+  const claimEndpoint = (topic: string, owner: string): void => {
+    for (const route of [
+      topic,
+      `${topic}/result`,
+      `${topic}/set`,
+      `${topic}/get`,
+    ])
+      claim(route, owner);
+  };
+  for (const entry of heatedBedding) {
+    const { prefix, controller } = entry;
+    claimPrefix(prefix);
     claim(
       `${prefix}/${controller}/availability`,
       `controller ${prefix}/${controller}`,
     );
-    for (const topic of heatedBeddingTopics(entry)) {
-      for (const route of [
-        topic,
-        `${topic}/result`,
-        `${topic}/set`,
-        `${topic}/get`,
-      ])
-        claim(route, `zone ${topic}`);
-    }
+    for (const topic of heatedBeddingTopics(entry))
+      claimEndpoint(topic, `zone ${topic}`);
+  }
+  for (const curtain of curtains) {
+    const topic = tucsonTopic(curtain);
+    claimPrefix(curtain.prefix);
+    claim(`${topic}/availability`, `curtain ${topic}`);
+    claimEndpoint(topic, `curtain ${topic}`);
   }
   for (const device of devices) {
     if (device.topic.includes("+") || device.topic.includes("#")) {

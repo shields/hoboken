@@ -96,7 +96,6 @@ try {
             name: "Curtain",
             prefix: "tuya",
             controller: "bed",
-            zone: "curtain",
           },
         ]
       : [],
