@@ -80,6 +80,19 @@ export const fixtureData: StatusData = {
       state: { fan_state: "ON", fan_mode: "medium" },
     },
   ],
+  curtains: [
+    {
+      name: "Living Room Curtain",
+      topic: "tuya/living_room/curtain",
+      state: {
+        session_id: "demo-session",
+        current_position: 40,
+        target_position: 80,
+        motion: null,
+      },
+      pending: 0,
+    },
+  ],
   heatedBedding: [
     {
       name: "Bed Side A",

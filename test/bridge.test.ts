@@ -260,6 +260,84 @@ async function openEvents(
 }
 
 describe("startBridge", () => {
+  test("curtain-only bridge exposes reported positions, confirmed targets, diagnostics, and recovery", async () => {
+    const curtain = {
+      name: "Curtain",
+      prefix: "tuya",
+      controller: "window",
+      zone: "curtain",
+    };
+    const topic = "tuya/window/curtain";
+    const config = { ...metricsConfig(), devices: [], curtains: [curtain] };
+    expect(
+      buildStatusData(
+        config,
+        new Map(),
+        { url: "mqtt://localhost", connected: false },
+        [],
+        "test",
+      ).curtains,
+    ).toEqual([{ name: "Curtain", topic, state: null, pending: 0 }]);
+    const { bridge, metricsPort, shutdown } = await startBridge(config);
+    const client = mockClient;
+    const service = bridge.bridgedAccessories[0]!.getService(
+      Service.WindowCovering,
+    )!;
+    try {
+      const unavailable = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
+      ).text();
+      expect(unavailable).toContain("No Response");
+      readyHeatedBedding(client);
+      heatedBeddingMessage(client, "tuya/window/availability", "online");
+      const state = {
+        session_id: "live",
+        current_position: 20,
+        target_position: 80,
+        motion: null,
+      };
+      heatedBeddingMessage(client, topic, state);
+      expect(
+        await service
+          .getCharacteristic(Characteristic.CurrentPosition)
+          .handleGetRequest(),
+      ).toBe(20);
+      const write = service
+        .getCharacteristic(Characteristic.TargetPosition)
+        .handleSetRequest(90);
+      const sent = client.heatedBeddingPublications[0]!;
+      const command = JSON.parse(sent.message) as { request_id: string };
+      sent.complete();
+      heatedBeddingMessage(client, topic, { ...state, target_position: 90 });
+      heatedBeddingMessage(client, `${topic}/result`, {
+        ...command,
+        outcome: "confirmed",
+      });
+      await write;
+      await Promise.resolve();
+      const html = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
+      ).text();
+      expect(html).toContain('<span class="type-badge">curtain</span>');
+      expect(html).toContain("current_position");
+      const metrics = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`)
+      ).text();
+      expect(metrics).toContain("hoboken_devices_configured 1");
+      expect(metrics).toContain("hoboken_devices_state_unknown 0");
+      expect(metrics).toContain("hoboken_mqtt_messages_published_total 1");
+      client.connected = false;
+      client.emit("close");
+      const offline = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`)
+      ).text();
+      expect(offline).toContain("hoboken_devices_state_unknown 1");
+      expect(offline).toContain("hoboken_mqtt_errors_total 1");
+    } finally {
+      await shutdown();
+    }
+  });
+
   test("each device state update produces one dashboard SSE event", async () => {
     const { metricsPort, shutdown } = await startBridge(metricsConfig());
     const controller = new AbortController();
@@ -517,6 +595,66 @@ describe("startBridge", () => {
     } finally {
       await shutdown();
     }
+  });
+
+  test("mixed bedding and curtain bridges maintain independent state and report both shutdown failures", async () => {
+    const count = mockClients.length;
+    const { bridge, shutdown } = await startBridge({
+      ...testConfig(),
+      devices: [],
+      heatedBedding: HEATED_BEDDING,
+      curtains: [
+        {
+          name: "Curtain",
+          prefix: "tuya",
+          controller: "window",
+          zone: "curtain",
+        },
+      ],
+    });
+    const bedding = mockClients[count]!;
+    const curtain = mockClients[count + 1]!;
+    readyHeatedBedding(bedding);
+    readyHeatedBedding(curtain);
+    heatedBeddingMessage(curtain, "tuya/window/availability", "online");
+    heatedBeddingMessage(curtain, "tuya/window/curtain", {
+      session_id: "live",
+      current_position: 70,
+      target_position: 0,
+    });
+    expect(
+      await bridge.bridgedAccessories[0]!.getService(Service.Fanv2)!
+        .getCharacteristic(Characteristic.RotationSpeed)
+        .handleGetRequest(),
+    ).toBe(40);
+    expect(
+      await bridge.bridgedAccessories[4]!.getService(Service.WindowCovering)!
+        .getCharacteristic(Characteristic.CurrentPosition)
+        .handleGetRequest(),
+    ).toBe(70);
+    for (const [client, label] of [
+      [bedding, "bedding"],
+      [curtain, "curtain"],
+    ] as const) {
+      client.end = (_force, complete) => {
+        (complete as ((error: Error) => void) | undefined)?.(
+          new Error(`${label} close failed`),
+        );
+        return client;
+      };
+    }
+    expect(await Promise.allSettled([shutdown()])).toMatchObject([
+      {
+        status: "rejected",
+        reason: new AggregateError(
+          [
+            new Error("bedding close failed"),
+            new Error("curtain close failed"),
+          ],
+          "Tucson MQTT shutdown failed",
+        ),
+      },
+    ]);
   });
 
   test("a heated bedding shutdown failure still unpublishes and closes the legacy client", async () => {

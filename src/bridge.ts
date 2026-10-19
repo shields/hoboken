@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { CurtainMQTT } from "./curtain-mqtt.ts";
+import type { CurtainSource } from "./curtain-source.ts";
+import {
+  createCurtainAccessory,
+  type CurtainAccessory,
+} from "./curtain-accessories.ts";
 import {
   Accessory,
   Bridge,
@@ -30,7 +36,7 @@ import { connect } from "mqtt";
 import { Registry } from "prom-client";
 import type { Config } from "./config.ts";
 import { HeatedBeddingMQTT } from "./heated-bedding-mqtt.ts";
-import { heatedBeddingTopic } from "./heated-bedding-profile.ts";
+import { tucsonTopic } from "./tucson-profile.ts";
 import type { HeatedBeddingSource } from "./heated-bedding-source.ts";
 import {
   createHeatedBeddingAccessories,
@@ -73,6 +79,7 @@ export function buildStatusData(
   hapConnections: HapConnection[],
   version: string,
   heatedBedding?: HeatedBeddingSource,
+  curtains?: CurtainSource,
 ): StatusData {
   return {
     mqtt,
@@ -89,12 +96,25 @@ export function buildStatusData(
     ...(config.heatedBedding?.length
       ? {
           heatedBedding: config.heatedBedding.map((zone) => {
-            const topic = heatedBeddingTopic(zone);
+            const topic = tucsonTopic(zone);
             return {
               name: zone.name,
               topic,
               state: heatedBedding?.usableState(topic) ?? null,
               pending: heatedBedding?.pendingCount(topic) ?? 0,
+            };
+          }),
+        }
+      : {}),
+    ...(config.curtains?.length
+      ? {
+          curtains: config.curtains.map((curtain) => {
+            const topic = tucsonTopic(curtain);
+            return {
+              name: curtain.name,
+              topic,
+              state: curtains?.usableState(topic) ?? null,
+              pending: curtains?.pendingCount(topic) ?? 0,
             };
           }),
         }
@@ -114,6 +134,8 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   const lastColorPublish = new Map<string, number>();
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let heatedBedding: HeatedBeddingMQTT | undefined;
+  let curtains: CurtainMQTT | undefined;
+  const curtainAccessories: CurtainAccessory[] = [];
   const heatedBeddingAccessories: HeatedBeddingAccessories[] = [];
 
   function cancelAllRetries(): void {
@@ -187,7 +209,8 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   function mqttConnected(): boolean {
     return (
       (config.devices.length === 0 || mqttClient?.connected === true) &&
-      (heatedBedding?.connected ?? (config.heatedBedding?.length ?? 0) === 0)
+      (heatedBedding?.connected ?? (config.heatedBedding?.length ?? 0) === 0) &&
+      (curtains?.connected ?? (config.curtains?.length ?? 0) === 0)
     );
   }
 
@@ -197,8 +220,10 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       (device) => !stateCache.has(device.topic),
     ).length;
     for (const zone of config.heatedBedding ?? []) {
-      if (!heatedBedding?.source.usableState(heatedBeddingTopic(zone)))
-        unknown++;
+      if (!heatedBedding?.source.usableState(tucsonTopic(zone))) unknown++;
+    }
+    for (const curtain of config.curtains ?? []) {
+      if (!curtains?.source.usableState(tucsonTopic(curtain))) unknown++;
     }
     metrics?.devicesStateUnknown.set(unknown);
     metricsServer?.notifyStateChange();
@@ -304,6 +329,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
         [...hapConnections.values()],
         version,
         heatedBedding?.source,
+        curtains?.source,
       );
     metricsServer = startMetricsServer(
       config.metrics.port,
@@ -399,7 +425,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
   if (config.heatedBedding?.length) {
     const zoneTopics = new Map(
       config.heatedBedding.flatMap((zone) => {
-        const topic = heatedBeddingTopic(zone);
+        const topic = tucsonTopic(zone);
         return [
           [topic, topic],
           [`${topic}/result`, topic],
@@ -448,8 +474,50 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
       heatedBeddingAccessories.push(accessories);
     }
   }
+
+  if (config.curtains?.length) {
+    const topics = new Map(
+      config.curtains.flatMap((curtain) => {
+        const topic = tucsonTopic(curtain);
+        return [
+          [topic, topic],
+          [`${topic}/result`, topic],
+        ];
+      }),
+    );
+    curtains = new CurtainMQTT(config.mqtt.url, config.curtains, {
+      changed: () => {
+        for (const accessory of curtainAccessories) accessory.update();
+        updateMetrics();
+      },
+      received: (topic) => {
+        const curtain = topics.get(topic);
+        if (curtain) metrics?.mqttMessagesReceived.labels(curtain).inc();
+      },
+      published: () => {
+        metrics?.mqttMessagesPublished.inc();
+      },
+      failed: () => {
+        metrics?.mqttErrors.inc();
+      },
+    });
+    for (const configCurtain of config.curtains) {
+      const curtain = createCurtainAccessory(configCurtain, curtains.source);
+      setAccessoryInfo(
+        curtain.accessory,
+        "Hoboken",
+        "Curtain",
+        `${configCurtain.controller}/${configCurtain.zone}/curtain`,
+        version,
+      );
+      bridge.addBridgedAccessory(curtain.accessory);
+      curtainAccessories.push(curtain);
+    }
+  }
   metrics?.devicesConfigured.set(
-    config.devices.length + (config.heatedBedding?.length ?? 0),
+    config.devices.length +
+      (config.heatedBedding?.length ?? 0) +
+      (config.curtains?.length ?? 0),
   );
   updateMetrics();
 
@@ -648,11 +716,25 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
     ...(metricsPort === undefined ? {} : { metricsPort }),
     shutdown: async () => {
       cancelAllRetries();
-      let heatedBeddingFailure: { error: unknown } | undefined;
+      let tucsonFailure: { error: unknown } | undefined;
       try {
-        await heatedBedding?.stop();
+        const stopped = await Promise.allSettled([
+          heatedBedding?.stop(),
+          curtains?.stop(),
+        ]);
+        const failures = stopped.filter(
+          (result) => result.status === "rejected",
+        );
+        const firstFailure = failures[0];
+        if (firstFailure)
+          throw failures.length === 1
+            ? firstFailure.reason
+            : new AggregateError(
+                failures.map((failure): unknown => failure.reason),
+                "Tucson MQTT shutdown failed",
+              );
       } catch (error: unknown) {
-        heatedBeddingFailure = { error };
+        tucsonFailure = { error };
       }
       log.log("Shutting down: unpublishing bridge (sending mDNS goodbye)");
       await bridge.unpublish();
@@ -670,7 +752,7 @@ export async function startBridge(config: Config): Promise<BridgeHandle> {
         await ms.close();
       }
       metrics?.dispose();
-      if (heatedBeddingFailure) throw heatedBeddingFailure.error;
+      if (tucsonFailure) throw tucsonFailure.error;
       log.log("Shutdown complete");
     },
   };

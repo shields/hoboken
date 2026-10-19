@@ -526,20 +526,20 @@ describe("heated bedding MQTT owner", () => {
       expect(owner.connected).toBe(false);
       expect(() => owner.source.getState(TOPIC)).toThrow(HapStatusError);
       expect(logs.join(" ")).not.toContain("secret");
-      expect(logs.join(" ")).toContain("invalid_heated_bedding_message");
+      expect(logs.join(" ")).toContain("invalid_tucson_message");
     },
   );
 
   test.each([
     [{ ...STATE, power: "secret" }, "Invalid heated bedding reported Boolean"],
-    ["secret invalid JSON", "Heated bedding MQTT payload is not valid JSON"],
-    ["secret".repeat(11000), "Heated bedding MQTT payload exceeds its limit"],
+    ["secret invalid JSON", "Tucson MQTT payload is not valid JSON"],
+    ["secret".repeat(11000), "Tucson MQTT payload exceeds its limit"],
   ])(
     "an invalid message logs its topic and a fixed reason",
     (value, reason) => {
       ready().receive(TOPIC, value);
       expect(JSON.parse(logs.at(-1)!)).toMatchObject({
-        event: "invalid_heated_bedding_message",
+        event: "invalid_tucson_message",
         topic: TOPIC,
         reason,
       });
@@ -646,7 +646,7 @@ describe("heated bedding MQTT owner", () => {
   });
 
   test("shutdown has a finite deadline", async () => {
-    shutdownError = new Error("Heated bedding MQTT shutdown timed out");
+    shutdownError = new Error("Tucson MQTT shutdown timed out");
     clients[0]!.finishEnd = false;
     const outcome = Promise.allSettled([owner.stop()]);
     jest.advanceTimersByTime(2000);

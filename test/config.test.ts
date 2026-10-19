@@ -162,7 +162,7 @@ describe("validateConfig", () => {
   ])("rejects reserved heated bedding identities: %j", (entry) => {
     expect(() =>
       validateConfig({ ...validConfig(), heatedBedding: [entry] }),
-    ).toThrow("reserved heated bedding topic");
+    ).toThrow("reserved Tucson topic");
   });
 
   test.each([heatedBedding, { ...heatedBedding, prefix: "another/prefix" }])(
@@ -173,7 +173,7 @@ describe("validateConfig", () => {
           ...validConfig(),
           heatedBedding: [heatedBedding, second],
         }),
-      ).toThrow("duplicate heated bedding identity");
+      ).toThrow("duplicate Tucson identity");
     },
   );
 
@@ -183,7 +183,7 @@ describe("validateConfig", () => {
     "protocol_version",
     "capabilities",
     "topic",
-  ])("rejects unknown heated bedding field %s without its value", (key) => {
+  ])("rejects unknown Tucson field %s without its value", (key) => {
     try {
       validateConfig({
         ...validConfig(),
@@ -192,9 +192,7 @@ describe("validateConfig", () => {
       throw new Error("Unexpected success");
     } catch (error: unknown) {
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain(
-        "unknown heated bedding field",
-      );
+      expect((error as Error).message).toContain("unknown Tucson field");
       expect((error as Error).message).not.toContain("never-log-key");
     }
   });
@@ -214,7 +212,7 @@ describe("validateConfig", () => {
       data.devices[0]!.topic = topic;
       expect(() =>
         validateConfig({ ...data, heatedBedding: [heatedBedding] }),
-      ).toThrow("collides with a heated bedding topic");
+      ).toThrow("collides with a Tucson topic");
     },
   );
 
@@ -238,7 +236,7 @@ describe("validateConfig", () => {
     };
     expect(() =>
       validateConfig({ ...data, heatedBedding: [alternate] }),
-    ).toThrow("collides with a heated bedding topic");
+    ).toThrow("collides with a Tucson topic");
   });
 
   test.each([
@@ -259,7 +257,7 @@ describe("validateConfig", () => {
           ...validConfig(),
           heatedBedding: [heatedBedding, nested],
         }),
-      ).toThrow(`heated bedding topic "${topic}" is used by both`);
+      ).toThrow(`Tucson topic "${topic}" is used by both`);
     },
   );
 
@@ -270,7 +268,7 @@ describe("validateConfig", () => {
       data.devices[0]!.topic = topic;
       expect(() =>
         validateConfig({ ...data, heatedBedding: [heatedBedding] }),
-      ).toThrow("wildcard device topics cannot accompany heated bedding");
+      ).toThrow("wildcard device topics cannot accompany Tucson endpoints");
     },
   );
 

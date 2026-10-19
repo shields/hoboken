@@ -690,7 +690,7 @@ describe("heated bedding source", () => {
       throw new Error("A duplicate configuration must not publish");
     };
     expect(() => new HeatedBeddingSource([ZONE, ZONE], publish)).toThrow(
-      new RangeError(`Duplicate heated bedding MQTT topic "${TOPIC}"`),
+      new RangeError(`Duplicate Tucson MQTT topic "${TOPIC}"`),
     );
     expect(
       () =>
@@ -737,7 +737,7 @@ describe("heated bedding source", () => {
     ).toMatchObject([
       {
         status: "rejected",
-        reason: new Error("Duplicate generated heated bedding request ID"),
+        reason: new Error("Duplicate generated Tucson request ID"),
       },
     ]);
     expect(source.pendingCount(TOPIC)).toBe(1);
@@ -750,11 +750,11 @@ describe("heated bedding source", () => {
     expect(await fanOutcomes).toMatchObject([
       {
         status: "rejected",
-        reason: new Error("Duplicate generated heated bedding request ID"),
+        reason: new Error("Duplicate generated Tucson request ID"),
       },
       {
         status: "rejected",
-        reason: new Error("Duplicate generated heated bedding request ID"),
+        reason: new Error("Duplicate generated Tucson request ID"),
       },
     ]);
     expect(source.pendingCount(TOPIC)).toBe(1);

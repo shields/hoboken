@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { curtainMotion, type CurtainState } from "./curtain-profile.ts";
 import { createServer } from "node:http";
 import type { Server, ServerResponse } from "node:http";
 import { Counter, Gauge, Registry, collectDefaultMetrics } from "prom-client";
@@ -136,6 +137,12 @@ export interface StatusData {
   hap: { connections: HapConnection[] };
   bridge: { name: string; version: string };
   devices: DeviceStatus[];
+  curtains?: {
+    name: string;
+    topic: string;
+    state: CurtainState | null;
+    pending: number;
+  }[];
   heatedBedding?: {
     name: string;
     topic: string;
@@ -650,6 +657,32 @@ function renderStatusContent(data: StatusData): string {
             )
             .join("")}</tbody></table>`;
     devicesHtml += `<div class="device"><h2>${escapeHtml(zone.name)} <span class="type-badge">heated bedding</span></h2><div class="label">HomeKit</div>${homeKit}<div class="label">MQTT state <span class="topic">${escapeHtml(zone.topic)}</span></div>${rows}<div class="label">Pending callers: ${String(zone.pending)}</div></div>`;
+  }
+
+  for (const curtain of data.curtains ?? []) {
+    const homeKit =
+      curtain.state === null
+        ? '<span class="na">No Response</span>'
+        : `<table><tbody>${[
+            ["CurrentPosition", curtain.state.current_position],
+            ["TargetPosition", curtain.state.target_position],
+            ["PositionState", curtainMotion(curtain.state)],
+          ]
+            .map(
+              ([key, value]) =>
+                `<tr><td class="key">${String(key)}</td><td>${String(value)}</td></tr>`,
+            )
+            .join("")}</tbody></table>`;
+    const state =
+      curtain.state === null
+        ? '<span class="na">No Response</span>'
+        : `<table><tbody>${Object.entries(curtain.state)
+            .map(
+              ([key, value]) =>
+                `<tr><td class="key">${escapeHtml(key)}</td><td>${escapeHtml(formatValue(value))}</td></tr>`,
+            )
+            .join("")}</tbody></table>`;
+    devicesHtml += `<div class="device"><h2>${escapeHtml(curtain.name)} <span class="type-badge">curtain</span></h2><div class="label">HomeKit</div>${homeKit}<div class="label">MQTT state <span class="topic">${escapeHtml(curtain.topic)}</span></div>${state}<div class="label">Pending callers: ${String(curtain.pending)}</div></div>`;
   }
 
   return `<h1>${escapeHtml(data.bridge.name)}</h1>

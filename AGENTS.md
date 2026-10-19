@@ -186,3 +186,17 @@ make lint test
 - Heated bedding routes cannot overlap device routes; wildcard device topics cannot
   accompany heated bedding
 - Heated bedding entries reject unknown fields and contain only logical MQTT names
+
+## Tucson curtains
+
+- `curtains` entries use `name`, `prefix`, `controller`, and `zone`, like
+  `heatedBedding`. A curtain-only configuration may omit `devices`.
+- `tucson-source.ts`, `tucson-mqtt.ts`, and `tucson-profile.ts` own the shared
+  MQTT session, request/result, and wire-validation behavior. Bedding and
+  curtain modules supply state parsing and accessory behavior.
+- Curtains expose only target position writes. Do not add start/stop commands
+  or `HoldPosition` without a separate request.
+- Report current position from the device. Infer movement from reported
+  current/target positions only when motion telemetry is absent.
+- Production Zemismart mapping is pending hardware qualification in Tucson;
+  its synthetic curtain profile is test-only.

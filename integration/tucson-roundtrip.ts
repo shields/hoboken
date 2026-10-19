@@ -43,6 +43,7 @@ assert(
   process.versions.node.startsWith("26."),
   "Qualification requires Node.js 26",
 );
+const curtainMode = process.env.MQTT_TEST_CURTAIN === "1";
 const url = process.env.MQTT_TEST_URL;
 assert(url, "MQTT_TEST_URL must identify the qualification broker");
 const directory = mkdtempSync(path.join(tmpdir(), "hoboken-tucson-"));
@@ -81,10 +82,32 @@ try {
     },
     mqtt: { url },
     devices: [],
-    heatedBedding: [
-      { name: "Bed Side A", prefix: "tuya", controller: "bed", zone: "side_a" },
-      { name: "Bed Side B", prefix: "tuya", controller: "bed", zone: "side_b" },
-    ],
+    curtains: curtainMode
+      ? [
+          {
+            name: "Curtain",
+            prefix: "tuya",
+            controller: "bed",
+            zone: "curtain",
+          },
+        ]
+      : [],
+    heatedBedding: curtainMode
+      ? []
+      : [
+          {
+            name: "Bed Side A",
+            prefix: "tuya",
+            controller: "bed",
+            zone: "side_a",
+          },
+          {
+            name: "Bed Side B",
+            prefix: "tuya",
+            controller: "bed",
+            zone: "side_b",
+          },
+        ],
   });
   client = new HttpClient(
     "tucson-test-controller",
@@ -92,45 +115,81 @@ try {
     handle.hapPort,
   );
   await client.pairSetup("031-45-154");
-  const [left, preheatAccessory, right] = handle.bridge.bridgedAccessories;
-  assert(left && preheatAccessory && right);
-  const fan = left.getService(Service.Fanv2);
-  const rightFan = right.getService(Service.Fanv2);
-  const preheatSwitch = preheatAccessory.getService(Service.Switch);
-  assert(fan && rightFan && preheatSwitch);
-  const speed = `${String(left.aid)}.${String(fan.getCharacteristic(Characteristic.RotationSpeed).iid)}`;
-  const power = `${String(left.aid)}.${String(fan.getCharacteristic(Characteristic.Active).iid)}`;
-  const rightSpeed = `${String(right.aid)}.${String(rightFan.getCharacteristic(Characteristic.RotationSpeed).iid)}`;
-  const preheat = `${String(preheatAccessory.aid)}.${String(preheatSwitch.getCharacteristic(Characteristic.On).iid)}`;
-  await poll(
-    async () =>
-      (await get(speed)).value === 40 && (await get(rightSpeed)).value === 40,
-  );
-  await write({ [speed]: 60 });
-  await write({ [rightSpeed]: 80 });
-  assert.equal((await get(speed)).value, 60);
-  assert.equal((await get(rightSpeed)).value, 80);
-  await write({ [preheat]: true });
-  assert.equal((await get(preheat)).value, 1);
-  await write({ [power]: 0, [speed]: 90 });
-  assert.equal((await get(power)).value, 0);
-  assert.equal((await get(speed)).value, 60);
-  assert.equal((await get(rightSpeed)).value, 80);
-  process.stdout.write(JSON.stringify({ event: "ready_for_push" }) + "\n");
-  await poll(
-    async () =>
-      (await get(speed)).value === 30 && (await get(preheat)).value === 0,
-  );
-  assert.equal((await get(rightSpeed)).value, 80);
-  process.stdout.write(JSON.stringify({ event: "ready_for_shutdown" }) + "\n");
-  await poll(
-    async () =>
-      (await get(speed)).status === HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-  );
-  assert.equal(
-    (await get(rightSpeed)).status,
-    HAPStatus.SERVICE_COMMUNICATION_FAILURE,
-  );
+  if (curtainMode) {
+    const curtain = handle.bridge.bridgedAccessories[0];
+    assert(curtain);
+    const service = curtain.getService(Service.WindowCovering);
+    assert(service);
+    assert.equal(
+      service.testCharacteristic(Characteristic.HoldPosition),
+      false,
+    );
+    const current = `${String(curtain.aid)}.${String(service.getCharacteristic(Characteristic.CurrentPosition).iid)}`;
+    const target = `${String(curtain.aid)}.${String(service.getCharacteristic(Characteristic.TargetPosition).iid)}`;
+    const motion = `${String(curtain.aid)}.${String(service.getCharacteristic(Characteristic.PositionState).iid)}`;
+    await poll(async () => (await get(current)).value === 0);
+    await write({ [target]: 80 });
+    assert.equal((await get(target)).value, 80);
+    assert.equal((await get(current)).value, 0);
+    process.stdout.write(JSON.stringify({ event: "ready_for_push" }) + "\n");
+    await poll(async () => (await get(current)).value === 40);
+    assert.equal(
+      (await get(motion)).value,
+      Characteristic.PositionState.INCREASING,
+    );
+    await write({ [target]: 0 });
+    assert.equal((await get(target)).value, 0);
+    assert.equal((await get(current)).value, 40);
+    process.stdout.write(
+      JSON.stringify({ event: "ready_for_shutdown" }) + "\n",
+    );
+    await poll(
+      async () =>
+        (await get(current)).status === HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+    );
+  } else {
+    const [left, preheatAccessory, right] = handle.bridge.bridgedAccessories;
+    assert(left && preheatAccessory && right);
+    const fan = left.getService(Service.Fanv2);
+    const rightFan = right.getService(Service.Fanv2);
+    const preheatSwitch = preheatAccessory.getService(Service.Switch);
+    assert(fan && rightFan && preheatSwitch);
+    const speed = `${String(left.aid)}.${String(fan.getCharacteristic(Characteristic.RotationSpeed).iid)}`;
+    const power = `${String(left.aid)}.${String(fan.getCharacteristic(Characteristic.Active).iid)}`;
+    const rightSpeed = `${String(right.aid)}.${String(rightFan.getCharacteristic(Characteristic.RotationSpeed).iid)}`;
+    const preheat = `${String(preheatAccessory.aid)}.${String(preheatSwitch.getCharacteristic(Characteristic.On).iid)}`;
+    await poll(
+      async () =>
+        (await get(speed)).value === 40 && (await get(rightSpeed)).value === 40,
+    );
+    await write({ [speed]: 60 });
+    await write({ [rightSpeed]: 80 });
+    assert.equal((await get(speed)).value, 60);
+    assert.equal((await get(rightSpeed)).value, 80);
+    await write({ [preheat]: true });
+    assert.equal((await get(preheat)).value, 1);
+    await write({ [power]: 0, [speed]: 90 });
+    assert.equal((await get(power)).value, 0);
+    assert.equal((await get(speed)).value, 60);
+    assert.equal((await get(rightSpeed)).value, 80);
+    process.stdout.write(JSON.stringify({ event: "ready_for_push" }) + "\n");
+    await poll(
+      async () =>
+        (await get(speed)).value === 30 && (await get(preheat)).value === 0,
+    );
+    assert.equal((await get(rightSpeed)).value, 80);
+    process.stdout.write(
+      JSON.stringify({ event: "ready_for_shutdown" }) + "\n",
+    );
+    await poll(
+      async () =>
+        (await get(speed)).status === HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+    );
+    assert.equal(
+      (await get(rightSpeed)).status,
+      HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+    );
+  }
   process.stdout.write(
     JSON.stringify({ event: "qualification_passed" }) + "\n",
   );

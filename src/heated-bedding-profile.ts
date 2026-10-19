@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { object, identifier, integer } from "./tucson-profile.ts";
+export {
+  parseTucsonHeartbeat as parseHeatedBeddingHeartbeat,
+  parseTucsonResult as parseHeatedBeddingResult,
+} from "./tucson-profile.ts";
 export interface HeatedBeddingState {
   session_id: string;
   power: boolean | null;
@@ -30,21 +35,10 @@ export interface HeatedBeddingCommand {
 
 export type HeatedBeddingFanWrite = { active: boolean } | { speed: number };
 
-export type HeatedBeddingResult =
-  | { request_id: string; outcome: "confirmed" }
-  | {
-      request_id: string;
-      outcome: "rejected" | "unconfirmed";
-      error_code: string;
-    };
-
-export function heatedBeddingTopic(zone: {
-  prefix: string;
-  controller: string;
-  zone: string;
-}): string {
-  return `${zone.prefix}/${zone.controller}/${zone.zone}`;
-}
+export {
+  tucsonTopic as heatedBeddingTopic,
+  type TucsonResult as HeatedBeddingResult,
+} from "./tucson-profile.ts";
 
 export function normalizeHeatedBeddingSpeed(percent: number): number {
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
@@ -86,25 +80,6 @@ export function coalesceHeatedBeddingFanWrites(
     : { power: true, heat_level: heatLevel };
 }
 
-function object(value: unknown): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new RangeError("Heated bedding MQTT payload must be an object");
-  }
-  return value as Record<string, unknown>;
-}
-
-function identifier(value: unknown, field: string, maxLength = 128): string {
-  if (
-    typeof value !== "string" ||
-    value.length === 0 ||
-    value !== value.trim() ||
-    value.length > maxLength
-  ) {
-    throw new RangeError(`Invalid heated bedding ${field}`);
-  }
-  return value;
-}
-
 function boolean(value: unknown): boolean | null {
   if (value === undefined || value === null) {
     return null;
@@ -113,29 +88,6 @@ function boolean(value: unknown): boolean | null {
     throw new RangeError("Invalid heated bedding reported Boolean");
   }
   return value;
-}
-
-function integer(
-  value: unknown,
-  min: number,
-  max = Number.MAX_SAFE_INTEGER,
-): number | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (
-    typeof value !== "number" ||
-    !Number.isSafeInteger(value) ||
-    value < min ||
-    value > max
-  ) {
-    throw new RangeError("Invalid heated bedding reported integer");
-  }
-  return value;
-}
-
-export function parseHeatedBeddingHeartbeat(value: unknown): string {
-  return identifier(object(value).session_id, "session_id");
 }
 
 export function parseHeatedBeddingState(value: unknown): HeatedBeddingState {
@@ -148,26 +100,5 @@ export function parseHeatedBeddingState(value: unknown): HeatedBeddingState {
     auto_off_seconds: integer(data.auto_off_seconds, 1),
     remaining_seconds: integer(data.remaining_seconds, 0),
     preheat_remaining_seconds: integer(data.preheat_remaining_seconds, 0),
-  };
-}
-
-export function parseHeatedBeddingResult(value: unknown): HeatedBeddingResult {
-  const data = object(value);
-  const requestId = identifier(data.request_id, "request_id");
-  if (data.outcome === "confirmed") {
-    if (data.error_code !== undefined && data.error_code !== null) {
-      throw new RangeError(
-        "Confirmed heated bedding result cannot include an error",
-      );
-    }
-    return { request_id: requestId, outcome: data.outcome };
-  }
-  if (data.outcome !== "rejected" && data.outcome !== "unconfirmed") {
-    throw new RangeError("Invalid heated bedding result outcome");
-  }
-  return {
-    request_id: requestId,
-    outcome: data.outcome,
-    error_code: identifier(data.error_code, "error_code", 64),
   };
 }

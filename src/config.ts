@@ -14,7 +14,8 @@
 
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
-import { heatedBeddingTopic } from "./heated-bedding-profile.ts";
+import { tucsonTopic } from "./tucson-profile.ts";
+import type { CurtainConfig } from "./curtain-source.ts";
 import type { HeatedBeddingZoneConfig } from "./heated-bedding-source.ts";
 
 export type Capability =
@@ -76,6 +77,7 @@ export interface Config {
   mqtt: MqttConfig;
   devices: DeviceConfig[];
   heatedBedding?: HeatedBeddingZoneConfig[];
+  curtains?: CurtainConfig[];
   metrics?: MetricsConfig;
 }
 
@@ -128,12 +130,23 @@ export function validateConfig(data: unknown): Config {
   const heatedBedding =
     obj.heatedBedding === undefined
       ? undefined
-      : validateHeatedBedding(obj.heatedBedding);
+      : validateTucsonEndpoints(obj.heatedBedding);
+  const curtains =
+    obj.curtains === undefined
+      ? undefined
+      : validateTucsonEndpoints(obj.curtains, "curtains");
+  const endpoints = [...(heatedBedding ?? []), ...(curtains ?? [])];
+  const identities = new Set<string>();
+  for (const endpoint of endpoints) {
+    const topic = tucsonTopic(endpoint);
+    if (identities.has(topic)) throw new Error("Duplicate Tucson endpoint");
+    identities.add(topic);
+  }
   const rawDevices =
-    obj.devices === undefined && heatedBedding?.length ? [] : obj.devices;
+    obj.devices === undefined && endpoints.length ? [] : obj.devices;
   if (
     !Array.isArray(rawDevices) ||
-    (rawDevices.length === 0 && !heatedBedding?.length)
+    (rawDevices.length === 0 && !endpoints.length)
   ) {
     throw new Error("devices must be a non-empty array");
   }
@@ -141,8 +154,7 @@ export function validateConfig(data: unknown): Config {
   const devices = rawDevices.map((d: unknown, i: number) =>
     validateDevice(d, i),
   );
-  if (heatedBedding?.length)
-    validateHeatedBeddingTopics(devices, heatedBedding);
+  if (endpoints.length) validateTucsonTopics(devices, endpoints);
 
   const topics = new Set<string>();
   for (const device of devices) {
@@ -212,16 +224,19 @@ export function validateConfig(data: unknown): Config {
     },
     devices,
     ...(heatedBedding ? { heatedBedding } : {}),
+    ...(curtains ? { curtains } : {}),
     ...(metrics ? { metrics } : {}),
   };
 }
 
-function validateHeatedBedding(data: unknown): HeatedBeddingZoneConfig[] {
-  if (!Array.isArray(data))
-    throw new TypeError("heatedBedding must be an array");
+function validateTucsonEndpoints(
+  data: unknown,
+  field = "heatedBedding",
+): HeatedBeddingZoneConfig[] {
+  if (!Array.isArray(data)) throw new TypeError(`${field} must be an array`);
   const identities = new Set<string>();
   return data.map((entry: unknown, index: number) => {
-    const label = `heatedBedding[${String(index)}]`;
+    const label = `${field}[${String(index)}]`;
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       throw new TypeError(`${label} must be an object`);
     }
@@ -231,7 +246,7 @@ function validateHeatedBedding(data: unknown): HeatedBeddingZoneConfig[] {
         (field) => !["name", "prefix", "controller", "zone"].includes(field),
       )
     ) {
-      throw new Error(`${label}: unknown heated bedding field`);
+      throw new Error(`${label}: unknown Tucson field`);
     }
     if (
       typeof value.name !== "string" ||
@@ -265,11 +280,11 @@ function validateHeatedBedding(data: unknown): HeatedBeddingZoneConfig[] {
       throw new Error(`${label}.zone must be a valid Tucson zone name`);
     }
     if (value.controller === "bridge" || value.zone === "availability") {
-      throw new Error(`${label}: reserved heated bedding topic`);
+      throw new Error(`${label}: reserved Tucson topic`);
     }
     const identity = `${value.controller}/${value.zone}`;
     if (identities.has(identity))
-      throw new Error(`${label}: duplicate heated bedding identity`);
+      throw new Error(`${label}: duplicate Tucson identity`);
     identities.add(identity);
     return {
       name: value.name,
@@ -280,7 +295,7 @@ function validateHeatedBedding(data: unknown): HeatedBeddingZoneConfig[] {
   });
 }
 
-function validateHeatedBeddingTopics(
+function validateTucsonTopics(
   devices: DeviceConfig[],
   heatedBedding: HeatedBeddingZoneConfig[],
 ): void {
@@ -289,14 +304,14 @@ function validateHeatedBeddingTopics(
     const existing = owners.get(route);
     if (existing !== undefined && existing !== owner) {
       throw new Error(
-        `heated bedding topic "${route}" is used by both ${existing} and ${owner}`,
+        `Tucson topic "${route}" is used by both ${existing} and ${owner}`,
       );
     }
     owners.set(route, owner);
   };
   for (const zone of heatedBedding) {
     const { prefix, controller } = zone;
-    const topic = heatedBeddingTopic(zone);
+    const topic = tucsonTopic(zone);
     claim(`${prefix}/bridge/availability`, `prefix ${prefix}`);
     claim(`${prefix}/bridge/heartbeat`, `prefix ${prefix}`);
     claim(
@@ -313,7 +328,9 @@ function validateHeatedBeddingTopics(
   }
   for (const device of devices) {
     if (device.topic.includes("+") || device.topic.includes("#")) {
-      throw new Error("wildcard device topics cannot accompany heated bedding");
+      throw new Error(
+        "wildcard device topics cannot accompany Tucson endpoints",
+      );
     }
     const routes =
       device.type === "wled"
@@ -325,7 +342,7 @@ function validateHeatedBeddingTopics(
           ]
         : [device.topic, `${device.topic}/set`, `${device.topic}/get`];
     if (routes.some((topic) => owners.has(topic))) {
-      throw new Error("device route collides with a heated bedding topic");
+      throw new Error("device route collides with a Tucson topic");
     }
   }
 }

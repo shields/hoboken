@@ -347,3 +347,38 @@ kubectl -n hoboken logs deploy/hoboken
 The bridge logs lifecycle events: MQTT connection state, HAP server listening
 address, mDNS advertisement, identify requests, pair-setup completion, and
 connection close events.
+
+### Tucson curtains
+
+The optional `curtains` configuration presents Tucson endpoints as HomeKit
+window coverings:
+
+```yaml
+curtains:
+  - name: Living Room Curtain
+    prefix: tuya
+    controller: living_room
+    zone: curtain
+```
+
+A curtain-only bridge may omit `devices` or set it to `[]`. Each entry uses the
+same logical topic naming rules as `heatedBedding`; routes must not overlap.
+No Tuya credentials belong in Hoboken.
+
+Set `TargetPosition` from zero (closed) to 100 (open). `CurrentPosition` comes
+from device reports. `PositionState` uses reported motion when available and
+otherwise compares reported current and target positions. This inference
+cannot detect a motor stalled away from its target. Start/stop controls and
+HomeKit `HoldPosition` are not exposed.
+
+Target writes complete after Tucson confirms device acceptance, before the
+curtain necessarily finishes moving. Missing positions, stale sessions, or
+unavailable controllers produce “No Response.” The status page displays
+reported state and pending callers.
+
+This is infrastructure for future Zemismart Wi-Fi curtain support. Tucson does
+not yet register a production Zemismart profile; the physical model and
+mapping must be qualified first. Its
+[curtain contract](https://github.com/shields/tucson/blob/main/docs/implementation-plan.md#curtain-infrastructure)
+defines the MQTT interface. `make homekit` in Tucson exercises the synthetic
+curtain profile through both bridges and paired HomeKit clients.
