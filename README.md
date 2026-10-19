@@ -315,8 +315,16 @@ or `passwd`. The error names the key but not its value. Keep the password out of
 `config.yaml`, which is typically a ConfigMap.
 
 Credentials embedded in `mqtt.url` as `scheme://user:password@host` keep working
-when `mqtt.username` and `mqtt.passwordFile` are both unset. Percent-encode any
-`/`, `?`, or `#` in them; Hoboken refuses a URL that has an `@` after its host.
+when `mqtt.username` and `mqtt.passwordFile` are both unset. mqtt.js
+percent-decodes them, so write `%`, `\`, `/`, `?`, and `#` in them as `%25`,
+`%5C`, `%2F`, `%3F`, and `%23`. Left as they are, most of these make startup
+fail with `mqtt.url is not a valid MQTT URL`, which names no cause, and a `%`
+that is followed by two hexadecimal digits is decoded into a different password
+without any error. mqtt.js also splits the decoded credentials at the last `:`
+that has text on both sides, so percent-encoding cannot protect a `:` in a
+password. Use `mqtt.username` and `mqtt.passwordFile` for such a password, and
+for one with any other special character.
+
 The logs and the status page show only the scheme, host, and port of `mqtt.url`,
 never its credentials, path, or query. A YAML error or warning in `config.yaml`,
 such as a syntax error, an unresolved tag, or a key that is a list or a mapping,
