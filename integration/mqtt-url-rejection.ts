@@ -20,6 +20,7 @@ import path from "node:path";
 import { setImmediate as nextMacrotask } from "node:timers/promises";
 import { after, before, describe, mock, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { HAPStorage } from "@homebridge/hap-nodejs";
 import { startBridge } from "../src/bridge.ts";
 import {
   INVALID_MQTT_URL,
@@ -28,6 +29,7 @@ import {
   type URLReport,
 } from "../test/mqtt-urls.ts";
 
+const CHECKOUT = new URL("../", import.meta.url);
 const MAIN = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const REPORT = fileURLToPath(
   new URL("../test/mqtt-url-report.ts", import.meta.url),
@@ -41,6 +43,14 @@ const SPAWNED_URLS = [
   `user:${SECRET}@broker:1883`,
   "broker",
 ];
+
+// Stack frames carry the checkout's path, which can contain any word that the
+// assertions look for.
+function withoutCheckoutPath(output: string): string {
+  return output
+    .replaceAll(CHECKOUT.href, "")
+    .replaceAll(fileURLToPath(CHECKOUT), "");
+}
 
 function childEnvironment(): Record<string, string | undefined> {
   return Object.fromEntries(
@@ -70,11 +80,19 @@ function bridgeConfig(url: string) {
   };
 }
 
+// A bridge that starts anyway would keep the process alive after the assertion
+// fails.
+async function startThenStop(url: string): Promise<void> {
+  const handle = await startBridge(bridgeConfig(url));
+  await handle.shutdown();
+}
+
 describe("an mqtt.url that is not well formed", () => {
   let directory: string | undefined;
 
   before(() => {
     directory = mkdtempSync(path.join(tmpdir(), "hoboken-url-"));
+    HAPStorage.setCustomStoragePath(directory);
   });
 
   after(() => {
@@ -109,7 +127,7 @@ describe("an mqtt.url that is not well formed", () => {
       child.once("error", reject);
       child.once("close", resolve);
     });
-    return { code, output };
+    return { code, output: withoutCheckoutPath(output) };
   }
 
   for (const [index, url] of SPAWNED_URLS.entries()) {
@@ -138,10 +156,7 @@ describe("an mqtt.url that is not well formed", () => {
     process.on("warning", record);
     try {
       for (const url of MALFORMED_MQTT_URLS) {
-        await assert.rejects(
-          startBridge(bridgeConfig(url)),
-          new Error(INVALID_MQTT_URL),
-        );
+        await assert.rejects(startThenStop(url), new Error(INVALID_MQTT_URL));
       }
       await nextMacrotask();
       assert.deepEqual(warnings, []);
