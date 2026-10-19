@@ -401,6 +401,18 @@ describe("validateConfig", () => {
       );
     });
 
+    test("a curtain without a zone is told to name a zone", () => {
+      const { name, prefix, controller } = heatedBedding;
+      expect(
+        errorMessage(() =>
+          validateConfig({
+            ...validConfig(),
+            curtains: [{ name, prefix, controller }],
+          }),
+        ),
+      ).toBe("curtains[0].zone must be a valid Tucson zone name");
+    });
+
     test("rejects a curtain on a zone that a group lists", () => {
       expect(() =>
         validateConfig({

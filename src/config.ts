@@ -418,7 +418,10 @@ function validateTucsonEndpoints(
         `${label}.controller must be a valid Tucson controller name`,
       );
     }
-    if ((value.zone === undefined) === (value.zones === undefined)) {
+    if (
+      field === "heatedBedding" &&
+      (value.zone === undefined) === (value.zones === undefined)
+    ) {
       throw new Error(`${label}: exactly one of zone or zones is required`);
     }
     const base = {
