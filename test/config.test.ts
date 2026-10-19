@@ -1310,6 +1310,8 @@ ${extraLines}
       `  url: !mqtt "mqtt://svc:${SECRET}@broker:1883"`,
       8,
     ],
+    ["NON_STRING_KEY", `  ? [ "mqtt://svc:${SECRET}@broker:1883", b ]`, 5],
+    ["NON_STRING_KEY", `  ? url: "mqtt://svc:${SECRET}@broker:1883"`, 8],
   ])(
     "reports a YAML %s problem by position, without quoting the line",
     async (code, line, column) => {
@@ -1331,6 +1333,21 @@ ${extraLines}
       }
     },
   );
+
+  test("reports an alias with no anchor without quoting it or chaining its error", () => {
+    const configPath = writeConfig(`  url: *mqtt://svc:${SECRET}@broker:1883`);
+    let failure: unknown;
+    try {
+      loadConfig(configPath);
+    } catch (error: unknown) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(
+      `${configPath}: invalid YAML (alias error)`,
+    );
+    expect((failure as Error).cause).toBeUndefined();
+  });
 
   test("loads the shipped example configuration", () => {
     const config = loadConfig(

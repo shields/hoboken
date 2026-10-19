@@ -593,9 +593,14 @@ function validateScene(
 }
 
 // The parser's messages, for errors and for warnings such as an unresolved tag,
-// quote the offending line, which can be an mqtt.url with a password in it.
+// quote the offending line, which can be an mqtt.url with a password in it. So
+// does the conversion to JavaScript: an alias with no anchor throws its name,
+// and a key that is a list or a mapping becomes a process warning and the
+// unknown-field message. stringKeys makes such a key a parse error. The
+// replacement error has no cause because Node prints the cause of an uncaught
+// error.
 function parseYAML(path: string, content: string): unknown {
-  const document = parseDocument(content);
+  const document = parseDocument(content, { stringKeys: true });
   const [problem] = [...document.errors, ...document.warnings];
   if (problem) {
     const { line, col } = problem.linePos?.[0] ?? { line: 0, col: 0 };
@@ -603,7 +608,11 @@ function parseYAML(path: string, content: string): unknown {
       `${path}: invalid YAML (${problem.code} at line ${String(line)}, column ${String(col)})`,
     );
   }
-  return document.toJS();
+  try {
+    return document.toJS();
+  } catch {
+    throw new Error(`${path}: invalid YAML (alias error)`);
+  }
 }
 
 export function loadConfig(path: string): Config {

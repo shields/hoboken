@@ -113,12 +113,17 @@ Each module is independently testable with dependency injection:
   `/`, `?`, or `#` ends the authority early and leaves the rest of the userinfo
   there, where no userinfo pattern finds it. `loadConfig` stops on a YAML error
   or warning, such as an unresolved tag, and reports it by code, line, and
-  column only, because the parser's messages quote the offending line. Both
-  clients create and connect through `withoutErrorMessage`, which replaces any
-  error that mqtt.js or Node throws synchronously, because Node quotes the URL
-  in them, with "MQTT client could not be started" and keeps only a string
-  `code`. `isMQTTURL` runs the legacy parser with `process.noDeprecation` set,
-  except that Node has already set it, read-only, under `--no-deprecation`.
+  column only, because the parser's messages quote the offending line. It parses
+  with `stringKeys`, so a key that is a list or a mapping is a parse error
+  rather than a process warning and an unknown-field message that quote it, and
+  it replaces the error that converting the document throws for an alias with no
+  anchor, which names the alias, with one that has no `cause`, because Node
+  prints the cause of an uncaught error. Both clients create and connect through
+  `withoutErrorMessage`, which replaces any error that mqtt.js or Node throws
+  synchronously, because Node quotes the URL in them, with "MQTT client could
+  not be started" and keeps only a string `code`. `isMQTTURL` runs the legacy
+  parser with `process.noDeprecation` set, except that Node has already set it,
+  read-only, under `--no-deprecation`.
   Node 22 and 24 emit DEP0170 with the whole URL for a port that `url.parse`
   finds invalid but `new URL` accepts, as in `mqtt:user:pw@host:1x`; Node 26
   throws an error that quotes the URL instead. Node 24 and 26 emit DEP0169,

@@ -315,11 +315,12 @@ Credentials embedded in `mqtt.url` as `scheme://user:password@host` keep working
 when `mqtt.username` and `mqtt.passwordFile` are both unset. Percent-encode any
 `/`, `?`, or `#` in them. The logs and the status page show only the
 scheme, host, and port of `mqtt.url`, never its credentials, path, or query. A
-YAML error or warning in `config.yaml`, such as a syntax error or an unresolved
-tag, stops startup and is reported by its code, line, and column without the
-text of the line, which can hold such credentials. The configured password never
-appears in logs, the status page, metrics, or error messages. Rotating it takes
-a restart.
+YAML error or warning in `config.yaml`, such as a syntax error, an unresolved
+tag, or a key that is a list or a mapping, stops startup and is reported by its
+code, line, and column without the text of the line, which can hold such
+credentials. An alias with no anchor is reported without a position. The
+configured password never appears in logs, the status page, metrics, or error
+messages. Rotating it takes a restart.
 Use `mqtts://` unless the broker is on a trusted network, because `mqtt://`
 sends the password unencrypted. `mqtt.passwordFile` can name any file that the
 container can read, so treat `config.yaml` as being as trusted as the container.
