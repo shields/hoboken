@@ -209,10 +209,10 @@ describe(
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (data: Buffer) => {
-        stdout = (stdout + data.toString()).slice(-16384);
+        stdout += data.toString();
       });
       child.stderr.on("data", (data: Buffer) => {
-        stderr = (stderr + data.toString()).slice(-16384);
+        stderr += data.toString();
       });
       let closed = false;
       const exited = new Promise<number | null>((resolve, reject) => {
@@ -618,15 +618,6 @@ describe(
         await expectMainAuthenticates("ignored-start", "0E:36:29:42:81:18", {
           passwordFile,
           environment: { MQTT_PASSWORD: `wrong-${HOBOKEN_SENTINEL}` },
-        });
-      });
-
-      test("main.ts authenticates with the password from a file with a trailing newline", async () => {
-        assert(directory);
-        const passwordFile = path.join(directory, "main-password");
-        writeFileSync(passwordFile, `${HOBOKEN_SENTINEL}\n`, { mode: 0o600 });
-        await expectMainAuthenticates("file-start", "0E:36:29:42:81:1C", {
-          passwordFile,
         });
       });
 

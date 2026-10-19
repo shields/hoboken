@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { pbkdf2Sync, randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { createConnection, createServer } from "node:net";
+import { createServer } from "node:net";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -83,26 +83,6 @@ export async function freePort(): Promise<number> {
     });
   });
   return address.port;
-}
-
-export async function listening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
-    socket.setTimeout(200);
-    const finish = (ready: boolean): void => {
-      socket.destroy();
-      resolve(ready);
-    };
-    socket.once("connect", () => {
-      finish(true);
-    });
-    socket.once("error", () => {
-      finish(false);
-    });
-    socket.once("timeout", () => {
-      finish(false);
-    });
-  });
 }
 
 export interface BrokerAuth {
@@ -175,9 +155,11 @@ export class TestBroker {
           `MQTT test broker exited unsuccessfully: ${this.#stderr.trim()}`,
         );
     });
-    await poll(async () => {
+    // Mosquitto logs this line only once its own listeners are open, so another
+    // process that holds the port cannot satisfy the wait.
+    await poll(() => {
       if (this.#error) throw this.#error;
-      return listening(this.port);
+      return /mosquitto version \S+ running/.test(this.#stderr);
     });
   }
 
