@@ -163,11 +163,11 @@ Each module is independently testable with dependency injection:
   handler runs and without a callback, so the handler's call has nothing left to
   send and a refusal after a reconnect goes unreported. mqtt.js reports a SUBACK
   failure code (bit 0x80) as an error whose `packet.granted` holds one code per
-  requested topic, while the grants argument still carries the requested QoS; a
-  grant of 128 without an error counts as a refusal too. Codes name topics only
-  when their count matches the request. A refusal logs the refused topics and
-  any other failure logs every requested topic, each as one `log.error` line and
-  one `mqttErrors` count per `subscribe` call. The connection stays up.
+  requested topic, while the grants argument still carries the requested QoS.
+  Codes name topics only when their count matches the request. A refusal logs
+  the refused topics and any other failure logs every requested topic, each as
+  one `log.error` line and one `mqttErrors` count per `subscribe` call. The
+  connection stays up.
 - **State cache**: `Map<string, Z2MState>` in bridge.ts, keyed by device topic.
 - **Dashboard browser support**: The status page targets modern browsers
   (Chrome/Edge 111+, Safari 18+). Features like the View Transitions API are

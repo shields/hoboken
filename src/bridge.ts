@@ -90,9 +90,7 @@ function deniedTopics(
   const aligned = codes.length === grants.length ? codes : [];
   return grants
     .filter(
-      ({ qos }, i) =>
-        qos >= SUBACK_FAILURE ||
-        (typeof aligned[i] === "number" && aligned[i] >= SUBACK_FAILURE),
+      (_, i) => typeof aligned[i] === "number" && aligned[i] >= SUBACK_FAILURE,
     )
     .map(({ topic }) => topic);
 }

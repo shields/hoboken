@@ -2075,19 +2075,6 @@ describe("startBridge subscription results", () => {
     }
   });
 
-  test("a topic granted as 128 is named and counted", async () => {
-    const { metricsPort, shutdown } = await connected();
-    try {
-      complete(null, [granted[0]!, { topic: BEDROOM, qos: 128 }]);
-      expect(failures()).toHaveLength(1);
-      expect(failures()[0]).toContain("refused for zigbee2mqtt/bedroom");
-      expect(failures()[0]).not.toContain(LIVING_ROOM);
-      expect(await errorCount(metricsPort)).toBe(1);
-    } finally {
-      await shutdown();
-    }
-  });
-
   test("a partly denied subscription names only the denied topic", async () => {
     const { metricsPort, shutdown } = await connected();
     try {
