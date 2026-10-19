@@ -269,9 +269,12 @@ host's LAN interface name (e.g., `eno1`) so HomeKit clients can reach the bridge
 `mqtt`, `mqtts`, `tcp`, `ssl`, `tls`, `ws`, or `wss`, the host is required, and
 a port, if present, is 1 to 65535. A bare hostname does not work, because
 mqtt.js requires a scheme, and neither does `host:port`, because mqtt.js reads
-the host as the scheme. Write a non-ASCII hostname in punycode. A `ws` or `wss`
-URL needs a hostname rather than an IPv6 address, because mqtt.js writes the
-address without its brackets and cannot connect.
+the host as the scheme. A Unix socket URL such as
+`mqtt+unix:///run/mosquitto.sock` does not work either. Write a non-ASCII
+hostname in punycode, such as `xn--bcher-kva.example`; `ws` and `wss` URLs also
+accept it as written. A `ws` or `wss` URL needs a hostname rather than an IPv6
+address, because mqtt.js writes the address without its brackets and cannot
+connect.
 
 Hoboken refuses to start with `mqtt.url is not a valid MQTT URL` when the URL
 breaks these rules. The URL can carry credentials, and a URL that is not well

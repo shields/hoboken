@@ -97,7 +97,10 @@ Each module is independently testable with dependency injection:
   only if mqtt.js can connect with it as written. Node's legacy `url.parse`,
   which mqtt.js uses, must find a scheme that mqtt.js builds a stream for
   (`mqtt`, `mqtts`, `tcp`, `ssl`, `tls`, `ws`, `wss`), a host, and a port of 1
-  or more, and the WHATWG `URL` parser must find the same host. The second check
+  or more, and the WHATWG `URL` parser must find the same host. WHATWG
+  percent-encodes a host that is not ASCII for `mqtt`, `mqtts`, `tcp`, `ssl`,
+  and `tls`, where `url.parse` writes punycode, so those URLs fail; `ws` and
+  `wss` pass because WHATWG writes punycode for them too. The second check
   rejects what `url.parse` truncates without complaint, such as a space, `;`, or
   `%` in the host, where mqtt.js would connect to the text before it. A control
   character in the host fails too, because WHATWG percent-encodes one in the
@@ -110,39 +113,42 @@ Each module is independently testable with dependency injection:
   cannot be told from a path, query, or fragment that holds an `@`, so both are
   refused; `%40` writes an `@` there. A bare hostname fails because mqtt.js
   throws "Missing protocol". mqtt.js would map an unknown scheme to `mqtt`, so
-  the scheme list is stricter than mqtt.js. A `ws` or `wss` URL with an IPv6
-  address fails too, because mqtt.js writes its host without brackets and
-  `new WebSocket` rejects the result. `validateConfig`, `startBridge`, and the
-  `HeatedBeddingMQTT` constructor call `assertMQTTURL`, which throws "mqtt.url
-  is not a valid MQTT URL". The log line and status page use `displayMQTTURL`,
-  which shows only the scheme, host, and port, or "(not shown)" for a URL that
-  does not pass; `startBridge` has already refused such a URL, so that is a
-  second layer. It never shows the path, query, or fragment, which can carry a
-  token. `loadConfig` stops on a YAML error or warning, such as an unresolved
-  tag, and reports it by code, line, and column only, because the parser's
-  messages quote the offending line. It parses with `stringKeys`, so a key that
-  is a list or a mapping is a parse error rather than a process warning and an
-  unknown-field message that quote it, and it replaces the error that converting
-  the document throws for an alias with no anchor, which names the alias, with
-  one that has no `cause`, because Node prints the cause of an uncaught error.
-  Both clients create and connect through `withoutErrorMessage`, which replaces
-  any error that mqtt.js or Node throws synchronously, because Node quotes the
-  URL in them, with "MQTT client could not be started" and keeps only a string
-  `code`. `isMQTTURL` runs the legacy parser with `process.noDeprecation` set
-  and then puts back the value that it found, except that Node has already set
-  it, read-only, under `--no-deprecation`. Node 22 and 24 emit DEP0170 with the
-  whole URL for a port that `url.parse` finds invalid but `new URL` accepts, as
-  in `mqtt:user:pw@host:1x`; Node 26 throws an error that quotes the URL
-  instead. Node 24 and 26 emit DEP0169, which does not quote the URL, for any
-  `url.parse` call outside `node_modules`. A process emits each warning once, so
-  `test/mqtt-url-report.ts` checks the shared lists in `test/mqtt-urls.ts` in a
-  fresh process, which `config.test.ts` starts under Bun and
-  `integration/mqtt-url-rejection.ts` starts under Node. It also creates and
-  connects an mqtt.js client for every valid URL with `net.createConnection`,
-  `tls.connect`, and the `createWebsocket` option stubbed, so that the stream
-  builders run and no socket opens; `manualConnect` alone never runs them. Every
-  malformed URL in those lists that has a place for credentials carries a
-  secret there, so any output that quotes part of one fails.
+  the scheme list is stricter than mqtt.js. A `+unix` URL fails too, for lack of
+  a host: mqtt.js reaches a socket only for `mqtt+unix` and `tcp+unix`, and
+  dials `localhost` over TCP for `mqtts`, `ssl`, `tls`, `ws`, and `wss`. A `ws`
+  or `wss` URL with an IPv6 address fails too, because mqtt.js writes its host
+  without brackets and `new WebSocket` rejects the result. `validateConfig`,
+  `startBridge`, and the `HeatedBeddingMQTT` constructor call `assertMQTTURL`,
+  which throws "mqtt.url is not a valid MQTT URL". The log line and status page
+  use `displayMQTTURL`, which shows only the scheme, host, and port, or "(not
+  shown)" for a URL that does not pass; `startBridge` has already refused such a
+  URL, so that is a second layer. It never shows the path, query, or fragment,
+  which can carry a token. `loadConfig` stops on a YAML error or warning, such
+  as an unresolved tag, and reports it by code, line, and column only, because
+  the parser's messages quote the offending line. It parses with `stringKeys`,
+  so a key that is a list or a mapping is a parse error rather than a process
+  warning and an unknown-field message that quote it, and it replaces the error
+  that converting the document throws for an alias with no anchor, which names
+  the alias, with one that has no `cause`, because Node prints the cause of an
+  uncaught error. Both clients create and connect through `withoutErrorMessage`,
+  which replaces any error that mqtt.js or Node throws synchronously, because
+  Node quotes the URL in them, with "MQTT client could not be started" and keeps
+  only a string `code`. `isMQTTURL` runs the legacy parser with
+  `process.noDeprecation` set and then puts back the value that it found, except
+  that Node has already set it, read-only, under `--no-deprecation`. Node 22 and
+  24 emit DEP0170 with the whole URL for a port that `url.parse` finds invalid
+  but `new URL` accepts, as in `mqtt:user:pw@host:1x`; Node 26 throws an error
+  that quotes the URL instead. Node 24 and 26 emit DEP0169, which does not quote
+  the URL, for any `url.parse` call outside `node_modules`. A process emits each
+  warning once, so `test/mqtt-url-report.ts` checks the shared lists in
+  `test/mqtt-urls.ts` in a fresh process, which `config.test.ts` starts under
+  Bun and `integration/mqtt-url-rejection.ts` starts under Node. It also creates
+  and connects an mqtt.js client for every valid URL with
+  `net.createConnection`, `tls.connect`, and the `createWebsocket` option
+  stubbed, so that the stream builders run and no socket opens; `manualConnect`
+  alone never runs them. Every malformed URL in those lists that has a place for
+  credentials carries a secret there, so any output that quotes part of one
+  fails.
 - **Main MQTT reconnect backoff**: the main client sets
   `reconnectOnConnackError` in every configuration, because mqtt.js otherwise
   never retries after a refused login, and starts `reconnectPeriod` at the

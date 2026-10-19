@@ -59,6 +59,8 @@ export const VALID_MQTT_URLS = [
   "mqtt://user:pw@[::1]:1883/some/path?x=1#fragment",
   "mqtt://broker:1883/a%40b",
   "ws://broker:9001/mqtt?next=%40x",
+  "mqtt://xn--bcher-kva.example:1883",
+  "wss://bücher.example/mqtt",
 ];
 
 // Each that has a place for credentials carries SECRET there, so that a
@@ -143,8 +145,10 @@ export const MALFORMED_MQTT_URLS = [
   // Not an MQTT scheme.
   `http://user:${SECRET}@broker`,
   `ftp://user:${SECRET}@broker:21`,
+  // A Unix socket, which has no host.
   `mqtt+unix://user:${SECRET}@broker`,
   "mqtt+unix:///var/run/mosquitto.sock",
+  // No scheme, which mqtt.js rejects or reads "broker" as.
   "broker:1883",
   "broker",
   "not a valid url",
