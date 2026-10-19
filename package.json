@@ -20,7 +20,7 @@
     "aedes": "1.2.0",
     "eslint": "10.12.0",
     "eslint-config-prettier": "10.1.8",
-    "eslint-plugin-unicorn": "77.0.0",
+    "eslint-plugin-unicorn": "78.0.0",
     "hap-controller": "0.10.2",
     "jiti": "2.7.0",
     "lefthook": "2.2.2",
