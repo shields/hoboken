@@ -234,8 +234,8 @@ export async function startBridge(
     metrics = createMetrics(metricsRegister);
   }
 
-  const sanitizedUrl = displayMQTTURL(config.mqtt.url);
-  if (config.devices.length) log.log(`Connecting to MQTT at ${sanitizedUrl}`);
+  const displayURL = displayMQTTURL(config.mqtt.url);
+  if (config.devices.length) log.log(`Connecting to MQTT at ${displayURL}`);
 
   const mqttClient = config.devices.length
     ? withoutErrorMessage(() =>
@@ -379,7 +379,7 @@ export async function startBridge(
       buildStatusData(
         config,
         stateCache,
-        { url: sanitizedUrl, connected: mqttConnected() },
+        { url: displayURL, connected: mqttConnected() },
         [...hapConnections.values()],
         version,
         heatedBedding?.source,

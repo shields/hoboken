@@ -2412,7 +2412,7 @@ describe("startBridge with MQTT credentials", () => {
     ["mqtt://legacy:LEGACYPW@[::1]", "mqtt://[::1]"],
   ])(
     "credentials embedded in the URL %s stay out of logs and the status page",
-    async (url, sanitized) => {
+    async (url, displayed) => {
       const output = captureConsole();
       try {
         const config = metricsConfig();
@@ -2428,10 +2428,10 @@ describe("startBridge with MQTT credentials", () => {
         }
 
         expect(mockClient.url).toBe(url);
-        expect(page).toContain(sanitized);
+        expect(page).toContain(displayed);
         expect(page).not.toContain("LEGACYPW");
         const lines = output.lines();
-        expect(lines.some((line) => line.includes(sanitized))).toBe(true);
+        expect(lines.some((line) => line.includes(displayed))).toBe(true);
         expect(lines.filter((line) => line.includes("LEGACYPW"))).toStrictEqual(
           [],
         );
