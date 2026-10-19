@@ -29,6 +29,7 @@ import {
   resolveMQTTCredentials,
   type MQTTCredentials,
 } from "../src/config.ts";
+import type { CurtainCommand } from "../src/curtain-profile.ts";
 import type {
   HeatedBeddingCommand,
   HeatedBeddingState,
@@ -54,6 +55,12 @@ const ZONES = ["side_a", "side_b"].map((zone) => ({
   controller: "bed",
   zone,
 }));
+const CURTAIN = {
+  name: "Window Curtain",
+  prefix: PREFIX,
+  controller: "window",
+  zone: "curtain",
+};
 const AUTH: BrokerAuth = {
   users: { hoboken: HOBOKEN_SENTINEL, backend: BACKEND_PASSWORD },
   acl: [
@@ -69,6 +76,10 @@ const AUTH: BrokerAuth = {
       `topic read ${PREFIX}/${controller}/${zone}/result`,
       `topic write ${PREFIX}/${controller}/${zone}/set`,
     ]),
+    `topic read ${PREFIX}/${CURTAIN.controller}/availability`,
+    `topic read ${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}`,
+    `topic read ${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}/result`,
+    `topic write ${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}/set`,
     "user backend",
     "topic readwrite #",
     "",
@@ -84,7 +95,9 @@ interface WireCharacteristic {
 interface WireResponse {
   characteristics: WireCharacteristic[];
 }
-type Command = HeatedBeddingCommand & { request_id: string };
+type Command = (HeatedBeddingCommand | CurtainCommand) & {
+  request_id: string;
+};
 
 async function scrape(port: number | undefined): Promise<string> {
   assert(port);
@@ -120,13 +133,15 @@ describe(
     let handle: Awaited<ReturnType<typeof startBridge>> | undefined;
     let client: InstanceType<typeof HttpClient> | undefined;
     let lightOn: string;
+    let curtainCurrent: string;
+    let curtainTarget: string;
     const speeds = new Map<string, string>();
     const session = "session-auth";
     const requests: unknown[] = [];
     const lightWrites: unknown[] = [];
     const ungrantedWrites: unknown[] = [];
     const commands: { topic: string; command: Command }[] = [];
-    const states = new Map<string, HeatedBeddingState>();
+    const states = new Map<string, object>();
     const children = new Set<ChildProcess>();
 
     async function publish(
@@ -383,6 +398,7 @@ describe(
             `${Z2M_TOPIC}/set`,
             "zigbee2mqtt/ungranted/set",
             `${PREFIX}/bed/+/set`,
+            `${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}/set`,
           ],
           { qos: 0, rap: true },
         );
@@ -412,6 +428,7 @@ describe(
               },
             ],
             heatedBedding: ZONES,
+            curtains: [CURTAIN],
             metrics: { port: 0, bind: "127.0.0.1" },
           },
           credentials,
@@ -442,6 +459,13 @@ describe(
             `${String(bedding.aid)}.${String(fan.getCharacteristic(Characteristic.RotationSpeed).iid)}`,
           );
         }
+        const curtain = accessories.find(
+          (accessory) => accessory.displayName === CURTAIN.name,
+        );
+        const covering = curtain?.getService(Service.WindowCovering);
+        assert(curtain && covering);
+        curtainCurrent = `${String(curtain.aid)}.${String(covering.getCharacteristic(Characteristic.CurrentPosition).iid)}`;
+        curtainTarget = `${String(curtain.aid)}.${String(covering.getCharacteristic(Characteristic.TargetPosition).iid)}`;
       });
 
       after(async () => {
@@ -483,7 +507,7 @@ describe(
         }
       });
 
-      test("both MQTT clients authenticate from a password file with a trailing newline", async () => {
+      test("every MQTT client authenticates from a password file with a trailing newline", async () => {
         assert.deepEqual(credentials, {
           username: "hoboken",
           password: HOBOKEN_SENTINEL,
@@ -539,6 +563,39 @@ describe(
           });
           assert.equal(await value(speed), 80);
         }
+      });
+
+      test("curtains report state and carry a confirmed target write under the ACL", async () => {
+        await poll(connected);
+        const topic = `${PREFIX}/${CURTAIN.controller}/${CURTAIN.zone}`;
+        await publish(`${PREFIX}/bridge/availability`, "online", true);
+        await publish(
+          `${PREFIX}/${CURTAIN.controller}/availability`,
+          "online",
+          true,
+        );
+        const state = {
+          session_id: session,
+          current_position: 20,
+          target_position: 20,
+          motion: null,
+        };
+        states.set(topic, state);
+        await publish(topic, state, true);
+        await publish(`${PREFIX}/bridge/heartbeat`, { session_id: session });
+        await poll(async () => (await value(curtainCurrent)) === 20);
+
+        const count = commands.length;
+        await write({ [curtainTarget]: 80 });
+        assert.equal(commands.length, count + 1);
+        const latest = commands.at(-1);
+        assert(latest);
+        assert.equal(latest.topic, `${topic}/set`);
+        assert.deepEqual(latest.command, {
+          request_id: latest.command.request_id,
+          target_position: 80,
+        });
+        assert.equal(await value(curtainTarget), 80);
       });
 
       test("the ACL withholds topics outside Hoboken's grants", async () => {

@@ -447,12 +447,13 @@ The simulated MQTT controller exercises the contract; actual Sunbeam, Home
 app, and Siri qualification still requires hardware.
 
 The authenticated round trip runs a broker that refuses anonymous clients and
-restricts each user's topics. It shows that both MQTT connections log in with a
-password read from a file, that Zigbee2MQTT and heated bedding writes and state
-get through the topic permissions, that the status page and metrics never carry
-the password, that `main.ts` exits without a password file and never takes the
-password from `MQTT_PASSWORD`, and that a login the broker first refuses, with
-credentials or without, is retried until the broker accepts it.
+restricts each user's topics. It shows that every MQTT connection logs in with a
+password read from a file, that Zigbee2MQTT, heated bedding, and curtain writes
+and state get through the topic permissions, that the status page and metrics
+never carry the password, that `main.ts` exits without a password file and
+never takes the password from `MQTT_PASSWORD`, and that a login the broker
+first refuses, with credentials or without, is retried until the broker accepts
+it.
 
 The refused-subscription round trip runs an in-process broker that refuses
 chosen topics. It shows that the bridge names only the refused topic, counts
