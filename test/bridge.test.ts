@@ -2280,32 +2280,38 @@ describe("startBridge with MQTT credentials", () => {
   test.each([
     [
       "a configured username without credentials",
-      "hoboken",
+      { username: "hoboken" },
       undefined,
       "mqtt.username requires credentials",
     ],
     [
       "credentials without a configured username",
-      undefined,
+      {},
       CREDENTIALS,
       "credentials require mqtt.username",
     ],
     [
       "credentials for a different username",
-      "hoboken",
+      { username: "hoboken" },
       { ...CREDENTIALS, username: "intruder" },
       "credentials.username must match mqtt.username",
     ],
+    [
+      "a password file without a username",
+      { passwordFile: "/run/secrets/mqtt_password" },
+      undefined,
+      "mqtt.passwordFile requires mqtt.username",
+    ],
   ])(
     "refuses %s before creating any client or server",
-    async (_name, username, credentials, message) => {
+    async (_name, login, credentials, message) => {
       const count = mockClients.length;
       const config: Config = {
         ...metricsConfig(),
         heatedBedding: HEATED_BEDDING,
         curtains: CURTAINS,
       };
-      if (username !== undefined) config.mqtt.username = username;
+      Object.assign(config.mqtt, login);
       let failure: unknown;
       try {
         await startBridge(config, credentials);
@@ -2316,6 +2322,22 @@ describe("startBridge with MQTT credentials", () => {
       expect(mockClients.length).toBe(count);
     },
   );
+
+  test("a password file beside its username and credentials starts normally", async () => {
+    const count = mockClients.length;
+    const config = loginConfig();
+    config.mqtt.passwordFile = "/run/secrets/mqtt_password";
+    const { shutdown } = await startBridge(config, CREDENTIALS);
+    try {
+      expect(mockClients.length - count).toBe(1);
+      expect(mockClient.options).toMatchObject({
+        username: "hoboken",
+        password: PASSWORD,
+      });
+    } finally {
+      await shutdown();
+    }
+  });
 
   test("the password never reaches logs, the status page, or metrics", async () => {
     const output = captureConsole();

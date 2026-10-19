@@ -160,6 +160,9 @@ function checkCredentials(
 ): void {
   if (mqtt.username === undefined) {
     if (credentials) throw new Error("credentials require mqtt.username");
+    if (mqtt.passwordFile !== undefined) {
+      throw new Error("mqtt.passwordFile requires mqtt.username");
+    }
   } else if (!credentials) {
     throw new Error("mqtt.username requires credentials");
   } else if (credentials.username !== mqtt.username) {

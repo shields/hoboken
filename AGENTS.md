@@ -88,9 +88,10 @@ Each module is independently testable with dependency injection:
   `auth` so userinfo in the broker URL cannot replace the configured login.
   `startBridge` rejects, before creating any client or server, credentials
   whose username differs from `config.mqtt.username`, a configured username
-  without credentials, and credentials without a configured username, so a
-  library caller cannot connect anonymously or under the wrong name. The
-  messages name the fields but never echo values.
+  without credentials, credentials without a configured username, and a
+  password file without a username, so a library caller cannot connect
+  anonymously or under the wrong name. The messages name the fields but never
+  echo values.
 - **MQTT URL**: a URL that is not well formed cannot be reliably stripped of
   its credentials, so no part of it is printed anywhere. `isMQTTURL` accepts a
   URL only if mqtt.js can connect with it as written. Node's legacy
