@@ -132,11 +132,8 @@ const TUCSON_ENDPOINT_FIELDS: Fields<HeatedBeddingZoneConfig> = {
 };
 const MAC_RE = /^[\dA-Fa-f]{2}(:[\dA-Fa-f]{2}){5}$/;
 const PIN_RE = /^\d{3}-\d{2}-\d{3}$/;
-// Userinfo as url.parse, which mqtt.js uses, finds it: after a scheme or
-// leading slashes, with backslashes as slashes and the "//" optional.
-const MQTT_URL_USERINFO_RE = /^(?:[^/\\?#:]+:[/\\]{0,2}|[/\\]{2})[^/\\?#]+@/;
-// The schemes for which mqtt.js builds a Node.js stream. It connects over mqtt
-// or mqtts for any other scheme, and rejects a URL without one.
+// The schemes for which mqtt.js builds a Node.js stream. It connects over plain
+// mqtt, never mqtts, for any other scheme, and rejects a URL without one.
 const MQTT_URL_PROTOCOLS = new Set([
   "mqtt:",
   "mqtts:",
@@ -215,7 +212,7 @@ export function validateConfig(data: unknown): Config {
   if (typeof mqtt.url !== "string" || mqtt.url.length === 0) {
     throw new Error("mqtt.url must be a non-empty string");
   }
-  assertMQTTURL(mqtt.url);
+  const { hasUserinfo } = assertMQTTURL(mqtt.url);
   if (
     mqtt.username !== undefined &&
     (typeof mqtt.username !== "string" || mqtt.username.length === 0)
@@ -236,7 +233,7 @@ export function validateConfig(data: unknown): Config {
   ) {
     throw new Error("mqtt.passwordFile must be a non-empty string");
   }
-  if (mqtt.username !== undefined && MQTT_URL_USERINFO_RE.test(mqtt.url)) {
+  if (mqtt.username !== undefined && hasUserinfo) {
     throw new Error(
       "mqtt.username cannot be combined with credentials in mqtt.url; use one or the other",
     );
@@ -638,6 +635,8 @@ function parseLegacy(url: string) {
 interface MQTTEndpoint {
   protocol: string;
   host: string;
+  // mqtt.js takes the login from the URL when url.parse finds userinfo.
+  hasUserinfo: boolean;
 }
 
 // mqtt.js parses with the legacy url.parse, so the URL is parsed that way and
@@ -666,7 +665,7 @@ function parseMQTTURL(url: string): MQTTEndpoint | undefined {
       !`${legacy.path ?? ""}${legacy.hash ?? ""}`.includes("@") &&
       !/\p{Cc}/u.test(host) &&
       new URL(`${protocol}//${host}`).host === strict.host.toLowerCase()
-      ? { protocol, host }
+      ? { protocol, host, hasUserinfo: Boolean(legacy.auth) }
       : undefined;
   } catch {
     return undefined;
@@ -677,8 +676,10 @@ export function isMQTTURL(url: string): boolean {
   return parseMQTTURL(url) !== undefined;
 }
 
-export function assertMQTTURL(url: string): void {
-  if (!isMQTTURL(url)) throw new Error("mqtt.url is not a valid MQTT URL");
+export function assertMQTTURL(url: string): MQTTEndpoint {
+  const endpoint = parseMQTTURL(url);
+  if (!endpoint) throw new Error("mqtt.url is not a valid MQTT URL");
+  return endpoint;
 }
 
 // Only the scheme, host, and port, because the path, query, and fragment can

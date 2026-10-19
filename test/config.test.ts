@@ -704,6 +704,8 @@ describe("validateConfig", () => {
       "mqtt://user:pw@broker:1883",
       "mqtt://user@broker",
       "mqtt://:pw@broker",
+      "mqtt://:@broker",
+      "mqtt://user:@broker",
       "mqtts://user:pw@broker/path",
       "mqtt://u:p@ss@broker",
     ])("rejects mqtt.username combined with URL credentials: %s", (url) => {
@@ -719,7 +721,9 @@ describe("validateConfig", () => {
       "ws://broker:9001/mqtt?next=%40x",
       "mqtt://[::1]:1883",
       "mqtt://@broker",
-    ])("accepts a URL without userinfo: %s", (url) => {
+      "mqtts://\t@broker",
+      "mqtt://\r\n@broker",
+    ])("accepts a URL without userinfo: %j", (url) => {
       expect(
         validateConfig(withMQTT({ url, username: "hoboken" })).mqtt,
       ).toStrictEqual({ url, username: "hoboken" });
