@@ -304,7 +304,7 @@ The file must be valid UTF-8; invalid bytes, including a UTF-16 file with a byte
 order mark, fail startup instead of becoming a different password. Hoboken takes
 the password from no other source and ignores any `MQTT_PASSWORD` environment
 variable. The connection for Zigbee2MQTT and WLED devices and the heated bedding
-connection use the same credentials.
+and curtain connections use the same credentials.
 
 Hoboken refuses to start when `mqtt.username` has no `mqtt.passwordFile`, when
 `mqtt.passwordFile` has no `mqtt.username`, when the password file cannot be
@@ -347,11 +347,12 @@ Zigbee2MQTT and WLED connection logs `MQTT error: Connection refused: ...`,
 counts it in `hoboken_mqtt_errors_total`, and keeps retrying. It waits 1 second
 before the first retry and doubles the wait with each further attempt up to 60
 seconds. The wait returns to 1 second only after a connection has stayed up for
-60 seconds. The heated bedding connection logs an `mqtt_connection_error` event
-with the reason code, counts it in the same metric, and retries with the same
-doubling waits, each shortened at random by up to 25 percent: the first retry
-comes 0.75 to 1 second after the failure and the longest waits are 45 to 60
-seconds. Correcting the broker therefore takes effect without a restart.
+60 seconds. The heated bedding and curtain connections log an
+`mqtt_connection_error` event with the reason code, count it in the same metric,
+and retry with the same doubling waits, each shortened at random by up to 25
+percent: the first retry comes 0.75 to 1 second after the failure and the
+longest waits are 45 to 60 seconds. Correcting the broker therefore takes
+effect without a restart.
 
 Brokers that restrict topics per user must grant Hoboken these topics:
 
@@ -361,6 +362,8 @@ Brokers that restrict topics per user must grant Hoboken these topics:
   `<prefix>/bridge/heartbeat`, `<prefix>/<controller>/availability`, and each
   zone's `<prefix>/<controller>/<zone>` and `<prefix>/<controller>/<zone>/result`;
   write each zone's `<prefix>/<controller>/<zone>/set`.
+- Curtains: the same topics as heated bedding, for each curtain's controller and
+  zone.
 
 With an `acl_file`, Mosquitto accepts a subscription to a topic that the user
 cannot read and then delivers nothing, so a missing read permission shows up as
@@ -378,9 +381,10 @@ and keeps the connection open, so the topics the broker granted keep working
 while the refused devices report no state. Every reconnect subscribes again and
 reports a refusal again. The line says `failed` instead of `refused` and names
 every topic when the subscription ended without a usable answer from the broker,
-such as a connection that closed first. The heated bedding connection treats a
-refused subscription as a failed connection: it logs `mqtt_subscription_failed`,
-counts it in the same metric, and reconnects with backoff.
+such as a connection that closed first. The heated bedding and curtain
+connections treat a refused subscription as a failed connection: they log
+`mqtt_subscription_failed`, count it in the same metric, and reconnect with
+backoff.
 
 ### MAC and PIN Generation
 

@@ -59,7 +59,9 @@ Each module is independently testable with dependency injection:
 - `src/bridge.ts` — MQTT client, bridge wiring, state cache, lifecycle
 - `src/heated-bedding-profile.ts` — Pure heated bedding payload parsing, topic naming, and fan write coalescing
 - `src/heated-bedding-source.ts` — Heated bedding availability, session, and confirmed-write state machine, injected publish/clock
-- `src/heated-bedding-mqtt.ts` — Dedicated MQTT 5 connection and reconnect policy for the heated bedding source
+- `src/tucson-mqtt.ts` — Dedicated MQTT 5 connection, credentials, URL checks, and reconnect policy shared by the heated bedding and curtain sources
+- `src/heated-bedding-mqtt.ts` — Binds `TucsonMQTT` to the heated bedding source
+- `src/curtain-mqtt.ts` — Binds `TucsonMQTT` to the curtain source
 - `src/heated-bedding-accessories.ts` — Fan and preheat accessories backed by the heated bedding source
 - `src/main.ts` — Entry point (~10 lines)
 
@@ -80,10 +82,10 @@ Each module is independently testable with dependency injection:
 - **No config reload**: restart the container for config changes.
 - **MQTT credentials**: `Config` holds only `mqtt.username` and the password
   file path. `main.ts` calls `resolveMQTTCredentials(config.mqtt)` and passes
-  the resulting `MQTTCredentials` to `startBridge`, which gives them to both
-  MQTT clients, so the status page, metrics, and logs cannot reach the password.
+  the resulting `MQTTCredentials` to `startBridge`, which gives them to every
+  MQTT client, so the status page, metrics, and logs cannot reach the password.
   `validateConfig` stays pure and `startBridge` takes credentials only as an
-  argument. Both clients build their options with `credentialOptions`, which
+  argument. Every client builds its options with `credentialOptions`, which
   empties mqtt.js's `auth` so userinfo in the broker URL cannot replace the
   configured login. `startBridge` rejects, before creating any client or server,
   credentials whose username differs from `config.mqtt.username`, a configured
@@ -117,7 +119,7 @@ Each module is independently testable with dependency injection:
   dials `localhost` over TCP for `mqtts`, `ssl`, `tls`, `ws`, and `wss`. A `ws`
   or `wss` URL with an IPv6 address fails too, because mqtt.js writes its host
   without brackets and `new WebSocket` rejects the result. `validateConfig`,
-  `startBridge`, and the `HeatedBeddingMQTT` constructor call `assertMQTTURL`,
+  `startBridge`, and the `TucsonMQTT` constructor call `assertMQTTURL`,
   which throws "mqtt.url is not a valid MQTT URL". The log line and status page
   use `displayMQTTURL`, which shows only the scheme, host, and port, or "(not
   shown)" for a URL that does not pass; `startBridge` has already refused such a
@@ -129,7 +131,7 @@ Each module is independently testable with dependency injection:
   warning and an unknown-field message that quote it, and it replaces the error
   that converting the document throws for an alias with no anchor, which names
   the alias, with one that has no `cause`, because Node prints the cause of an
-  uncaught error. Both clients create and connect through `withoutErrorMessage`,
+  uncaught error. Every client creates and connects through `withoutErrorMessage`,
   which replaces any error that mqtt.js or Node throws synchronously, because
   Node quotes the URL in them, with "MQTT client could not be started" and keeps
   only a string `code`. `isMQTTURL` runs the legacy parser with
@@ -156,7 +158,7 @@ Each module is independently testable with dependency injection:
   `client.options.reconnectPeriod` up to `MAX_BACKOFF`. The doubled period is
   the wait after that attempt fails. Counting `reconnect` rather than `error`,
   `close`, or `offline` counts a failed attempt once. `connect` starts a timer,
-  like the heated bedding client's stable-connection timer, that resets the
+  like the Tucson client's stable-connection timer, that resets the
   period to `MIN_BACKOFF` once the connection has stayed up for `MAX_BACKOFF`;
   `close` and shutdown clear it. A broker that accepts the login and then drops
   the session, such as VerneMQ or EMQX with `deny_action=disconnect` after a
