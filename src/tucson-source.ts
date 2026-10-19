@@ -34,6 +34,14 @@ export interface TucsonProfile<S, C> {
   matches: (command: C, state: S) => boolean;
 }
 
+// How a window of writes that only asks a zone to resume interacts with the
+// zone's power.
+export interface TucsonResume<S, C, W> {
+  only: (writes: readonly W[]) => boolean;
+  powered: (state: S) => boolean;
+  power: (command: C) => boolean | undefined;
+}
+
 interface Prefix<S, W> {
   online: boolean;
   session: string | undefined;
@@ -361,6 +369,7 @@ export class TucsonSource<
     topic: string,
     write: W,
     coalesce: (writes: readonly W[]) => C,
+    resume?: TucsonResume<S, C, W>,
   ): Promise<S> {
     const zone = this.#admit(topic);
     return new Promise((resolve, reject) => {
@@ -380,6 +389,7 @@ export class TucsonSource<
               coalesce(window.writes),
               window.waiters,
               window.deadline,
+              resume?.only(window.writes) ? resume : undefined,
             );
           }, COALESCE_DELAY),
         };
@@ -406,9 +416,10 @@ export class TucsonSource<
     command: C,
     waiters: Waiter<S>[],
     deadline: number,
+    resume?: TucsonResume<S, C, W>,
   ): void {
     try {
-      this.#dispatch(zone, command, waiters, deadline);
+      this.#dispatch(zone, command, waiters, deadline, resume);
     } catch (error: unknown) {
       this.#reject(zone, waiters, error);
     }
@@ -419,6 +430,7 @@ export class TucsonSource<
     command: C,
     waiters: Waiter<S>[],
     deadline: number,
+    resume: TucsonResume<S, C, W> | undefined,
   ): void {
     if (this.#clock() >= deadline) {
       this.#reject(
@@ -436,6 +448,23 @@ export class TucsonSource<
         new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE),
       );
       return;
+    }
+    if (resume) {
+      // Reported power lags a power write that is still in flight, so the
+      // latest such write decides.
+      let inFlight: Pending<S, C, W> | undefined;
+      for (const pending of this.#pending.values()) {
+        if (
+          pending.zone === zone &&
+          resume.power(pending.command) !== undefined
+        )
+          inFlight = pending;
+      }
+      if (inFlight ? resume.power(inFlight.command) : resume.powered(state)) {
+        if (inFlight) inFlight.waiters.push(...waiters);
+        else this.#resolve(zone, waiters, state);
+        return;
+      }
     }
     const id = this.#identifier();
     if (this.#pending.has(id)) {
@@ -511,8 +540,12 @@ export class TucsonSource<
       return;
     this.#pending.delete(id);
     clearTimeout(pending.timer);
-    pending.zone.callers -= pending.waiters.length;
-    for (const waiter of pending.waiters) waiter.resolve(state);
+    this.#resolve(pending.zone, pending.waiters, state);
+  }
+
+  #resolve(zone: Zone<S, W>, waiters: Waiter<S>[], state: S): void {
+    zone.callers -= waiters.length;
+    for (const waiter of waiters) waiter.resolve(state);
   }
 
   #reject(zone: Zone<S, W>, waiters: Waiter<S>[], error: unknown): void {

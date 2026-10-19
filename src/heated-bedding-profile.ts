@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { object, identifier, integer } from "./tucson-profile.ts";
+import { object, identifier, integer, tucsonTopic } from "./tucson-profile.ts";
 export {
   parseTucsonHeartbeat as parseHeatedBeddingHeartbeat,
   parseTucsonResult as parseHeatedBeddingResult,
@@ -33,12 +33,60 @@ export interface HeatedBeddingCommand {
   preheat?: boolean;
 }
 
-export type HeatedBeddingFanWrite = { active: boolean } | { speed: number };
+export type HeatedBeddingFanRequest = { active: boolean } | { speed: number };
+
+export type HeatedBeddingFanWrite = HeatedBeddingFanRequest | { resume: true };
+
+export interface HeatedBeddingSummary {
+  power: boolean;
+  heat_level: number;
+  preheat: boolean;
+}
 
 export {
   tucsonTopic as heatedBeddingTopic,
   type TucsonResult as HeatedBeddingResult,
 } from "./tucson-profile.ts";
+
+type HeatedBeddingZoneSelection =
+  { zone: string } | { zones: readonly string[] };
+
+export function heatedBeddingTopics(
+  entry: { prefix: string; controller: string } & HeatedBeddingZoneSelection,
+): string[] {
+  return ("zones" in entry ? entry.zones : [entry.zone]).map((zone) =>
+    tucsonTopic({ ...entry, zone }),
+  );
+}
+
+// Code-unit order, so that an identity does not depend on the locale.
+export function sortedHeatedBeddingZones(zones: readonly string[]): string[] {
+  return zones.toSorted((a, b) => (a < b ? -1 : Number(a > b)));
+}
+
+export function heatedBeddingIdentity(
+  entry: { controller: string } & HeatedBeddingZoneSelection,
+): string {
+  // A zone name cannot contain a comma, so a group's identity never equals a
+  // single zone's.
+  return `${entry.controller}/${"zones" in entry ? sortedHeatedBeddingZones(entry.zones).join(",") : entry.zone}`;
+}
+
+export function aggregateHeatedBeddingStates(
+  states: readonly HeatedBeddingSummary[],
+): HeatedBeddingSummary {
+  if (states.length === 0) {
+    throw new RangeError("Heated bedding aggregation requires a state");
+  }
+  const on = states.filter((state) => state.power);
+  return {
+    power: on.length > 0,
+    heat_level: Math.max(
+      ...(on.length > 0 ? on : states).map((state) => state.heat_level),
+    ),
+    preheat: states.some((state) => state.preheat),
+  };
+}
 
 export function normalizeHeatedBeddingSpeed(percent: number): number {
   if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
@@ -78,6 +126,12 @@ export function coalesceHeatedBeddingFanWrites(
   return heatLevel === undefined
     ? { power: true }
     : { power: true, heat_level: heatLevel };
+}
+
+export function heatedBeddingResumeOnly(
+  writes: readonly HeatedBeddingFanWrite[],
+): boolean {
+  return writes.every((write) => "resume" in write);
 }
 
 function boolean(value: unknown): boolean | null {

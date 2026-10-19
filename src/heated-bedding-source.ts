@@ -14,20 +14,48 @@
 
 import {
   coalesceHeatedBeddingFanWrites,
+  heatedBeddingResumeOnly,
   normalizeHeatedBeddingSpeed,
   parseHeatedBeddingState,
   type HeatedBeddingCommand,
   type HeatedBeddingFanWrite,
   type HeatedBeddingState,
 } from "./heated-bedding-profile.ts";
+import { tucsonTopic } from "./tucson-profile.ts";
 import {
   TucsonSource,
   type SourceOptions,
   type TucsonEndpointConfig,
   type TucsonPublish,
+  type TucsonResume,
 } from "./tucson-source.ts";
 
 export type HeatedBeddingZoneConfig = TucsonEndpointConfig;
+
+export interface HeatedBeddingGroupConfig {
+  name: string;
+  prefix: string;
+  controller: string;
+  zones: string[];
+}
+
+export type HeatedBeddingConfig =
+  HeatedBeddingZoneConfig | HeatedBeddingGroupConfig;
+
+export function heatedBeddingZoneConfigs(
+  entries: readonly HeatedBeddingConfig[],
+): HeatedBeddingZoneConfig[] {
+  const zones = new Map<string, HeatedBeddingZoneConfig>();
+  for (const entry of entries) {
+    const { name, prefix, controller } = entry;
+    for (const zone of "zones" in entry ? entry.zones : [entry.zone]) {
+      const topic = tucsonTopic({ prefix, controller, zone });
+      if (!zones.has(topic))
+        zones.set(topic, { name, prefix, controller, zone });
+    }
+  }
+  return [...zones.values()];
+}
 export type UsableHeatedBeddingState = HeatedBeddingState & {
   power: boolean;
   heat_level: number;
@@ -37,6 +65,16 @@ export type HeatedBeddingPublication = HeatedBeddingCommand & {
   request_id: string;
 };
 export type HeatedBeddingPublish = TucsonPublish<HeatedBeddingCommand>;
+
+const RESUME: TucsonResume<
+  UsableHeatedBeddingState,
+  HeatedBeddingCommand,
+  HeatedBeddingFanWrite
+> = {
+  only: heatedBeddingResumeOnly,
+  powered: (state) => state.power,
+  power: (command) => command.power,
+};
 
 export class HeatedBeddingSource extends TucsonSource<
   UsableHeatedBeddingState,
@@ -82,7 +120,12 @@ export class HeatedBeddingSource extends TucsonSource<
     write: HeatedBeddingFanWrite,
   ): Promise<UsableHeatedBeddingState> {
     if ("speed" in write) normalizeHeatedBeddingSpeed(write.speed);
-    return this.writeCoalesced(topic, write, coalesceHeatedBeddingFanWrites);
+    return this.writeCoalesced(
+      topic,
+      write,
+      coalesceHeatedBeddingFanWrites,
+      RESUME,
+    );
   }
 
   async writePreheat(

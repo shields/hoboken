@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test";
 import { HAPStatus, HapStatusError } from "@homebridge/hap-nodejs";
 import {
   HeatedBeddingSource,
+  heatedBeddingZoneConfigs,
   type HeatedBeddingPublication,
   type HeatedBeddingZoneConfig,
 } from "../src/heated-bedding-source.ts";
@@ -307,6 +308,210 @@ describe("heated bedding source", () => {
       source.getState(TOPIC),
     ]);
     expect(source.getState(TOPIC).heat_level).toBe(4);
+  });
+
+  test("entries expand to their distinct zones in first-seen order", () => {
+    const base = { prefix: "tuya", controller: "bed" };
+    expect(
+      heatedBeddingZoneConfigs([
+        { ...base, name: "Side B", zone: "side_b" },
+        { ...base, name: "Side A", zone: "side_a" },
+        { ...base, name: "Bed", zones: ["side_a", "side_b", "side_c"] },
+        { ...base, name: "Other", zones: ["side_c", "side_d"] },
+      ]),
+    ).toEqual([
+      { ...base, name: "Side B", zone: "side_b" },
+      { ...base, name: "Side A", zone: "side_a" },
+      { ...base, name: "Bed", zone: "side_c" },
+      { ...base, name: "Other", zone: "side_d" },
+    ]);
+    expect(heatedBeddingZoneConfigs([])).toEqual([]);
+  });
+
+  describe("resume", () => {
+    function on(): void {
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 6 });
+    }
+
+    function confirm(requestId: string): void {
+      receive(`${TOPIC}/result`, {
+        request_id: requestId,
+        outcome: "confirmed",
+      });
+    }
+
+    test("a zone that is on is left alone", async () => {
+      ready();
+      on();
+      const write = source.writeFan(TOPIC, { resume: true });
+      expect(source.pendingCount(TOPIC)).toBe(1);
+      advance(50);
+      expect(sent).toHaveLength(0);
+      expect(await write).toMatchObject({ power: true, heat_level: 6 });
+      expect(source.pendingCount(TOPIC)).toBe(0);
+    });
+
+    test("a zone that is off powers on and keeps its stored level", async () => {
+      ready();
+      const write = source.writeFan(TOPIC, { resume: true });
+      advance(50);
+      expect(sent.map(({ payload }) => payload)).toEqual([
+        { request_id: "request-1", power: true },
+      ]);
+      receive(TOPIC, { ...BASELINE, power: true });
+      confirm("request-1");
+      expect(await write).toMatchObject({ power: true, heat_level: 4 });
+      expect(source.pendingCount(TOPIC)).toBe(0);
+    });
+
+    test("resume writes in one window send one command", async () => {
+      ready();
+      const writes = [
+        source.writeFan(TOPIC, { resume: true }),
+        source.writeFan(TOPIC, { resume: true }),
+      ];
+      advance(50);
+      expect(sent.map(({ payload }) => payload)).toEqual([
+        { request_id: "request-1", power: true },
+      ]);
+      receive(TOPIC, { ...BASELINE, power: true });
+      confirm("request-1");
+      await Promise.all(writes);
+      expect(source.pendingCount(TOPIC)).toBe(0);
+    });
+
+    test.each([
+      ["a speed", { speed: 50 }, { power: true, heat_level: 5 }],
+      ["an Active write", { active: true }, { power: true }],
+    ] as const)(
+      "%s in the same window makes the command unconditional on a zone that is on",
+      async (_case, other, command) => {
+        ready();
+        on();
+        const writes = [
+          source.writeFan(TOPIC, { resume: true }),
+          source.writeFan(TOPIC, other),
+        ];
+        advance(50);
+        expect(sent.map(({ payload }) => payload)).toEqual([
+          { request_id: "request-1", ...command },
+        ]);
+        receive(TOPIC, { ...BASELINE, power: true, heat_level: 5 });
+        confirm("request-1");
+        await Promise.all(writes);
+      },
+    );
+
+    test.each([
+      ["an explicit off", { active: false }],
+      ["a speed of zero", { speed: 0 }],
+    ] as const)(
+      "%s in the same window wins over a resume",
+      async (_case, other) => {
+        ready();
+        on();
+        const writes = [
+          source.writeFan(TOPIC, { resume: true }),
+          source.writeFan(TOPIC, other),
+        ];
+        advance(50);
+        expect(sent.map(({ payload }) => payload)).toEqual([
+          { request_id: "request-1", power: false },
+        ]);
+        receive(TOPIC, { ...BASELINE, power: false, heat_level: 6 });
+        confirm("request-1");
+        await Promise.all(writes);
+      },
+    );
+
+    test("a power-on already in flight is joined rather than repeated", async () => {
+      ready();
+      const first = source.writeFan(TOPIC, { speed: 50 });
+      advance(50);
+      const resume = source.writeFan(TOPIC, { resume: true });
+      expect(source.pendingCount(TOPIC)).toBe(2);
+      advance(50);
+      expect(sent).toHaveLength(1);
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 5 });
+      confirm("request-1");
+      expect((await resume).heat_level).toBe(5);
+      expect((await first).heat_level).toBe(5);
+      expect(source.pendingCount(TOPIC)).toBe(0);
+    });
+
+    test("a joined resume fails with the write it joined", async () => {
+      ready();
+      const first = Promise.allSettled([source.writeFan(TOPIC, { speed: 50 })]);
+      advance(50);
+      const resume = Promise.allSettled([
+        source.writeFan(TOPIC, { resume: true }),
+      ]);
+      advance(50);
+      receive(`${TOPIC}/result`, {
+        request_id: "request-1",
+        outcome: "rejected",
+        error_code: "invalid_command",
+      });
+      const rejected = {
+        status: "rejected",
+        reason: { hapStatus: HAPStatus.INVALID_VALUE_IN_REQUEST },
+      };
+      expect(await first).toMatchObject([rejected]);
+      expect(await resume).toMatchObject([rejected]);
+      expect(source.pendingCount(TOPIC)).toBe(0);
+    });
+
+    test("a power-off in flight is undone by a later resume", async () => {
+      ready();
+      on();
+      const off = source.writeFan(TOPIC, { active: false });
+      advance(50);
+      const resume = source.writeFan(TOPIC, { resume: true });
+      advance(50);
+      expect(sent.map(({ payload }) => payload)).toEqual([
+        { request_id: "request-1", power: false },
+        { request_id: "request-2", power: true },
+      ]);
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 6 });
+      confirm("request-1");
+      confirm("request-2");
+      expect((await off).power).toBe(true);
+      expect((await resume).power).toBe(true);
+      expect(source.pendingCount(TOPIC)).toBe(0);
+    });
+
+    test("only the latest write that sets power decides", async () => {
+      ready();
+      const first = source.writeFan(TOPIC, { speed: 50 });
+      advance(50);
+      const off = source.writeFan(TOPIC, { active: false });
+      advance(50);
+      const resume = source.writeFan(TOPIC, { resume: true });
+      advance(50);
+      expect(sent.map(({ payload }) => payload)).toEqual([
+        { request_id: "request-1", power: true, heat_level: 5 },
+        { request_id: "request-2", power: false },
+        { request_id: "request-3", power: true },
+      ]);
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 5 });
+      for (const id of ["request-1", "request-2", "request-3"]) confirm(id);
+      await Promise.all([first, off, resume]);
+    });
+
+    test("a write in flight that leaves power alone does not decide", async () => {
+      ready();
+      const preheat = source.writePreheat(TOPIC, true);
+      const resume = source.writeFan(TOPIC, { resume: true });
+      advance(50);
+      expect(sent.map(({ payload }) => payload)).toEqual([
+        { request_id: "request-1", preheat: true },
+        { request_id: "request-2", power: true },
+      ]);
+      receive(TOPIC, { ...BASELINE, power: true, preheat: true });
+      confirm("request-1");
+      confirm("request-2");
+      await Promise.all([preheat, resume]);
+    });
   });
 
   test("a broker outage cancels coalesced work without publishing after reconnect", async () => {

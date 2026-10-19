@@ -14,12 +14,17 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  aggregateHeatedBeddingStates,
   coalesceHeatedBeddingFanWrites,
+  heatedBeddingIdentity,
+  heatedBeddingResumeOnly,
   heatedBeddingTopic,
+  heatedBeddingTopics,
   normalizeHeatedBeddingSpeed,
   parseHeatedBeddingHeartbeat,
   parseHeatedBeddingResult,
   parseHeatedBeddingState,
+  sortedHeatedBeddingZones,
 } from "../src/heated-bedding-profile.ts";
 
 describe("heated bedding zone topic", () => {
@@ -31,6 +36,125 @@ describe("heated bedding zone topic", () => {
         zone: "side_a",
       }),
     ).toBe("home/tuya/bed/side_a");
+  });
+});
+
+describe("heated bedding entry topics and identity", () => {
+  test("a single zone has one topic and a group has one per zone in order", () => {
+    const base = { prefix: "home/tuya", controller: "bed" };
+    expect(heatedBeddingTopics({ ...base, zone: "side_a" })).toEqual([
+      "home/tuya/bed/side_a",
+    ]);
+    expect(
+      heatedBeddingTopics({ ...base, zones: ["side_b", "side_a"] }),
+    ).toEqual(["home/tuya/bed/side_b", "home/tuya/bed/side_a"]);
+  });
+
+  test("a group's identity ignores zone order and differs from every single zone", () => {
+    expect(
+      heatedBeddingIdentity({
+        controller: "bed",
+        zones: ["side_b", "side_a"],
+      }),
+    ).toBe(
+      heatedBeddingIdentity({
+        controller: "bed",
+        zones: ["side_a", "side_b"],
+      }),
+    );
+    const identities = [
+      heatedBeddingIdentity({ controller: "bed", zone: "side_a" }),
+      heatedBeddingIdentity({ controller: "bed", zone: "side_b" }),
+      heatedBeddingIdentity({ controller: "bed2", zone: "side_a" }),
+      heatedBeddingIdentity({
+        controller: "bed",
+        zones: ["side_a", "side_b"],
+      }),
+      heatedBeddingIdentity({
+        controller: "bed2",
+        zones: ["side_a", "side_b"],
+      }),
+      heatedBeddingIdentity({
+        controller: "bed",
+        zones: ["side_a", "side_c"],
+      }),
+    ];
+    expect(new Set(identities).size).toBe(identities.length);
+  });
+
+  test("zones sort by code unit whatever the locale", () => {
+    expect(sortedHeatedBeddingZones(["a_1", "b", "a1", "a"])).toEqual([
+      "a",
+      "a1",
+      "a_1",
+      "b",
+    ]);
+    const zones = ["b", "a"];
+    sortedHeatedBeddingZones(zones);
+    expect(zones).toEqual(["b", "a"]);
+  });
+});
+
+describe("heated bedding group state", () => {
+  const state = (power: boolean, level: number, preheat = false) => ({
+    power,
+    heat_level: level,
+    preheat,
+  });
+
+  test("a single state aggregates to itself", () => {
+    expect(aggregateHeatedBeddingStates([state(true, 3, true)])).toEqual(
+      state(true, 3, true),
+    );
+    expect(aggregateHeatedBeddingStates([state(false, 3)])).toEqual(
+      state(false, 3),
+    );
+  });
+
+  test("the group is on when any member is on", () => {
+    expect(
+      aggregateHeatedBeddingStates([state(false, 4), state(true, 2)]).power,
+    ).toBe(true);
+    expect(
+      aggregateHeatedBeddingStates([state(true, 2), state(false, 4)]).power,
+    ).toBe(true);
+    expect(
+      aggregateHeatedBeddingStates([state(false, 4), state(false, 2)]).power,
+    ).toBe(false);
+  });
+
+  test("the speed is the highest level among members that are on", () => {
+    expect(
+      aggregateHeatedBeddingStates([
+        state(true, 2),
+        state(false, 9),
+        state(true, 5),
+      ]).heat_level,
+    ).toBe(5);
+  });
+
+  test("the speed is the highest stored level while every member is off", () => {
+    expect(
+      aggregateHeatedBeddingStates([
+        state(false, 2),
+        state(false, 9),
+        state(false, 5),
+      ]).heat_level,
+    ).toBe(9);
+  });
+
+  test("the group preheats when any member does", () => {
+    expect(
+      aggregateHeatedBeddingStates([state(false, 1), state(false, 1, true)])
+        .preheat,
+    ).toBe(true);
+    expect(
+      aggregateHeatedBeddingStates([state(false, 1), state(true, 1)]).preheat,
+    ).toBe(false);
+  });
+
+  test("an empty group has no state", () => {
+    expect(() => aggregateHeatedBeddingStates([])).toThrow(RangeError);
   });
 });
 
@@ -121,6 +245,36 @@ describe("heated bedding fan command", () => {
     ].map((writes) => [writes] as const),
   )("an explicit off preserves level regardless of ordering: %j", (writes) => {
     expect(coalesceHeatedBeddingFanWrites(writes)).toEqual({ power: false });
+  });
+
+  test("a resume asks for power without a level", () => {
+    expect(coalesceHeatedBeddingFanWrites([{ resume: true }])).toEqual({
+      power: true,
+    });
+    expect(heatedBeddingResumeOnly([{ resume: true }, { resume: true }])).toBe(
+      true,
+    );
+  });
+
+  test.each([
+    [{ active: true }],
+    [{ active: false }],
+    [{ speed: 50 }],
+    [{ speed: 0 }],
+  ])("a resume with %j is not resume-only", (write) => {
+    expect(heatedBeddingResumeOnly([{ resume: true }, write])).toBe(false);
+  });
+
+  test("a resume yields to a speed or an explicit off in its window", () => {
+    expect(
+      coalesceHeatedBeddingFanWrites([{ resume: true }, { speed: 50 }]),
+    ).toEqual({ power: true, heat_level: 5 });
+    expect(
+      coalesceHeatedBeddingFanWrites([{ resume: true }, { active: false }]),
+    ).toEqual({ power: false });
+    expect(
+      coalesceHeatedBeddingFanWrites([{ resume: true }, { speed: 0 }]),
+    ).toEqual({ power: false });
   });
 
   test("an empty window cannot produce a command", () => {
