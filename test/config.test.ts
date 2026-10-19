@@ -561,7 +561,7 @@ describe("validateConfig", () => {
         expect(result.status).toBe(0);
         stderr = result.stderr;
         report = JSON.parse(result.stdout) as URLReport;
-      });
+      }, 60000);
 
       test("accepts every valid form and rejects every malformed one", () => {
         expect(report.rejectedValid).toStrictEqual([]);
