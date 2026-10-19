@@ -45,7 +45,14 @@ import {
 import { HeatedBeddingMQTT } from "./heated-bedding-mqtt.ts";
 import { MAX_BACKOFF, MIN_BACKOFF } from "./tucson-mqtt.ts";
 import { tucsonTopic } from "./tucson-profile.ts";
-import type { HeatedBeddingSource } from "./heated-bedding-source.ts";
+import {
+  heatedBeddingIdentity,
+  heatedBeddingTopics,
+} from "./heated-bedding-profile.ts";
+import {
+  heatedBeddingZoneConfigs,
+  type HeatedBeddingSource,
+} from "./heated-bedding-source.ts";
 import {
   createHeatedBeddingAccessories,
   type HeatedBeddingAccessories,
@@ -70,6 +77,7 @@ import {
 import { createMetrics, startMetricsServer } from "./metrics.ts";
 import type {
   HapConnection,
+  HeatedBeddingZoneStatus,
   Metrics,
   MetricsServer,
   StatusData,
@@ -118,14 +126,18 @@ export function buildStatusData(
     })),
     ...(config.heatedBedding?.length
       ? {
-          heatedBedding: config.heatedBedding.map((zone) => {
-            const topic = tucsonTopic(zone);
-            return {
-              name: zone.name,
+          heatedBedding: config.heatedBedding.map((entry) => {
+            const zoneStatus = (topic: string): HeatedBeddingZoneStatus => ({
               topic,
               state: heatedBedding?.usableState(topic) ?? null,
               pending: heatedBedding?.pendingCount(topic) ?? 0,
-            };
+            });
+            return "zones" in entry
+              ? {
+                  name: entry.name,
+                  zones: heatedBeddingTopics(entry).map(zoneStatus),
+                }
+              : { name: entry.name, ...zoneStatus(tucsonTopic(entry)) };
           }),
         }
       : {}),
@@ -264,8 +276,13 @@ export async function startBridge(
     let unknown = config.devices.filter(
       (device) => !stateCache.has(device.topic),
     ).length;
-    for (const zone of config.heatedBedding ?? []) {
-      if (!heatedBedding?.source.usableState(tucsonTopic(zone))) unknown++;
+    for (const entry of config.heatedBedding ?? []) {
+      if (
+        heatedBeddingTopics(entry).some(
+          (topic) => heatedBedding?.source.usableState(topic) === undefined,
+        )
+      )
+        unknown++;
     }
     for (const curtain of config.curtains ?? []) {
       if (!curtains?.source.usableState(tucsonTopic(curtain))) unknown++;
@@ -475,8 +492,9 @@ export async function startBridge(
   }
 
   if (config.heatedBedding?.length) {
+    const zones = heatedBeddingZoneConfigs(config.heatedBedding);
     const zoneTopics = new Map(
-      config.heatedBedding.flatMap((zone) => {
+      zones.flatMap((zone) => {
         const topic = tucsonTopic(zone);
         return [
           [topic, topic],
@@ -484,31 +502,27 @@ export async function startBridge(
         ];
       }),
     );
-    heatedBedding = new HeatedBeddingMQTT(
-      config.mqtt.url,
-      config.heatedBedding,
-      {
-        credentials,
-        changed: () => {
-          for (const accessories of heatedBeddingAccessories)
-            accessories.update();
-          updateMetrics();
-        },
-        received: (topic) => {
-          const zone = zoneTopics.get(topic);
-          if (zone) metrics?.mqttMessagesReceived.labels(zone).inc();
-        },
-        published: () => {
-          metrics?.mqttMessagesPublished.inc();
-        },
-        failed: () => {
-          metrics?.mqttErrors.inc();
-        },
+    heatedBedding = new HeatedBeddingMQTT(config.mqtt.url, zones, {
+      credentials,
+      changed: () => {
+        for (const accessories of heatedBeddingAccessories)
+          accessories.update();
+        updateMetrics();
       },
-    );
-    for (const zone of config.heatedBedding) {
+      received: (topic) => {
+        const zone = zoneTopics.get(topic);
+        if (zone) metrics?.mqttMessagesReceived.labels(zone).inc();
+      },
+      published: () => {
+        metrics?.mqttMessagesPublished.inc();
+      },
+      failed: () => {
+        metrics?.mqttErrors.inc();
+      },
+    });
+    for (const entry of config.heatedBedding) {
       const accessories = createHeatedBeddingAccessories(
-        zone,
+        entry,
         heatedBedding.source,
       );
       for (const [accessory, kind] of [
@@ -519,7 +533,7 @@ export async function startBridge(
           accessory,
           "Hoboken",
           kind,
-          `${zone.controller}/${zone.zone}/${kind}`,
+          `${heatedBeddingIdentity(entry)}/${kind}`,
           version,
         );
         bridge.addBridgedAccessory(accessory);

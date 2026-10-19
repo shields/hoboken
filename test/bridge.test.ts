@@ -619,6 +619,144 @@ describe("startBridge", () => {
     }
   });
 
+  test("a group beside its own zones shares their source and fans HomeKit writes out", async () => {
+    const group = {
+      name: "Bed",
+      prefix: "tuya",
+      controller: "bed",
+      zones: ["side_a", "side_b"],
+    };
+    const config = {
+      ...metricsConfig(),
+      devices: [],
+      heatedBedding: [...HEATED_BEDDING, group],
+    };
+    const count = mockClients.length;
+    const { bridge, metricsPort, shutdown } = await startBridge(config);
+    const client = mockClient;
+    try {
+      expect(mockClients.length - count).toBe(1);
+      expect(
+        bridge.bridgedAccessories.map((accessory) => accessory.displayName),
+      ).toEqual([
+        "Bed Side A",
+        "Bed Side A Preheat",
+        "Bed Side B",
+        "Bed Side B Preheat",
+        "Bed",
+        "Bed Preheat",
+      ]);
+      expect(
+        bridge.bridgedAccessories.map(
+          (accessory) =>
+            accessory
+              .getService(Service.AccessoryInformation)!
+              .getCharacteristic(Characteristic.SerialNumber).value,
+        ),
+      ).toEqual([
+        "bed/side_a/Heated Bedding Fan",
+        "bed/side_a/Heated Bedding Preheat",
+        "bed/side_b/Heated Bedding Fan",
+        "bed/side_b/Heated Bedding Preheat",
+        "bed/side_a,side_b/Heated Bedding Fan",
+        "bed/side_a,side_b/Heated Bedding Preheat",
+      ]);
+      const fan = bridge.bridgedAccessories[4]!.getService(Service.Fanv2)!;
+      const active = fan.getCharacteristic(Characteristic.Active);
+      const speed = fan.getCharacteristic(Characteristic.RotationSpeed);
+      const preheat = bridge.bridgedAccessories[5]!.getService(
+        Service.Switch,
+      )!.getCharacteristic(Characteristic.On);
+      expect(await Promise.allSettled([speed.handleGetRequest()])).toEqual([
+        { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+      ]);
+      readyHeatedBedding(client);
+      expect(
+        Object.keys(client.heatedBeddingSubscriptions!).toSorted((a, b) =>
+          a.localeCompare(b),
+        ),
+      ).toEqual([
+        "tuya/bed/availability",
+        "tuya/bed/side_a",
+        "tuya/bed/side_a/result",
+        "tuya/bed/side_b",
+        "tuya/bed/side_b/result",
+        "tuya/bridge/availability",
+        "tuya/bridge/heartbeat",
+      ]);
+      expect(await speed.handleGetRequest()).toBe(40);
+      expect(await active.handleGetRequest()).toBe(0);
+      const html = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
+      ).text();
+      expect(html).toContain(
+        '<h2>Bed <span class="type-badge">heated bedding group</span></h2>',
+      );
+      const metrics = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`)
+      ).text();
+      expect(metrics).toContain("hoboken_devices_configured 3");
+      expect(metrics).toContain("hoboken_devices_state_unknown 0");
+
+      jest.useFakeTimers();
+      const write = active.handleSetRequest(1);
+      jest.advanceTimersByTime(50);
+      const publications = client.heatedBeddingPublications;
+      expect(publications.map(({ topic }) => topic)).toEqual([
+        "tuya/bed/side_a/set",
+        "tuya/bed/side_b/set",
+      ]);
+      for (const publication of publications) {
+        const command = JSON.parse(publication.message) as {
+          request_id: string;
+          power: boolean;
+        };
+        expect(command).toEqual({
+          request_id: command.request_id,
+          power: true,
+        });
+        publication.complete();
+        const zone = publication.topic.slice(0, -"/set".length);
+        heatedBeddingMessage(client, zone, {
+          ...HEATED_BEDDING_STATE,
+          power: true,
+        });
+        heatedBeddingMessage(client, `${zone}/result`, {
+          request_id: command.request_id,
+          outcome: "confirmed",
+        });
+      }
+      await write;
+      expect(active.value).toBe(1);
+      expect(speed.value).toBe(40);
+      expect(preheat.value).toBe(false);
+      expect(
+        await (
+          await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`)
+        ).text(),
+      ).toContain("hoboken_mqtt_messages_published_total 2");
+
+      heatedBeddingMessage(client, "tuya/bed/side_b", {
+        ...HEATED_BEDDING_STATE,
+        power: null,
+      });
+      expect(await Promise.allSettled([speed.handleGetRequest()])).toEqual([
+        { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+      ]);
+      expect(await Promise.allSettled([active.handleSetRequest(0)])).toEqual([
+        { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+      ]);
+      expect(publications).toHaveLength(2);
+      const degraded = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`)
+      ).text();
+      expect(degraded).toContain("hoboken_devices_state_unknown 2");
+    } finally {
+      await shutdown();
+      jest.useRealTimers();
+    }
+  });
+
   test("mixed bridges keep legacy subscriptions and conversions on their own client", async () => {
     const count = mockClients.length;
     const config = { ...testConfig(), heatedBedding: HEATED_BEDDING };
@@ -3228,8 +3366,8 @@ describe("buildStatusData", () => {
       await outcomes;
       expect(
         buildStatusData(config, stateCache, mqtt, [], "version", source)
-          .heatedBedding![0]!.state,
-      ).toBeNull();
+          .heatedBedding![0],
+      ).toMatchObject({ state: null });
       const badConfig = {
         ...config,
         heatedBedding: [{ ...HEATED_BEDDING[0]!, zone: "unknown" }],
@@ -3237,6 +3375,78 @@ describe("buildStatusData", () => {
       expect(() =>
         buildStatusData(badConfig, stateCache, mqtt, [], "version", source),
       ).toThrow(RangeError);
+    } finally {
+      source.disconnect();
+    }
+  });
+
+  test("a heated bedding group lists the status of each of its zones", async () => {
+    const group = {
+      name: "Bed",
+      prefix: "tuya",
+      controller: "bed",
+      zones: ["side_a", "side_b"],
+    };
+    const config = {
+      ...testConfig(),
+      heatedBedding: [...HEATED_BEDDING, group],
+    };
+    const source = new HeatedBeddingSource(
+      HEATED_BEDDING,
+      (_topic, _payload, complete) => {
+        complete();
+      },
+    );
+    const mqtt = { url: "mqtt://localhost", connected: true };
+    const withoutSource = buildStatusData(
+      config,
+      new Map(),
+      mqtt,
+      [],
+      "version",
+    );
+    expect(withoutSource.heatedBedding![2]).toEqual({
+      name: "Bed",
+      zones: [
+        { topic: "tuya/bed/side_a", state: null, pending: 0 },
+        { topic: "tuya/bed/side_b", state: null, pending: 0 },
+      ],
+    });
+    const generation = source.connect();
+    try {
+      source.subscriptionsReady(generation);
+      source.handle(generation, "tuya/bridge/availability", "online", true);
+      source.handle(generation, "tuya/bed/availability", "online", true);
+      source.handle(
+        generation,
+        "tuya/bridge/heartbeat",
+        { session_id: "live" },
+        false,
+      );
+      source.handle(generation, "tuya/bed/side_b", HEATED_BEDDING_STATE, true);
+      const outcomes = Promise.allSettled([
+        source.writePreheat("tuya/bed/side_b", true),
+      ]);
+      const status = buildStatusData(
+        config,
+        new Map(),
+        mqtt,
+        [],
+        "version",
+        source,
+      );
+      expect(status.heatedBedding![2]).toMatchObject({
+        name: "Bed",
+        zones: [
+          { topic: "tuya/bed/side_a", state: null, pending: 0 },
+          { topic: "tuya/bed/side_b", state: HEATED_BEDDING_STATE, pending: 1 },
+        ],
+      });
+      expect(status.heatedBedding![0]).toMatchObject({
+        topic: "tuya/bed/side_a",
+      });
+      source.disconnect();
+      await outcomes;
     } finally {
       source.disconnect();
     }

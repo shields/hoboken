@@ -1457,6 +1457,116 @@ describe("status page (GET /)", () => {
     return (await fetch(`http://127.0.0.1:${String(addr(ms.server))}/`)).text();
   }
 
+  describe("heated bedding", () => {
+    const reported = (power: boolean, heatLevel: number, preheat = false) => ({
+      session_id: "live",
+      power,
+      heat_level: heatLevel,
+      preheat,
+      auto_off_seconds: 3600,
+      remaining_seconds: 3300,
+      preheat_remaining_seconds: null,
+    });
+
+    async function renderHeatedBedding(
+      heatedBedding: NonNullable<StatusData["heatedBedding"]>,
+    ): Promise<string> {
+      const register = new Registry();
+      const getStatus: GetStatusFn = () => makeStatus({ heatedBedding });
+      ms = startMetricsServer(0, register, undefined, getStatus);
+      await listening(ms.server);
+      return (
+        await fetch(`http://127.0.0.1:${String(addr(ms.server))}/`)
+      ).text();
+    }
+
+    const rows = (active: number, speed: number, preheat: boolean): string =>
+      `<table><tbody><tr><td class="key">Active</td><td>${String(active)}</td></tr>` +
+      `<tr><td class="key">RotationSpeed</td><td>${String(speed)}</td></tr>` +
+      `<tr><td class="key">Preheat On</td><td>${String(preheat)}</td></tr></tbody></table>`;
+
+    test("a zone shows its HomeKit values, reported state, and pending callers", async () => {
+      const body = await renderHeatedBedding([
+        {
+          name: "Bed Side A",
+          topic: "tuya/bed/side_a",
+          state: reported(true, 6, true),
+          pending: 2,
+        },
+      ]);
+      expect(body).toContain(
+        '<h2>Bed Side A <span class="type-badge">heated bedding</span></h2>',
+      );
+      expect(body).toContain(
+        `<div class="label">HomeKit</div>${rows(1, 60, true)}`,
+      );
+      expect(body).toContain(
+        '<div class="label">MQTT state <span class="topic">tuya/bed/side_a</span></div><table><tbody><tr><td class="key">session_id</td>',
+      );
+      expect(body).toContain('<div class="label">Pending callers: 2</div>');
+    });
+
+    test("a zone without usable state shows No Response in both places", async () => {
+      const body = await renderHeatedBedding([
+        {
+          name: "Bed Side A",
+          topic: "tuya/bed/side_a",
+          state: null,
+          pending: 0,
+        },
+      ]);
+      expect(body.match(/No Response/g)).toHaveLength(2);
+    });
+
+    test("a group shows the aggregate beside each zone's reported state", async () => {
+      const body = await renderHeatedBedding([
+        {
+          name: "Bed",
+          zones: [
+            {
+              topic: "tuya/bed/side_a",
+              state: reported(true, 3),
+              pending: 1,
+            },
+            {
+              topic: "tuya/bed/side_b",
+              state: reported(false, 8, true),
+              pending: 0,
+            },
+          ],
+        },
+      ]);
+      expect(body).toContain(
+        '<h2>Bed <span class="type-badge">heated bedding group</span></h2>',
+      );
+      expect(body).toContain(
+        `<div class="label">HomeKit</div>${rows(1, 30, true)}`,
+      );
+      expect(body).toContain('<span class="topic">tuya/bed/side_a</span>');
+      expect(body).toContain('<span class="topic">tuya/bed/side_b</span>');
+      expect(body).toContain('<div class="label">Pending callers: 1</div>');
+      expect(body).toContain('<div class="label">Pending callers: 0</div>');
+      expect(body).not.toContain("No Response");
+    });
+
+    test("a group with a member that has no usable state has no HomeKit values", async () => {
+      const body = await renderHeatedBedding([
+        {
+          name: "Bed",
+          zones: [
+            { topic: "tuya/bed/side_a", state: reported(true, 3), pending: 0 },
+            { topic: "tuya/bed/side_b", state: null, pending: 0 },
+          ],
+        },
+      ]);
+      expect(body).toContain(
+        '<div class="label">HomeKit</div><span class="na">No Response</span>',
+      );
+      expect(body.match(/No Response/g)).toHaveLength(2);
+      expect(body).toContain('<td class="key">heat_level</td><td>3</td>');
+    });
+  });
+
   test("renders an undefined state value as a literal without throwing", async () => {
     const body = await renderDevice({
       name: "Quirky",

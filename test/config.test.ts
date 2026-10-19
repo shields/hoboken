@@ -86,6 +86,14 @@ describe("validateConfig", () => {
     zone: "side_a",
   };
 
+  const sideB = { ...heatedBedding, name: "Bed Side B", zone: "side_b" };
+  const group = {
+    name: "Bed",
+    prefix: "tuya",
+    controller: "bed",
+    zones: ["side_a", "side_b"],
+  };
+
   test("accepts heated bedding zones alongside existing devices", () => {
     const data = {
       ...validConfig(),
@@ -215,6 +223,205 @@ describe("validateConfig", () => {
     },
   );
 
+  describe("heated bedding groups", () => {
+    function groupConfig(...entries: unknown[]): Record<string, unknown> {
+      return { ...validConfig(), heatedBedding: entries };
+    }
+
+    test("accepts a group beside the entries for its own zones", () => {
+      const entries = [
+        { ...heatedBedding, name: "Michael Bed" },
+        { ...sideB, name: "Elizabeth Bed" },
+        group,
+      ];
+      expect(
+        validateConfig(groupConfig(...entries)).heatedBedding,
+      ).toStrictEqual(entries);
+    });
+
+    test("accepts a bridge with only a group and keeps the zone order as written", () => {
+      const reversed = { ...group, zones: ["side_b", "side_a"] };
+      const config = validateConfig({
+        ...validConfig(),
+        devices: [],
+        heatedBedding: [reversed],
+      });
+      expect(config.devices).toEqual([]);
+      expect(config.heatedBedding).toStrictEqual([reversed]);
+    });
+
+    test("does not keep the caller's zones array", () => {
+      const config = validateConfig(groupConfig(group));
+      expect(config.heatedBedding![0]).not.toHaveProperty("zone");
+      expect((config.heatedBedding![0] as typeof group).zones).not.toBe(
+        group.zones,
+      );
+    });
+
+    test("accepts groups that overlap, nest, or sit on another controller", () => {
+      const data = groupConfig(
+        group,
+        { ...group, name: "Pair", zones: ["side_b", "side_c"] },
+        { ...group, name: "Trio", zones: ["side_a", "side_b", "side_c"] },
+        { ...group, name: "Other", controller: "bed2" },
+      );
+      expect(validateConfig(data).heatedBedding).toHaveLength(4);
+    });
+
+    test("rejects an entry with both zone and zones", () => {
+      expect(() =>
+        validateConfig(groupConfig({ ...group, zone: "side_a" })),
+      ).toThrow("heatedBedding[0]: exactly one of zone or zones is required");
+    });
+
+    test("rejects an entry with neither zone nor zones", () => {
+      const { name, prefix, controller } = group;
+      expect(() =>
+        validateConfig(groupConfig({ name, prefix, controller })),
+      ).toThrow("heatedBedding[0]: exactly one of zone or zones is required");
+    });
+
+    test.each([[null], ["side_a"], [{}], [[]], [["side_a"]]])(
+      "rejects zones %j that is not a list of at least two",
+      (zones) => {
+        expect(() => validateConfig(groupConfig({ ...group, zones }))).toThrow(
+          "heatedBedding[0].zones must be an array of at least two Tucson zone names",
+        );
+      },
+    );
+
+    test.each([
+      "",
+      "Uppercase",
+      "with space",
+      "with/slash",
+      "+",
+      "#",
+      "x".repeat(65),
+      false,
+      null,
+      5,
+    ])("rejects the invalid zone name %j", (name) => {
+      expect(() =>
+        validateConfig(groupConfig({ ...group, zones: ["side_a", name] })),
+      ).toThrow("heatedBedding[0].zones[1] must be a valid Tucson zone name");
+    });
+
+    test("rejects a repeated zone", () => {
+      expect(() =>
+        validateConfig(
+          groupConfig({ ...group, zones: ["side_a", "side_b", "side_a"] }),
+        ),
+      ).toThrow("heatedBedding[0].zones must not repeat a zone");
+    });
+
+    test.each([
+      { ...group, controller: "bridge" },
+      { ...group, zones: ["side_a", "availability"] },
+    ])("rejects reserved Tucson group identities: %j", (entry) => {
+      expect(() => validateConfig(groupConfig(entry))).toThrow(
+        "reserved Tucson topic",
+      );
+    });
+
+    test.each([
+      ["another order", { ...group, zones: ["side_b", "side_a"] }],
+      ["another name", { ...group, name: "Renamed" }],
+      ["another prefix", { ...group, prefix: "another/prefix" }],
+    ])(
+      "rejects a second group with the same zones under %s",
+      (_case, second) => {
+        expect(() => validateConfig(groupConfig(group, second))).toThrow(
+          "heatedBedding[1]: duplicate Tucson identity",
+        );
+      },
+    );
+
+    test("a zone keeps one prefix across singles and groups", () => {
+      const elsewhere = { ...group, prefix: "another/prefix" };
+      expect(() =>
+        validateConfig(groupConfig(heatedBedding, elsewhere)),
+      ).toThrow(
+        'heatedBedding[1]: Tucson zone "bed/side_a" is configured with more than one prefix',
+      );
+      expect(() => validateConfig(groupConfig(elsewhere, sideB))).toThrow(
+        'heatedBedding[1]: Tucson zone "bed/side_b" is configured with more than one prefix',
+      );
+      expect(() =>
+        validateConfig(
+          groupConfig(group, { ...elsewhere, zones: ["side_b", "side_c"] }),
+        ),
+      ).toThrow('Tucson zone "bed/side_b" is configured');
+    });
+
+    test("a group's zone cannot be another zone's route", () => {
+      const nested = {
+        ...group,
+        prefix: "tuya/bed",
+        controller: "side_a",
+        zones: ["result", "side_c"],
+      };
+      expect(() => validateConfig(groupConfig(heatedBedding, nested))).toThrow(
+        'Tucson topic "tuya/bed/side_a/result" is used by both zone tuya/bed/side_a and zone tuya/bed/side_a/result',
+      );
+    });
+
+    test.each([
+      "tuya/bed/side_b",
+      "tuya/bed/side_b/result",
+      "tuya/bed/side_b/set",
+      "tuya/bed/side_b/get",
+    ])("rejects a device on the route %s of a group's second zone", (topic) => {
+      const data = validConfig();
+      data.devices[0]!.topic = topic;
+      expect(() => validateConfig({ ...data, heatedBedding: [group] })).toThrow(
+        "collides with a Tucson topic",
+      );
+    });
+
+    test("rejects wildcard device topics beside a group", () => {
+      const data = validConfig();
+      data.devices[0]!.topic = "tuya/#";
+      expect(() => validateConfig({ ...data, heatedBedding: [group] })).toThrow(
+        "wildcard device topics cannot accompany Tucson endpoints",
+      );
+    });
+
+    test("curtains are single zones, so a curtain entry cannot list zones", () => {
+      const { name, prefix, controller } = heatedBedding;
+      expect(
+        errorMessage(() =>
+          validateConfig({
+            ...validConfig(),
+            curtains: [{ name, prefix, controller, zones: group.zones }],
+          }),
+        ),
+      ).toBe(
+        'curtains[0]: unknown field "zones"; supported fields are name, prefix, controller, and zone',
+      );
+    });
+
+    test("rejects a curtain on a zone that a group lists", () => {
+      expect(() =>
+        validateConfig({
+          ...validConfig(),
+          heatedBedding: [group],
+          curtains: [{ ...sideB, name: "Curtain" }],
+        }),
+      ).toThrow("Duplicate Tucson endpoint");
+    });
+
+    test("rejects an unknown field without its value", () => {
+      const message = errorMessage(() =>
+        validateConfig(groupConfig({ ...group, topic: "never-log-value" })),
+      );
+      expect(message).toBe(
+        'heatedBedding[0]: unknown field "topic"; supported fields are name, prefix, controller, zone, and zones',
+      );
+      expect(message).not.toContain("never-log-value");
+    });
+  });
+
   test.each([
     "device_id",
     "local_key",
@@ -229,7 +436,7 @@ describe("validateConfig", () => {
       }),
     );
     expect(message).toBe(
-      `heatedBedding[0]: unknown field ${JSON.stringify(key)}; supported fields are name, prefix, controller, and zone`,
+      `heatedBedding[0]: unknown field ${JSON.stringify(key)}; supported fields are name, prefix, controller, zone, and zones`,
     );
     expect(message).not.toContain("never-log-value");
   });
@@ -832,7 +1039,7 @@ describe("validateConfig", () => {
       })),
       ...[0, 1].map((index) => ({
         path: `heatedBedding[${String(index)}]`,
-        fields: "name, prefix, controller, and zone",
+        fields: "name, prefix, controller, zone, and zones",
         required: "zone",
         build: (changes: Record<string, unknown>) => {
           const entries: unknown[] = [
@@ -939,7 +1146,7 @@ describe("validateConfig", () => {
             scenes: [{ name: "Movie Mode", id: 1 }],
           },
         ],
-        heatedBedding: [heatedBedding],
+        heatedBedding: [heatedBedding, group],
         curtains: [{ ...heatedBedding, controller: "window", zone: "curtain" }],
         metrics: { port: 9090, bind: "127.0.0.1" },
       };

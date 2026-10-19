@@ -35,12 +35,19 @@ import { freePort, poll, TestBroker } from "./test-broker.ts";
 
 const PREFIX = "heated_bedding_test";
 const TOPIC = `${PREFIX}/bed/side_a`;
+const RIGHT_TOPIC = `${PREFIX}/bed/side_b`;
 const ZONES = ["side_a", "side_b"].map((zone) => ({
   name: `Bed Side ${zone === "side_a" ? "A" : "B"}`,
   prefix: PREFIX,
   controller: "bed",
   zone,
 }));
+const GROUP = {
+  name: "Bed",
+  prefix: PREFIX,
+  controller: "bed",
+  zones: ["side_a", "side_b"],
+};
 
 interface WireCharacteristic {
   aid: number;
@@ -65,8 +72,14 @@ describe(
     let active: string;
     let speed: string;
     let preheat: string;
+    let rightActive: string;
     let rightSpeed: string;
+    let rightPreheat: string;
+    let groupActive: string;
+    let groupSpeed: string;
+    let groupPreheat: string;
     let mode: "confirm" | "drop" | "reject" = "confirm";
+    let rejectedTopic: string | undefined;
     let session = "session-0";
     let sessions = 0;
     const commands: { topic: string; command: Command }[] = [];
@@ -111,7 +124,7 @@ describe(
         commands.push({ topic, command });
         if (mode === "drop") return;
         const stateTopic = topic.slice(0, -4);
-        if (mode === "reject") {
+        if (mode === "reject" || stateTopic === rejectedTopic) {
           void publish(`${stateTopic}/result`, {
             request_id: command.request_id,
             outcome: "rejected",
@@ -160,8 +173,20 @@ describe(
         assert.equal(characteristic.status ?? 0, expectedStatus);
     }
 
+    function sentSince(count: number): [string, object][] {
+      return commands
+        .slice(count)
+        .map(({ topic, command }): [string, object] => [
+          topic.slice(0, -"/set".length),
+          Object.fromEntries(
+            Object.entries(command).filter(([key]) => key !== "request_id"),
+          ),
+        ])
+        .toSorted(([a], [b]) => a.localeCompare(b));
+    }
+
     async function unavailable(): Promise<boolean> {
-      return (await get(speed, rightSpeed)).every(
+      return (await get(speed, rightSpeed, groupSpeed)).every(
         (characteristic) =>
           characteristic.status === HAPStatus.SERVICE_COMMUNICATION_FAILURE,
       );
@@ -188,6 +213,7 @@ describe(
 
     async function baseline(): Promise<void> {
       mode = "confirm";
+      rejectedTopic = undefined;
       warnings.length = 0;
       sessions++;
       session = `session-${String(sessions)}`;
@@ -196,15 +222,29 @@ describe(
       await publish(`${PREFIX}/bridge/heartbeat`, { session_id: session });
       await poll(async () => {
         const values = new Map(
-          (await get(active, speed, preheat, rightSpeed)).map(
-            ({ aid, iid, value }) => [`${String(aid)}.${String(iid)}`, value],
-          ),
+          (
+            await get(
+              active,
+              speed,
+              preheat,
+              rightSpeed,
+              groupActive,
+              groupSpeed,
+              groupPreheat,
+            )
+          ).map(({ aid, iid, value }) => [
+            `${String(aid)}.${String(iid)}`,
+            value,
+          ]),
         );
         return (
           values.get(active) === 0 &&
           values.get(speed) === 40 &&
           values.get(preheat) === 0 &&
-          values.get(rightSpeed) === 40
+          values.get(rightSpeed) === 40 &&
+          values.get(groupActive) === 0 &&
+          values.get(groupSpeed) === 40 &&
+          values.get(groupPreheat) === 0
         );
       });
     }
@@ -235,7 +275,7 @@ describe(
         },
         mqtt: { url: broker.url },
         devices: [],
-        heatedBedding: ZONES,
+        heatedBedding: [...ZONES, GROUP],
         metrics: { port: 0, bind: "127.0.0.1" },
       });
       handle.bridge.on("characteristic-warning", (warning) => {
@@ -248,18 +288,38 @@ describe(
       );
       await client.pairSetup("031-45-154");
       const accessories = handle.bridge.bridgedAccessories;
-      const left = accessories[0];
-      const switchAccessory = accessories[1];
-      const right = accessories[2];
-      assert(left && switchAccessory && right);
-      const fan = left.getService(Service.Fanv2);
-      const rightFan = right.getService(Service.Fanv2);
-      const preheatSwitch = switchAccessory.getService(Service.Switch);
-      assert(fan && rightFan && preheatSwitch);
-      active = `${String(left.aid)}.${String(fan.getCharacteristic(Characteristic.Active).iid)}`;
-      speed = `${String(left.aid)}.${String(fan.getCharacteristic(Characteristic.RotationSpeed).iid)}`;
-      rightSpeed = `${String(right.aid)}.${String(rightFan.getCharacteristic(Characteristic.RotationSpeed).iid)}`;
-      preheat = `${String(switchAccessory.aid)}.${String(preheatSwitch.getCharacteristic(Characteristic.On).iid)}`;
+      assert.equal(accessories.length, 6);
+      const key = (
+        accessory: (typeof accessories)[number] | undefined,
+        service: typeof Service.Fanv2 | typeof Service.Switch,
+        characteristic:
+          | typeof Characteristic.Active
+          | typeof Characteristic.RotationSpeed
+          | typeof Characteristic.On,
+      ): string => {
+        assert(accessory);
+        const iid = accessory
+          .getService(service)
+          ?.getCharacteristic(characteristic).iid;
+        return `${String(accessory.aid)}.${String(iid)}`;
+      };
+      active = key(accessories[0], Service.Fanv2, Characteristic.Active);
+      speed = key(accessories[0], Service.Fanv2, Characteristic.RotationSpeed);
+      preheat = key(accessories[1], Service.Switch, Characteristic.On);
+      rightActive = key(accessories[2], Service.Fanv2, Characteristic.Active);
+      rightSpeed = key(
+        accessories[2],
+        Service.Fanv2,
+        Characteristic.RotationSpeed,
+      );
+      rightPreheat = key(accessories[3], Service.Switch, Characteristic.On);
+      groupActive = key(accessories[4], Service.Fanv2, Characteristic.Active);
+      groupSpeed = key(
+        accessories[4],
+        Service.Fanv2,
+        Characteristic.RotationSpeed,
+      );
+      groupPreheat = key(accessories[5], Service.Switch, Characteristic.On);
     });
 
     after(async () => {
@@ -323,6 +383,190 @@ describe(
         state.preheat = false;
         await publish(TOPIC, state, true);
         await poll(async () => (await value(preheat)) === 0);
+      });
+
+      test("the group's Active on powers on only the members that are off", async () => {
+        await write({ [active]: 1 });
+        let count = commands.length;
+        await write({ [groupActive]: 1 });
+        assert.deepEqual(sentSince(count), [[RIGHT_TOPIC, { power: true }]]);
+        assert.equal(await value(groupActive), 1);
+        assert.equal(await value(rightActive), 1);
+        assert.equal(await value(speed), 40);
+        assert.equal(await value(rightSpeed), 40);
+        assert.equal(await value(groupSpeed), 40);
+        count = commands.length;
+        await write({ [groupActive]: 1 });
+        await delay(150);
+        assert.equal(commands.length, count);
+      });
+
+      test("the group's Active off powers off every member and keeps their levels", async () => {
+        await write({ [groupSpeed]: 70 });
+        const count = commands.length;
+        await write({ [groupActive]: 0 });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: false }],
+          [RIGHT_TOPIC, { power: false }],
+        ]);
+        for (const key of [active, rightActive, groupActive])
+          assert.equal(await value(key), 0);
+        for (const key of [speed, rightSpeed, groupSpeed])
+          assert.equal(await value(key), 70);
+      });
+
+      test("the group's speed sets every member and zero powers them off", async () => {
+        let count = commands.length;
+        await write({ [groupSpeed]: 70 });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: true, heat_level: 7 }],
+          [RIGHT_TOPIC, { power: true, heat_level: 7 }],
+        ]);
+        for (const key of [speed, rightSpeed, groupSpeed])
+          assert.equal(await value(key), 70);
+        for (const key of [active, rightActive, groupActive])
+          assert.equal(await value(key), 1);
+        count = commands.length;
+        await write({ [groupSpeed]: 0 });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: false }],
+          [RIGHT_TOPIC, { power: false }],
+        ]);
+        for (const key of [active, rightActive, groupActive])
+          assert.equal(await value(key), 0);
+        for (const key of [speed, rightSpeed, groupSpeed])
+          assert.equal(await value(key), 70);
+      });
+
+      test("the group's off wins over its speed in either HTTP write order", async () => {
+        for (const input of [
+          { [groupSpeed]: 80, [groupActive]: 0 },
+          { [groupActive]: 0, [groupSpeed]: 80 },
+        ]) {
+          const count = commands.length;
+          await write(input);
+          assert.deepEqual(sentSince(count), [
+            [TOPIC, { power: false }],
+            [RIGHT_TOPIC, { power: false }],
+          ]);
+          assert.equal(await value(groupSpeed), 40);
+          assert.equal(await value(groupActive), 0);
+        }
+      });
+
+      test("a zone's write in the group's HTTP request is coalesced per zone", async () => {
+        let count = commands.length;
+        await write({ [groupSpeed]: 50, [rightSpeed]: 20 });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: true, heat_level: 5 }],
+          [RIGHT_TOPIC, { power: true, heat_level: 2 }],
+        ]);
+        assert.equal(await value(speed), 50);
+        assert.equal(await value(rightSpeed), 20);
+        assert.equal(await value(groupSpeed), 50);
+        count = commands.length;
+        await write({ [speed]: 90, [groupActive]: 0 });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: false }],
+          [RIGHT_TOPIC, { power: false }],
+        ]);
+        count = commands.length;
+        await write({ [rightActive]: 0, [groupActive]: 1 });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: true }],
+          [RIGHT_TOPIC, { power: false }],
+        ]);
+        assert.equal(await value(groupActive), 1);
+        assert.equal(await value(rightActive), 0);
+        assert.equal(await value(groupSpeed), 50);
+      });
+
+      test("the group reports any member on at the highest level of those on", async () => {
+        const left = states.get(TOPIC);
+        const right = states.get(RIGHT_TOPIC);
+        assert(left && right);
+        Object.assign(left, { power: false, heat_level: 6 });
+        Object.assign(right, { power: true, heat_level: 3 });
+        await publish(TOPIC, left, true);
+        await publish(RIGHT_TOPIC, right, true);
+        await poll(
+          async () =>
+            (await value(groupSpeed)) === 30 &&
+            (await value(groupActive)) === 1,
+        );
+        right.power = false;
+        await publish(RIGHT_TOPIC, right, true);
+        await poll(
+          async () =>
+            (await value(groupSpeed)) === 60 &&
+            (await value(groupActive)) === 0,
+        );
+      });
+
+      test("the group's preheat follows its members and writes reach all of them", async () => {
+        let count = commands.length;
+        await write({ [groupPreheat]: true });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { preheat: true }],
+          [RIGHT_TOPIC, { preheat: true }],
+        ]);
+        for (const key of [preheat, rightPreheat, groupPreheat])
+          assert.equal(await value(key), 1);
+        const right = states.get(RIGHT_TOPIC);
+        assert(right);
+        right.preheat = false;
+        await publish(RIGHT_TOPIC, right, true);
+        await poll(async () => (await value(rightPreheat)) === 0);
+        assert.equal(await value(groupPreheat), 1);
+        count = commands.length;
+        await write({ [groupPreheat]: false });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { preheat: false }],
+          [RIGHT_TOPIC, { preheat: false }],
+        ]);
+        for (const key of [preheat, rightPreheat, groupPreheat])
+          assert.equal(await value(key), 0);
+      });
+
+      test("a member's rejection fails the group's write while the other member keeps its change", async () => {
+        rejectedTopic = RIGHT_TOPIC;
+        const count = commands.length;
+        await write({ [groupSpeed]: 70 }, HAPStatus.INVALID_VALUE_IN_REQUEST);
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: true, heat_level: 7 }],
+          [RIGHT_TOPIC, { power: true, heat_level: 7 }],
+        ]);
+        assert.equal(await value(speed), 70);
+        assert.equal(await value(active), 1);
+        assert.equal(await value(rightSpeed), 40);
+        assert.equal(await value(rightActive), 0);
+        assert.equal(await value(groupSpeed), 70);
+        assert.equal(await value(groupActive), 1);
+      });
+
+      test("the group is unavailable while any member is, and refuses writes", async () => {
+        const right = states.get(RIGHT_TOPIC);
+        assert(right);
+        await publish(RIGHT_TOPIC, { ...right, power: null }, true);
+        await poll(
+          async () =>
+            (await get(groupSpeed))[0]?.status ===
+            HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+        );
+        assert.equal(await value(speed), 40);
+        assert.equal(
+          (await get(rightSpeed))[0]?.status,
+          HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+        );
+        const count = commands.length;
+        await write(
+          { [groupSpeed]: 70 },
+          HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+        );
+        await delay(150);
+        assert.equal(commands.length, count);
+        await publish(RIGHT_TOPIC, right, true);
+        await poll(async () => (await value(groupSpeed)) === 40);
       });
 
       test("rejected writes preserve reported values", async () => {

@@ -57,12 +57,12 @@ Each module is independently testable with dependency injection:
 - `src/convert.ts` — Pure value conversion functions (Z2M ↔ HomeKit)
 - `src/accessories.ts` — HAP accessory/scene creation, takes `PublishFn`/`GetStateFn`
 - `src/bridge.ts` — MQTT client, bridge wiring, state cache, lifecycle
-- `src/heated-bedding-profile.ts` — Pure heated bedding payload parsing, topic naming, and fan write coalescing
+- `src/heated-bedding-profile.ts` — Pure heated bedding payload parsing, topic naming, fan write coalescing, and group identity and state aggregation
 - `src/heated-bedding-source.ts` — Heated bedding availability, session, and confirmed-write state machine, injected publish/clock
 - `src/tucson-mqtt.ts` — Dedicated MQTT 5 connection, credentials, URL checks, and reconnect policy shared by the heated bedding and curtain sources
 - `src/heated-bedding-mqtt.ts` — Binds `TucsonMQTT` to the heated bedding source
 - `src/curtain-mqtt.ts` — Binds `TucsonMQTT` to the curtain source
-- `src/heated-bedding-accessories.ts` — Fan and preheat accessories backed by the heated bedding source
+- `src/heated-bedding-accessories.ts` — Fan and preheat accessories backed by the heated bedding source, for one zone or a group of zones
 - `src/main.ts` — Entry point (~10 lines)
 
 ## Key Design Decisions
@@ -79,6 +79,31 @@ Each module is independently testable with dependency injection:
   tears down the whole heated bedding connection, which reconnects with backoff,
   instead of invalidating only the affected zone. Partially invalid state isn't
   trusted, so every zone starts over from a clean MQTT session.
+- **Heated bedding groups**: a `zones` entry has no source state of its own.
+  `createHeatedBeddingAccessories` gives it a control that reads every member
+  through `usableState` and writes every member through the same
+  `writeFan`/`writePreheat` path as the member's own accessory, so coalescing,
+  explicit-off precedence, caller limits, confirmation, and the sequence rule
+  apply to each member and writes in flight on the group and on a member need no
+  coordination between them. The group reads as on while any member is on, with
+  the highest level among those on, or the highest stored level while all are
+  off (`aggregateHeatedBeddingStates`); it is unavailable if any member is, and
+  a write checks every member first so that none is sent a command when one is
+  unavailable. Active on is a `{ resume: true }` fan write rather than
+  `{ active: true }`: a window of only resumes sends nothing to a zone whose
+  power is on, deciding by the latest in-flight write that sets power and
+  otherwise by reported power, and a resume that finds a power-on in flight
+  joins its waiters instead of sending another command. Any other write in the
+  window makes the resume an ordinary power on, and an off still wins. Every
+  other group write sends the per-zone write to all members. A group write
+  resolves only when every member does; each failure is logged once with the
+  zone's topic as `group_write_failed`, the first failure in the listed order
+  supplies the HAP error, and members that succeeded are not rolled back. The
+  `changed` observer updates the group's accessories like any zone's. The
+  source gets the distinct zones of all entries (`heatedBeddingZoneConfigs`),
+  because it rejects a repeated zone. The status page lists a group as its
+  members' states beside the aggregate, and the unknown-state metric counts a
+  group once, as unknown if any member is.
 - **No config reload**: restart the container for config changes.
 - **MQTT credentials**: `Config` holds only `mqtt.username` and the password
   file path. `main.ts` calls `resolveMQTTCredentials(config.mqtt)` and passes
@@ -302,19 +327,27 @@ make lint test
   a configuration with only heated bedding can omit `devices` or use an empty array
 - Each device: `name`, `topic`, `capabilities` (non-empty, valid values)
 - Scene IDs: positive integers
-- `heatedBedding`: optional array of `name`, `prefix`, `controller`, and `zone`
+- `heatedBedding`: optional array of `name`, `prefix`, `controller`, and exactly
+  one of `zone` or `zones`; `zones` lists at least two distinct zones of that
+  controller and prefix
 - Heated bedding topics use Tucson's lowercase controller/zone identifiers and prefix
   grammar; `bridge` controllers and `availability` zones are reserved
-- Controller/zone pairs are unique across prefixes because they determine HAP
-  accessory identities
+- Identities determine HAP accessory identities and are unique across prefixes:
+  a single zone's is its controller and zone, a group's is its controller and
+  its set of zones (`heatedBeddingIdentity`), independent of order, name, and
+  prefix. A zone name has no comma, so a group's never equals a single zone's.
+  A group's zones may also be configured as entries of their own, and groups
+  may overlap, but a controller/zone pair keeps one prefix across every entry
 - Heated bedding routes cannot overlap device routes; wildcard device topics cannot
-  accompany heated bedding
+  accompany heated bedding. An entry's routes are those of each of its zones,
+  and a zone shared by entries has the same owner in each, so it is no overlap
 - Heated bedding entries contain only logical MQTT names
 
 ## Tucson curtains
 
-- `curtains` entries use `name`, `prefix`, `controller`, and `zone`, like
-  `heatedBedding`. A curtain-only configuration may omit `devices`.
+- `curtains` entries use `name`, `prefix`, `controller`, and `zone`, like a
+  single-zone `heatedBedding` entry; groups with `zones` apply only to heated
+  bedding. A curtain-only configuration may omit `devices`.
 - `tucson-source.ts`, `tucson-mqtt.ts`, and `tucson-profile.ts` own the shared
   MQTT session, request/result, and wire-validation behavior. Bedding and
   curtain modules supply state parsing and accessory behavior.

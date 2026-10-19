@@ -17,6 +17,10 @@ import { createServer } from "node:http";
 import type { Server, ServerResponse } from "node:http";
 import { Counter, Gauge, Registry, collectDefaultMetrics } from "prom-client";
 import type { Capability, DeviceType } from "./config.ts";
+import {
+  aggregateHeatedBeddingStates,
+  type HeatedBeddingSummary,
+} from "./heated-bedding-profile.ts";
 import type { UsableHeatedBeddingState } from "./heated-bedding-source.ts";
 import {
   clampColorTemp,
@@ -132,6 +136,16 @@ export interface DeviceStatus {
   state: Record<string, unknown> | null;
 }
 
+export interface HeatedBeddingZoneStatus {
+  topic: string;
+  state: UsableHeatedBeddingState | null;
+  pending: number;
+}
+
+export type HeatedBeddingStatus =
+  | ({ name: string } & HeatedBeddingZoneStatus)
+  | { name: string; zones: HeatedBeddingZoneStatus[] };
+
 export interface StatusData {
   mqtt: { url: string; connected: boolean };
   hap: { connections: HapConnection[] };
@@ -143,12 +157,7 @@ export interface StatusData {
     state: CurtainState | null;
     pending: number;
   }[];
-  heatedBedding?: {
-    name: string;
-    topic: string;
-    state: UsableHeatedBeddingState | null;
-    pending: number;
-  }[];
+  heatedBedding?: HeatedBeddingStatus[];
 }
 
 export type GetStatusFn = () => StatusData;
@@ -579,6 +588,38 @@ function renderHomeKitSection(
   return `<div class="label">HomeKit</div>\n<table><tbody>${rowsHtml}</tbody></table>`;
 }
 
+function renderHeatedBeddingHomeKit(
+  summary: HeatedBeddingSummary | null,
+): string {
+  return summary === null
+    ? '<span class="na">No Response</span>'
+    : `<table><tbody>${(
+        [
+          ["Active", String(Number(summary.power))],
+          ["RotationSpeed", String(summary.heat_level * 10)],
+          ["Preheat On", String(summary.preheat)],
+        ] as const
+      )
+        .map(
+          ([name, value]) =>
+            `<tr><td class="key">${name}</td><td>${value}</td></tr>`,
+        )
+        .join("")}</tbody></table>`;
+}
+
+function renderHeatedBeddingZone(zone: HeatedBeddingZoneStatus): string {
+  const rows =
+    zone.state === null
+      ? '<span class="na">No Response</span>'
+      : `<table><tbody>${Object.entries(zone.state)
+          .map(
+            ([key, value]) =>
+              `<tr><td class="key">${escapeHtml(key)}</td><td>${escapeHtml(formatValue(value))}</td></tr>`,
+          )
+          .join("")}</tbody></table>`;
+  return `<div class="label">MQTT state <span class="topic">${escapeHtml(zone.topic)}</span></div>${rows}<div class="label">Pending callers: ${String(zone.pending)}</div>`;
+}
+
 function renderStatusContent(data: StatusData): string {
   let devicesHtml = "";
   const sortedDevices = data.devices.toSorted((a, b) =>
@@ -631,32 +672,14 @@ function renderStatusContent(data: StatusData): string {
       </div>`;
   }
 
-  for (const zone of data.heatedBedding ?? []) {
-    const homeKit =
-      zone.state === null
-        ? '<span class="na">No Response</span>'
-        : `<table><tbody>${(
-            [
-              ["Active", String(Number(zone.state.power))],
-              ["RotationSpeed", String(zone.state.heat_level * 10)],
-              ["Preheat On", String(zone.state.preheat)],
-            ] as const
-          )
-            .map(
-              ([name, value]) =>
-                `<tr><td class="key">${name}</td><td>${value}</td></tr>`,
-            )
-            .join("")}</tbody></table>`;
-    const rows =
-      zone.state === null
-        ? '<span class="na">No Response</span>'
-        : `<table><tbody>${Object.entries(zone.state)
-            .map(
-              ([key, value]) =>
-                `<tr><td class="key">${escapeHtml(key)}</td><td>${escapeHtml(formatValue(value))}</td></tr>`,
-            )
-            .join("")}</tbody></table>`;
-    devicesHtml += `<div class="device"><h2>${escapeHtml(zone.name)} <span class="type-badge">heated bedding</span></h2><div class="label">HomeKit</div>${homeKit}<div class="label">MQTT state <span class="topic">${escapeHtml(zone.topic)}</span></div>${rows}<div class="label">Pending callers: ${String(zone.pending)}</div></div>`;
+  for (const entry of data.heatedBedding ?? []) {
+    const zones = "zones" in entry ? entry.zones : [entry];
+    const states = zones.map((zone) => zone.state);
+    const summary = states.every((state) => state !== null)
+      ? aggregateHeatedBeddingStates(states)
+      : null;
+    const badge = "zones" in entry ? "heated bedding group" : "heated bedding";
+    devicesHtml += `<div class="device"><h2>${escapeHtml(entry.name)} <span class="type-badge">${badge}</span></h2><div class="label">HomeKit</div>${renderHeatedBeddingHomeKit(summary)}${zones.map((zone) => renderHeatedBeddingZone(zone)).join("")}</div>`;
   }
 
   for (const curtain of data.curtains ?? []) {

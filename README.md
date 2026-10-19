@@ -7,7 +7,8 @@ and Siri voice commands.
 Tucson's MQTT profile adds support for heated mattress pads and heated blankets
 (heated bedding). Each configured zone appears as a ten-level fan and a
 separate stateful preheat switch, with short display names such as "Bed Side A"
-and "Bed Side A Preheat".
+and "Bed Side A Preheat". A group of zones can appear the same way, as one fan
+and one preheat switch for the whole bed.
 
 It also provides an HTTP endpoint with a live-updating dashboard presenting all
 data in both MQTT and HAP forms, as well as Prometheus metrics and health check
@@ -102,9 +103,57 @@ Match these logical names to Tucson's configuration. A bridge with only heated b
 can omit `devices` or set it to `[]`. Controller/zone pairs must be unique
 even across prefixes, because they determine accessory identities. Display
 names and prefixes can change without changing those identities. Heated bedding
-configuration contains only these four fields, and any other field fails
-startup; Tucson owns controller credentials, protocol versions, and device
-connections.
+configuration contains only `name`, `prefix`, `controller`, and `zone` or
+`zones`, and any other field fails startup; Tucson owns controller credentials,
+protocol versions, and device connections.
+
+An entry can give `zones` instead of `zone` to control several zones of one
+controller as a group:
+
+```yaml
+heatedBedding:
+  - name: "Michael Bed"
+    prefix: "tuya"
+    controller: "bed"
+    zone: "side_a"
+  - name: "Elizabeth Bed"
+    prefix: "tuya"
+    controller: "bed"
+    zone: "side_b"
+  - name: "Bed"
+    prefix: "tuya"
+    controller: "bed"
+    zones: ["side_a", "side_b"]
+```
+
+Each entry has exactly one of `zone` and `zones`, and a group lists at least
+two distinct zones. A group can sit beside the entries for its own zones, as
+above, and shares their connection and per-zone writes. A group's identity
+comes from its controller and its set of zones, so reordering the zones,
+renaming the group, or changing the prefix keeps its accessories, and it never
+matches the identity of a single zone. Two groups over the same zones are
+duplicates; groups that merely share a zone are allowed. A controller/zone pair
+must use one prefix everywhere it appears.
+
+A group's fan is on while any of its zones is on. Its speed is the highest
+level among the zones that are on, or the highest stored level while all are
+off. Active on powers on each zone that is off, and each resumes its own stored
+level; a zone that is already on is left alone. Active off powers off every
+zone and preserves their levels. A positive RotationSpeed sets every zone to
+that level, which turns it on, and zero powers off every zone and preserves
+their levels. An explicit off takes precedence over other fan writes in the
+same 50 ms window, including writes to a zone's own fan. The preheat switch is
+on while any zone preheats; turning it on preheats every zone and turning it
+off cancels preheat on every zone.
+
+A group write goes to each zone through the same confirmed path as that zone's
+own accessory, so writes to the group and to a zone's accessory that are in
+flight together stay consistent. The write succeeds only when every zone's
+command is confirmed. Otherwise it returns the HomeKit error that the first
+failing zone, in the order listed, returned, and the bridge logs a
+`group_write_failed` event for each failing zone. Zones whose commands were
+confirmed keep their change. A group is unavailable ("No Response") while any
+of its zones is, and refuses writes without sending any command.
 
 The fan's Active control changes power. RotationSpeed zero turns power off
 and preserves the selected level; positive values select levels 1–10 in
@@ -251,7 +300,7 @@ the value.
 | `metrics`                  | `port`, `bind`                                                      |
 | each `devices` entry       | `name`, `type`, `topic`, `capabilities`, `scenes`                   |
 | each `scenes` entry        | `name`, `id`                                                        |
-| each `heatedBedding` entry | `name`, `prefix`, `controller`, `zone`                              |
+| each `heatedBedding` entry | `name`, `prefix`, `controller`, `zone`, `zones`                     |
 | each `curtains` entry      | `name`, `prefix`, `controller`, `zone`                              |
 
 ### Bind Interface
@@ -361,7 +410,8 @@ Brokers that restrict topics per user must grant Hoboken these topics:
 - Heated bedding: read `<prefix>/bridge/availability`,
   `<prefix>/bridge/heartbeat`, `<prefix>/<controller>/availability`, and each
   zone's `<prefix>/<controller>/<zone>` and `<prefix>/<controller>/<zone>/result`;
-  write each zone's `<prefix>/<controller>/<zone>/set`.
+  write each zone's `<prefix>/<controller>/<zone>/set`. A group needs the topics
+  of each of its zones and no others.
 - Curtains: the same topics as heated bedding, for each curtain's controller and
   zone.
 
@@ -446,7 +496,10 @@ Use `NODE=/path/to/node make test-integration` to select the runtime.
 
 Heated bedding integration covers reported state on both zones, fan-write
 ordering, stateful preheat, rejected and retained results, session changes,
-the full HAP write deadline, and broker restart without command replay.
+the full HAP write deadline, and broker restart without command replay. It also
+covers a group beside both zones: its aggregate state, each write path,
+precedence of an explicit off, a write that fails for one zone, and
+unavailability.
 The simulated MQTT controller exercises the contract; actual Sunbeam, Home
 app, and Siri qualification still requires hardware.
 
@@ -561,7 +614,8 @@ curtains:
 
 A curtain-only bridge may omit `devices` or set it to `[]`. Each entry uses the
 same logical topic naming rules as `heatedBedding`; routes must not overlap.
-No Tuya credentials belong in Hoboken.
+An entry names one `zone`; groups of zones apply only to heated bedding. No
+Tuya credentials belong in Hoboken.
 
 Set `TargetPosition` from zero (closed) to 100 (open). `CurrentPosition` comes
 from device reports. `PositionState` uses reported motion when available and
