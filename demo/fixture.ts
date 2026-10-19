@@ -83,7 +83,7 @@ export const fixtureData: StatusData = {
   curtains: [
     {
       name: "Living Room Curtain",
-      topic: "tuya/living_room/curtain",
+      topic: "tuya/living_room",
       state: {
         session_id: "demo-session",
         current_position: 40,
