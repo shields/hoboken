@@ -25,7 +25,7 @@ RUN printf '%s' "${GIT_VERSION}" > VERSION
 # Node runs .ts files directly (built-in type stripping, stable since 24.12)
 # :nonroot runs as uid 65532; the HAP (51826) and metrics ports are unprivileged
 # so root is never needed. The k8s manifest sets fsGroup so /persist stays writable.
-FROM gcr.io/distroless/nodejs26-debian13:nonroot@sha256:044d090d0c3ccfd30722126ebe46704885698970c8a303419dc0d704d628f0da
+FROM gcr.io/distroless/nodejs26-debian13:nonroot@sha256:bf14c9d80c1cc1430416fc164f7eb4b7b7a754259010530feac065dccd98035c
 WORKDIR /app
 COPY --from=build /app/node_modules node_modules/
 COPY --from=build /app/VERSION .
