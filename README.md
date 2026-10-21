@@ -167,6 +167,16 @@ off. An explicit off takes precedence over other fan writes arriving in
 the same 50 ms window. Preheat follows its reported Boolean until the
 controller changes it.
 
+A fan write that powers a zone on also sets its auto-off timer to six hours,
+because the controller returns the timer to 10 hours whenever the zone turns
+off. The timer is left out only while the zone reports power on and no
+power-off is in flight. A power-on still in flight can fail, so a write that
+follows one carries the timer too. A write to a zone that is already on sends
+no timer, because the controller restarts the countdown whenever the timer is
+written, even with the same value; power and level writes leave it running.
+Preheat is sent alone, so a preheat that turns a zone on leaves the
+controller's 10-hour default.
+
 Writes wait for a confirmed command result and reported state that matches
 it. Once a newer write to the same zone has been sent, the confirmed result
 alone suffices, and the write returns the current reported state. Failed or
@@ -501,7 +511,8 @@ trip with a malformed `mqtt.url`.
 Use `NODE=/path/to/node make test-integration` to select the runtime.
 
 Heated bedding integration covers reported state on both zones, fan-write
-ordering, stateful preheat, rejected and retained results, session changes,
+ordering, the auto-off timer set at power-on, stateful preheat, rejected and
+retained results, session changes,
 the full HAP write deadline, and broker restart without command replay. It also
 covers a group beside both zones: its aggregate state, each write path,
 precedence of an explicit off, a write that fails for one zone, and

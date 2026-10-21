@@ -17,6 +17,7 @@ import {
   heatedBeddingResumeOnly,
   normalizeHeatedBeddingSpeed,
   parseHeatedBeddingState,
+  prepareHeatedBeddingCommand,
   type HeatedBeddingCommand,
   type HeatedBeddingFanWrite,
   type HeatedBeddingState,
@@ -26,8 +27,8 @@ import {
   TucsonSource,
   type SourceOptions,
   type TucsonEndpointConfig,
+  type TucsonPower,
   type TucsonPublish,
-  type TucsonResume,
 } from "./tucson-source.ts";
 
 export interface HeatedBeddingZoneConfig extends TucsonEndpointConfig {
@@ -68,14 +69,15 @@ export type HeatedBeddingPublication = HeatedBeddingCommand & {
 };
 export type HeatedBeddingPublish = TucsonPublish<HeatedBeddingCommand>;
 
-const RESUME: TucsonResume<
+const POWER: TucsonPower<
   UsableHeatedBeddingState,
   HeatedBeddingCommand,
   HeatedBeddingFanWrite
 > = {
-  only: heatedBeddingResumeOnly,
+  resumeOnly: heatedBeddingResumeOnly,
   powered: (state) => state.power,
   power: (command) => command.power,
+  prepare: prepareHeatedBeddingCommand,
 };
 
 export class HeatedBeddingSource extends TucsonSource<
@@ -126,7 +128,7 @@ export class HeatedBeddingSource extends TucsonSource<
       topic,
       write,
       coalesceHeatedBeddingFanWrites,
-      RESUME,
+      POWER,
     );
   }
 

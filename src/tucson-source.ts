@@ -38,12 +38,11 @@ export interface TucsonProfile<S, C> {
   matches: (command: C, state: S) => boolean;
 }
 
-// How a window of writes that only asks an endpoint to resume interacts with
-// its power.
-export interface TucsonResume<S, C, W> {
-  only: (writes: readonly W[]) => boolean;
+export interface TucsonPower<S, C, W> {
+  resumeOnly: (writes: readonly W[]) => boolean;
   powered: (state: S) => boolean;
   power: (command: C) => boolean | undefined;
+  prepare: (command: C, powered: boolean) => C;
 }
 
 interface Prefix<S, W> {
@@ -374,7 +373,7 @@ export class TucsonSource<
     topic: string,
     write: W,
     coalesce: (writes: readonly W[]) => C,
-    resume?: TucsonResume<S, C, W>,
+    power?: TucsonPower<S, C, W>,
   ): Promise<S> {
     const endpoint = this.#admit(topic);
     return new Promise((resolve, reject) => {
@@ -394,7 +393,8 @@ export class TucsonSource<
               coalesce(window.writes),
               window.waiters,
               window.deadline,
-              resume?.only(window.writes) ? resume : undefined,
+              power,
+              power?.resumeOnly(window.writes),
             );
           }, COALESCE_DELAY),
         };
@@ -421,10 +421,11 @@ export class TucsonSource<
     command: C,
     waiters: Waiter<S>[],
     deadline: number,
-    resume?: TucsonResume<S, C, W>,
+    power?: TucsonPower<S, C, W>,
+    resume = false,
   ): void {
     try {
-      this.#dispatch(endpoint, command, waiters, deadline, resume);
+      this.#dispatch(endpoint, command, waiters, deadline, power, resume);
     } catch (error: unknown) {
       this.#reject(endpoint, waiters, error);
     }
@@ -435,7 +436,8 @@ export class TucsonSource<
     command: C,
     waiters: Waiter<S>[],
     deadline: number,
-    resume: TucsonResume<S, C, W> | undefined,
+    power: TucsonPower<S, C, W> | undefined,
+    resume: boolean,
   ): void {
     if (this.#clock() >= deadline) {
       this.#reject(
@@ -454,22 +456,27 @@ export class TucsonSource<
       );
       return;
     }
-    if (resume) {
+    if (power) {
       // Reported power lags a power write that is still in flight, so the
       // latest such write decides.
       let inFlight: Pending<S, C, W> | undefined;
       for (const pending of this.#pending.values()) {
         if (
           pending.endpoint === endpoint &&
-          resume.power(pending.command) !== undefined
+          power.power(pending.command) !== undefined
         )
           inFlight = pending;
       }
-      if (inFlight ? resume.power(inFlight.command) : resume.powered(state)) {
+      const powered = inFlight
+        ? power.power(inFlight.command) === true
+        : power.powered(state);
+      if (resume && powered) {
         if (inFlight) inFlight.waiters.push(...waiters);
         else this.#resolve(endpoint, waiters, state);
         return;
       }
+      // A power-on still in flight can fail, so it does not count as on here.
+      command = power.prepare(command, powered && power.powered(state));
     }
     const id = this.#identifier();
     if (this.#pending.has(id)) {

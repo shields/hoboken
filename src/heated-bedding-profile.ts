@@ -31,7 +31,10 @@ export interface HeatedBeddingCommand {
   power?: boolean;
   heat_level?: number;
   preheat?: boolean;
+  auto_off_seconds?: number;
 }
+
+const AUTO_OFF_SECONDS = 6 * 3600;
 
 export type HeatedBeddingFanRequest = { active: boolean } | { speed: number };
 
@@ -133,6 +136,18 @@ export function coalesceHeatedBeddingFanWrites(
   return heatLevel === undefined
     ? { power: true }
     : { power: true, heat_level: heatLevel };
+}
+
+// The firmware returns a zone's auto-off to 10 hours whenever the zone turns
+// off, so turning it on sets the timer again. A zone that is already on gets
+// no timer, because writing one restarts its countdown even when unchanged.
+export function prepareHeatedBeddingCommand(
+  command: HeatedBeddingCommand,
+  powered: boolean,
+): HeatedBeddingCommand {
+  return command.power === true && !powered
+    ? { ...command, auto_off_seconds: AUTO_OFF_SECONDS }
+    : command;
 }
 
 export function heatedBeddingResumeOnly(

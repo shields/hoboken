@@ -48,6 +48,7 @@ const GROUP = {
   controller: "bed",
   zones: ["side_a", "side_b"],
 };
+const TIMER = { auto_off_seconds: 21600 };
 
 interface WireCharacteristic {
   aid: number;
@@ -140,6 +141,8 @@ describe(
             Object.entries(command).filter(([key]) => key !== "request_id"),
           ),
         );
+        // Like the controller, turning a zone off returns its timer to 10 hours.
+        if (command.power === false) state.auto_off_seconds = 36000;
         void (async () => {
           await publish(`${stateTopic}/result`, {
             request_id: command.request_id,
@@ -202,8 +205,8 @@ describe(
           power: false,
           heat_level: 4,
           preheat: false,
-          auto_off_seconds: 3600,
-          remaining_seconds: 3300,
+          auto_off_seconds: 36000,
+          remaining_seconds: 36000,
           preheat_remaining_seconds: null,
         };
         states.set(topic, state);
@@ -377,6 +380,25 @@ describe(
         assert.equal(await value(rightSpeed), 100);
       });
 
+      test("each power-on from off sets a six-hour timer, and a write while on leaves it", async () => {
+        let count = commands.length;
+        await write({ [active]: 1 });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: true, ...TIMER }],
+        ]);
+        count = commands.length;
+        await write({ [speed]: 70 });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: true, heat_level: 7 }],
+        ]);
+        await write({ [active]: 0 });
+        count = commands.length;
+        await write({ [active]: 1, [speed]: 30 });
+        assert.deepEqual(sentSince(count), [
+          [TOPIC, { power: true, heat_level: 3, ...TIMER }],
+        ]);
+      });
+
       test("preheat stays on until a controller-style state push ends it", async () => {
         await write({ [preheat]: true });
         await delay(1200);
@@ -392,7 +414,9 @@ describe(
         await write({ [active]: 1 });
         let count = commands.length;
         await write({ [groupActive]: 1 });
-        assert.deepEqual(sentSince(count), [[RIGHT_TOPIC, { power: true }]]);
+        assert.deepEqual(sentSince(count), [
+          [RIGHT_TOPIC, { power: true, ...TIMER }],
+        ]);
         assert.equal(await value(groupActive), 1);
         assert.equal(await value(rightActive), 1);
         assert.equal(await value(speed), 40);
@@ -422,8 +446,8 @@ describe(
         let count = commands.length;
         await write({ [groupSpeed]: 70 });
         assert.deepEqual(sentSince(count), [
-          [TOPIC, { power: true, heat_level: 7 }],
-          [RIGHT_TOPIC, { power: true, heat_level: 7 }],
+          [TOPIC, { power: true, heat_level: 7, ...TIMER }],
+          [RIGHT_TOPIC, { power: true, heat_level: 7, ...TIMER }],
         ]);
         for (const key of [speed, rightSpeed, groupSpeed])
           assert.equal(await value(key), 70);
@@ -461,8 +485,8 @@ describe(
         let count = commands.length;
         await write({ [groupSpeed]: 50, [rightSpeed]: 20 });
         assert.deepEqual(sentSince(count), [
-          [TOPIC, { power: true, heat_level: 5 }],
-          [RIGHT_TOPIC, { power: true, heat_level: 2 }],
+          [TOPIC, { power: true, heat_level: 5, ...TIMER }],
+          [RIGHT_TOPIC, { power: true, heat_level: 2, ...TIMER }],
         ]);
         assert.equal(await value(speed), 50);
         assert.equal(await value(rightSpeed), 20);
@@ -476,7 +500,7 @@ describe(
         count = commands.length;
         await write({ [rightActive]: 0, [groupActive]: 1 });
         assert.deepEqual(sentSince(count), [
-          [TOPIC, { power: true }],
+          [TOPIC, { power: true, ...TIMER }],
           [RIGHT_TOPIC, { power: false }],
         ]);
         assert.equal(await value(groupActive), 1);
@@ -536,8 +560,8 @@ describe(
         const count = commands.length;
         await write({ [groupSpeed]: 70 }, HAPStatus.INVALID_VALUE_IN_REQUEST);
         assert.deepEqual(sentSince(count), [
-          [TOPIC, { power: true, heat_level: 7 }],
-          [RIGHT_TOPIC, { power: true, heat_level: 7 }],
+          [TOPIC, { power: true, heat_level: 7, ...TIMER }],
+          [RIGHT_TOPIC, { power: true, heat_level: 7, ...TIMER }],
         ]);
         assert.equal(await value(speed), 70);
         assert.equal(await value(active), 1);
@@ -593,7 +617,7 @@ describe(
         await publish(`${TOPIC}/result`, result, true);
         const state = states.get(TOPIC);
         assert(state);
-        Object.assign(state, { power: true, heat_level: 8 });
+        Object.assign(state, { power: true, heat_level: 8, ...TIMER });
         await publish(TOPIC, state, true);
         await delay(150);
         assert.equal(settled, false);

@@ -561,6 +561,7 @@ describe(
             request_id: latest.command.request_id,
             power: true,
             heat_level: 8,
+            auto_off_seconds: 21600,
           });
           assert.equal(await value(speed), 80);
         }

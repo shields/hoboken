@@ -24,6 +24,7 @@ import {
   parseHeatedBeddingHeartbeat,
   parseHeatedBeddingResult,
   parseHeatedBeddingState,
+  prepareHeatedBeddingCommand,
   sortedHeatedBeddingZones,
 } from "../src/heated-bedding-profile.ts";
 
@@ -285,6 +286,29 @@ describe("heated bedding fan command", () => {
     expect(() =>
       coalesceHeatedBeddingFanWrites([{ active: false }, { speed: NaN }]),
     ).toThrow(RangeError);
+  });
+});
+
+describe("heated bedding auto-off", () => {
+  test.each([[{ power: true }], [{ power: true, heat_level: 5 }]])(
+    "turning %j on from off sets a six-hour timer",
+    (command) => {
+      expect(prepareHeatedBeddingCommand(command, false)).toEqual({
+        ...command,
+        auto_off_seconds: 21600,
+      });
+    },
+  );
+
+  test.each([
+    [{ power: true }, true],
+    [{ power: true, heat_level: 5 }, true],
+    [{ power: false }, true],
+    [{ power: false }, false],
+    [{ preheat: true }, false],
+    [{ preheat: false }, true],
+  ])("%j with power %p is unchanged", (command, powered) => {
+    expect(prepareHeatedBeddingCommand(command, powered)).toBe(command);
   });
 });
 

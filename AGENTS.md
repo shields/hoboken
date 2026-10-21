@@ -57,7 +57,7 @@ Each module is independently testable with dependency injection:
 - `src/convert.ts` — Pure value conversion functions (Z2M ↔ HomeKit)
 - `src/accessories.ts` — HAP accessory/scene creation, takes `PublishFn`/`GetStateFn`
 - `src/bridge.ts` — MQTT client, bridge wiring, state cache, lifecycle
-- `src/heated-bedding-profile.ts` — Pure heated bedding payload parsing, topic naming, fan write coalescing, and group identity and state aggregation
+- `src/heated-bedding-profile.ts` — Pure heated bedding payload parsing, topic naming, fan write coalescing, the power-on timer, and group identity and state aggregation
 - `src/heated-bedding-source.ts` — Heated bedding availability, session, and confirmed-write state machine, injected publish/clock
 - `src/tucson-mqtt.ts` — Dedicated MQTT 5 connection, credentials, URL checks, and reconnect policy shared by the heated bedding and curtain sources
 - `src/heated-bedding-mqtt.ts` — Binds `TucsonMQTT` to the heated bedding source
@@ -110,6 +110,19 @@ Each module is independently testable with dependency injection:
   because it rejects a repeated zone. The status page lists a group as its
   members' states beside the aggregate, and the unknown-state metric counts a
   group once, as unknown if any member is.
+- **Heated bedding auto-off**: a fan write that powers a zone on carries
+  `auto_off_seconds` of six hours (`prepareHeatedBeddingCommand`), because the
+  Sunbeam firmware returns a zone's timer to 10 hours whenever the zone turns
+  off. `TucsonSource` leaves the timer out, just before it publishes, only when
+  the zone reports power on and the resume rule above also finds it on, that
+  is, no power-off is in flight. Writing the timer restarts the countdown even
+  when the value is unchanged, which power and level writes do not, so a zone
+  that is on gets none. An unconfirmed power-on does not count, because it can
+  still fail and leave the zone on at the firmware's 10 hours.
+  Tucson rejects a timer alone for a zone that is off and preheat combined with
+  anything, so only a power-on carries it, and preheat from off keeps the
+  firmware's default. Confirmation waits for the reported timer like any other
+  command field.
 - **No config reload**: restart the container for config changes.
 - **MQTT credentials**: `Config` holds only `mqtt.username` and the password
   file path. `main.ts` calls `resolveMQTTCredentials(config.mqtt)` and passes

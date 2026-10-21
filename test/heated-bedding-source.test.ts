@@ -34,6 +34,7 @@ const BASELINE = {
   heat_level: 4,
   preheat: false,
 };
+const TIMER = { auto_off_seconds: 21600 };
 
 describe("heated bedding source", () => {
   let now: number;
@@ -90,6 +91,10 @@ describe("heated bedding source", () => {
     receive("tuya/bridge/heartbeat", { session_id: "session-a" });
   }
 
+  function confirm(requestID: string): void {
+    receive(`${TOPIC}/result`, { request_id: requestID, outcome: "confirmed" });
+  }
+
   test("requires subscriptions, live heartbeat, availability, and matching snapshot", () => {
     expect(() => source.getState(TOPIC)).toThrow(HapStatusError);
     receive("tuya/bridge/availability", "online", true);
@@ -135,6 +140,7 @@ describe("heated bedding source", () => {
       request_id: "request-1",
       power: true,
       heat_level: 7,
+      ...TIMER,
     });
     sent[0]!.complete();
     receive(`${TOPIC}/result`, {
@@ -144,7 +150,9 @@ describe("heated bedding source", () => {
     await Promise.resolve();
     expect(settled).toBe(false);
     receive(TOPIC, { ...BASELINE, power: true, heat_level: 7 });
-    expect(await write).toMatchObject({ power: true, heat_level: 7 });
+    expect(source.pendingCount(TOPIC)).toBe(1);
+    receive(TOPIC, { ...BASELINE, power: true, heat_level: 7, ...TIMER });
+    expect(await write).toMatchObject({ power: true, heat_level: 7, ...TIMER });
     expect(source.pendingCount(TOPIC)).toBe(0);
   });
 
@@ -155,10 +163,10 @@ describe("heated bedding source", () => {
     const second = source.writeFan(TOPIC, { speed: 80 });
     advance(50);
     expect(sent.map(({ payload }) => payload)).toEqual([
-      { request_id: "request-1", power: true, heat_level: 5 },
-      { request_id: "request-2", power: true, heat_level: 8 },
+      { request_id: "request-1", power: true, heat_level: 5, ...TIMER },
+      { request_id: "request-2", power: true, heat_level: 8, ...TIMER },
     ]);
-    receive(TOPIC, { ...BASELINE, power: true, heat_level: 8 });
+    receive(TOPIC, { ...BASELINE, power: true, heat_level: 8, ...TIMER });
     receive(`${TOPIC}/result`, {
       request_id: "request-1",
       outcome: "confirmed",
@@ -180,9 +188,9 @@ describe("heated bedding source", () => {
     advance(50);
     expect(sent.map(({ payload }) => payload)).toEqual([
       { request_id: "request-1", preheat: true },
-      { request_id: "request-2", power: true, heat_level: 5 },
+      { request_id: "request-2", power: true, heat_level: 5, ...TIMER },
     ]);
-    receive(TOPIC, { ...BASELINE, power: true, heat_level: 5 });
+    receive(TOPIC, { ...BASELINE, power: true, heat_level: 5, ...TIMER });
     receive(`${TOPIC}/result`, {
       request_id: "request-2",
       outcome: "confirmed",
@@ -244,7 +252,7 @@ describe("heated bedding source", () => {
       advance(100);
       const newer = source.writeFan(TOPIC, { speed: 80 });
       advance(50);
-      receive(TOPIC, { ...BASELINE, power: true, heat_level: 8 });
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 8, ...TIMER });
       receive(`${TOPIC}/result`, {
         request_id: "request-2",
         outcome: "confirmed",
@@ -333,13 +341,6 @@ describe("heated bedding source", () => {
       receive(TOPIC, { ...BASELINE, power: true, heat_level: 6 });
     }
 
-    function confirm(requestId: string): void {
-      receive(`${TOPIC}/result`, {
-        request_id: requestId,
-        outcome: "confirmed",
-      });
-    }
-
     test("a zone that is on is left alone", async () => {
       ready();
       on();
@@ -356,9 +357,9 @@ describe("heated bedding source", () => {
       const write = source.writeFan(TOPIC, { resume: true });
       advance(50);
       expect(sent.map(({ payload }) => payload)).toEqual([
-        { request_id: "request-1", power: true },
+        { request_id: "request-1", power: true, ...TIMER },
       ]);
-      receive(TOPIC, { ...BASELINE, power: true });
+      receive(TOPIC, { ...BASELINE, power: true, ...TIMER });
       confirm("request-1");
       expect(await write).toMatchObject({ power: true, heat_level: 4 });
       expect(source.pendingCount(TOPIC)).toBe(0);
@@ -372,9 +373,9 @@ describe("heated bedding source", () => {
       ];
       advance(50);
       expect(sent.map(({ payload }) => payload)).toEqual([
-        { request_id: "request-1", power: true },
+        { request_id: "request-1", power: true, ...TIMER },
       ]);
-      receive(TOPIC, { ...BASELINE, power: true });
+      receive(TOPIC, { ...BASELINE, power: true, ...TIMER });
       confirm("request-1");
       await Promise.all(writes);
       expect(source.pendingCount(TOPIC)).toBe(0);
@@ -432,7 +433,7 @@ describe("heated bedding source", () => {
       expect(source.pendingCount(TOPIC)).toBe(2);
       advance(50);
       expect(sent).toHaveLength(1);
-      receive(TOPIC, { ...BASELINE, power: true, heat_level: 5 });
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 5, ...TIMER });
       confirm("request-1");
       expect((await resume).heat_level).toBe(5);
       expect((await first).heat_level).toBe(5);
@@ -470,9 +471,9 @@ describe("heated bedding source", () => {
       advance(50);
       expect(sent.map(({ payload }) => payload)).toEqual([
         { request_id: "request-1", power: false },
-        { request_id: "request-2", power: true },
+        { request_id: "request-2", power: true, ...TIMER },
       ]);
-      receive(TOPIC, { ...BASELINE, power: true, heat_level: 6 });
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 6, ...TIMER });
       confirm("request-1");
       confirm("request-2");
       expect((await off).power).toBe(true);
@@ -489,11 +490,11 @@ describe("heated bedding source", () => {
       const resume = source.writeFan(TOPIC, { resume: true });
       advance(50);
       expect(sent.map(({ payload }) => payload)).toEqual([
-        { request_id: "request-1", power: true, heat_level: 5 },
+        { request_id: "request-1", power: true, heat_level: 5, ...TIMER },
         { request_id: "request-2", power: false },
-        { request_id: "request-3", power: true },
+        { request_id: "request-3", power: true, ...TIMER },
       ]);
-      receive(TOPIC, { ...BASELINE, power: true, heat_level: 5 });
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 5, ...TIMER });
       for (const id of ["request-1", "request-2", "request-3"]) confirm(id);
       await Promise.all([first, off, resume]);
     });
@@ -505,12 +506,105 @@ describe("heated bedding source", () => {
       advance(50);
       expect(sent.map(({ payload }) => payload)).toEqual([
         { request_id: "request-1", preheat: true },
-        { request_id: "request-2", power: true },
+        { request_id: "request-2", power: true, ...TIMER },
       ]);
-      receive(TOPIC, { ...BASELINE, power: true, preheat: true });
+      receive(TOPIC, { ...BASELINE, power: true, preheat: true, ...TIMER });
       confirm("request-1");
       confirm("request-2");
       await Promise.all([preheat, resume]);
+    });
+  });
+
+  describe("auto-off", () => {
+    const COMMANDS = [
+      ["Active", { active: true }, { power: true }],
+      ["a speed", { speed: 30 }, { power: true, heat_level: 3 }],
+    ] as const;
+
+    test.each(COMMANDS)(
+      "%s on a zone that is off sets the timer",
+      async (_case, write, command) => {
+        ready();
+        const outcome = source.writeFan(TOPIC, write);
+        advance(50);
+        expect(sent.map(({ payload }) => payload)).toEqual([
+          { request_id: "request-1", ...command, ...TIMER },
+        ]);
+        receive(TOPIC, { ...BASELINE, ...command, ...TIMER });
+        confirm("request-1");
+        expect(await outcome).toMatchObject(TIMER);
+      },
+    );
+
+    test.each(COMMANDS)(
+      "%s on a zone that is on leaves its timer alone",
+      async (_case, write, command) => {
+        ready();
+        receive(TOPIC, { ...BASELINE, power: true, auto_off_seconds: 3600 });
+        const outcome = source.writeFan(TOPIC, write);
+        advance(50);
+        expect(sent.map(({ payload }) => payload)).toEqual([
+          { request_id: "request-1", ...command },
+        ]);
+        receive(TOPIC, { ...BASELINE, ...command, auto_off_seconds: 3600 });
+        confirm("request-1");
+        expect((await outcome).auto_off_seconds).toBe(3600);
+      },
+    );
+
+    test("a power-on after a power-off in flight sets the timer", async () => {
+      ready();
+      receive(TOPIC, { ...BASELINE, power: true });
+      const off = source.writeFan(TOPIC, { active: false });
+      advance(50);
+      const on = source.writeFan(TOPIC, { active: true });
+      advance(50);
+      expect(sent.map(({ payload }) => payload)).toEqual([
+        { request_id: "request-1", power: false },
+        { request_id: "request-2", power: true, ...TIMER },
+      ]);
+      receive(TOPIC, { ...BASELINE, power: true, ...TIMER });
+      confirm("request-1");
+      confirm("request-2");
+      await Promise.all([off, on]);
+    });
+
+    test("a write after a power-on in flight sets the timer in case that power-on fails", async () => {
+      ready();
+      const first = Promise.allSettled([source.writeFan(TOPIC, { speed: 50 })]);
+      advance(50);
+      const second = source.writeFan(TOPIC, { speed: 80 });
+      advance(50);
+      expect(sent.map(({ payload }) => payload)).toEqual([
+        { request_id: "request-1", power: true, heat_level: 5, ...TIMER },
+        { request_id: "request-2", power: true, heat_level: 8, ...TIMER },
+      ]);
+      receive(`${TOPIC}/result`, {
+        request_id: "request-1",
+        outcome: "unconfirmed",
+        error_code: "queue_full",
+      });
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 8, ...TIMER });
+      confirm("request-2");
+      expect(await second).toMatchObject({ heat_level: 8, ...TIMER });
+      expect(await first).toMatchObject([{ status: "rejected" }]);
+    });
+
+    test("a write after a power-on in flight to a zone reported on sets no timer", async () => {
+      ready();
+      receive(TOPIC, { ...BASELINE, power: true });
+      const first = source.writeFan(TOPIC, { speed: 50 });
+      advance(50);
+      const second = source.writeFan(TOPIC, { speed: 80 });
+      advance(50);
+      expect(sent.map(({ payload }) => payload)).toEqual([
+        { request_id: "request-1", power: true, heat_level: 5 },
+        { request_id: "request-2", power: true, heat_level: 8 },
+      ]);
+      receive(TOPIC, { ...BASELINE, power: true, heat_level: 8 });
+      confirm("request-1");
+      confirm("request-2");
+      await Promise.all([first, second]);
     });
   });
 
@@ -864,7 +958,7 @@ describe("heated bedding source", () => {
     expect(source.pendingCount(TOPIC)).toBe(32);
     advance(50);
     expect(sent).toHaveLength(1);
-    receive(TOPIC, { ...BASELINE, power: true, heat_level: 2 });
+    receive(TOPIC, { ...BASELINE, power: true, heat_level: 2, ...TIMER });
     receive(`${TOPIC}/result`, {
       request_id: "request-1",
       outcome: "confirmed",
@@ -908,7 +1002,7 @@ describe("heated bedding source", () => {
     ready();
     const first = source.writeFan(TOPIC, { speed: 20 });
     advance(50);
-    receive(TOPIC, { ...BASELINE, power: true, heat_level: 2 });
+    receive(TOPIC, { ...BASELINE, power: true, heat_level: 2, ...TIMER });
     receive(`${TOPIC}/result`, {
       request_id: "request-1",
       outcome: "confirmed",

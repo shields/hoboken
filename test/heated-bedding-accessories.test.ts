@@ -47,6 +47,7 @@ const BASELINE = {
   heat_level: 4,
   preheat: false,
 };
+const TIMER = { auto_off_seconds: 21600 };
 
 describe("heated bedding HomeKit accessories", () => {
   let source: HeatedBeddingSource;
@@ -186,11 +187,12 @@ describe("heated bedding HomeKit accessories", () => {
       request_id: "request-1",
       power: true,
       heat_level: 1,
+      ...TIMER,
     });
     source.handle(
       generation,
       TOPIC,
-      { ...BASELINE, power: true, heat_level: 1 },
+      { ...BASELINE, power: true, heat_level: 1, ...TIMER },
       false,
     );
     source.handle(
@@ -634,7 +636,7 @@ describe("heated bedding group accessories", () => {
     const write = Q(bed).active.handleSetRequest(Characteristic.Active.ACTIVE);
     flush();
     expect(commands()).toEqual([
-      { topic: "tuya/bed/right/set", payload: { power: true } },
+      { topic: "tuya/bed/right/set", payload: { power: true, ...TIMER } },
     ]);
     await confirm(0);
     expect(await write).toBe(Characteristic.Active.ACTIVE);
@@ -648,8 +650,8 @@ describe("heated bedding group accessories", () => {
     const write = Q(bed).active.handleSetRequest(Characteristic.Active.ACTIVE);
     flush();
     expect(commands()).toEqual([
-      { topic: "tuya/bed/left/set", payload: { power: true } },
-      { topic: "tuya/bed/right/set", payload: { power: true } },
+      { topic: "tuya/bed/left/set", payload: { power: true, ...TIMER } },
+      { topic: "tuya/bed/right/set", payload: { power: true, ...TIMER } },
     ]);
     await confirm(0);
     await confirm(1);
@@ -693,7 +695,10 @@ describe("heated bedding group accessories", () => {
     expect(Q(bed).speed.value).toBe(80);
     flush();
     expect(commands()).toEqual([
-      { topic: "tuya/bed/left/set", payload: { power: true, heat_level: 6 } },
+      {
+        topic: "tuya/bed/left/set",
+        payload: { power: true, heat_level: 6, ...TIMER },
+      },
       { topic: "tuya/bed/right/set", payload: { power: true, heat_level: 6 } },
     ]);
     await confirm(0);
@@ -776,7 +781,10 @@ describe("heated bedding group accessories", () => {
     flush();
     expect(commands()).toEqual([
       { topic: "tuya/bed/left/set", payload: { power: true, heat_level: 4 } },
-      { topic: "tuya/bed/right/set", payload: { power: true, heat_level: 4 } },
+      {
+        topic: "tuya/bed/right/set",
+        payload: { power: true, heat_level: 4, ...TIMER },
+      },
     ]);
     await confirm(0);
     await confirm(1);
@@ -1058,10 +1066,13 @@ describe("heated bedding group accessories", () => {
       ];
       flush();
       expect(commands()).toEqual([
-        { topic: "tuya/bed/left/set", payload: { power: true, heat_level: 3 } },
+        {
+          topic: "tuya/bed/left/set",
+          payload: { power: true, heat_level: 3, ...TIMER },
+        },
         {
           topic: "tuya/bed/right/set",
-          payload: { power: true, heat_level: 3 },
+          payload: { power: true, heat_level: 3, ...TIMER },
         },
       ]);
       await confirm(0);
@@ -1079,7 +1090,7 @@ describe("heated bedding group accessories", () => {
       flush();
       expect(commands()).toEqual([
         { topic: "tuya/bed/left/set", payload: { power: false } },
-        { topic: "tuya/bed/right/set", payload: { power: true } },
+        { topic: "tuya/bed/right/set", payload: { power: true, ...TIMER } },
       ]);
       await confirm(0);
       await confirm(1);
@@ -1120,8 +1131,8 @@ describe("heated bedding group accessories", () => {
       flush();
       expect(commands()).toEqual([
         { topic: "tuya/bed/left/set", payload: { power: false } },
-        { topic: "tuya/bed/left/set", payload: { power: true } },
-        { topic: "tuya/bed/right/set", payload: { power: true } },
+        { topic: "tuya/bed/left/set", payload: { power: true, ...TIMER } },
+        { topic: "tuya/bed/right/set", payload: { power: true, ...TIMER } },
       ]);
       await confirm(0);
       await confirm(1);
@@ -1144,8 +1155,11 @@ describe("heated bedding group accessories", () => {
       });
       flush();
       expect(commands()).toEqual([
-        { topic: "tuya/bed/left/set", payload: { power: true, heat_level: 5 } },
-        { topic: "tuya/bed/right/set", payload: { power: true } },
+        {
+          topic: "tuya/bed/left/set",
+          payload: { power: true, heat_level: 5, ...TIMER },
+        },
+        { topic: "tuya/bed/right/set", payload: { power: true, ...TIMER } },
       ]);
       await confirm(1);
       await Promise.resolve();
@@ -1181,14 +1195,17 @@ describe("heated bedding group accessories", () => {
       const zone = Q(right).speed.handleSetRequest(90);
       flush();
       expect(commands()).toEqual([
-        { topic: "tuya/bed/left/set", payload: { power: true, heat_level: 5 } },
         {
-          topic: "tuya/bed/right/set",
-          payload: { power: true, heat_level: 5 },
+          topic: "tuya/bed/left/set",
+          payload: { power: true, heat_level: 5, ...TIMER },
         },
         {
           topic: "tuya/bed/right/set",
-          payload: { power: true, heat_level: 9 },
+          payload: { power: true, heat_level: 5, ...TIMER },
+        },
+        {
+          topic: "tuya/bed/right/set",
+          payload: { power: true, heat_level: 9, ...TIMER },
         },
       ]);
       await confirm(0);

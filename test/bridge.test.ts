@@ -728,16 +728,19 @@ describe("startBridge", () => {
         const command = JSON.parse(publication.message) as {
           request_id: string;
           power: boolean;
+          auto_off_seconds: number;
         };
         expect(command).toEqual({
           request_id: command.request_id,
           power: true,
+          auto_off_seconds: 21600,
         });
         publication.complete();
         const zone = publication.topic.slice(0, -"/set".length);
         heatedBeddingMessage(client, zone, {
           ...HEATED_BEDDING_STATE,
           power: true,
+          auto_off_seconds: 21600,
         });
         heatedBeddingMessage(client, `${zone}/result`, {
           request_id: command.request_id,
