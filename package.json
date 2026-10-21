@@ -28,7 +28,7 @@
     "playwright": "1.64.1",
     "pngjs": "7.0.0",
     "prettier": "3.9.10",
-    "prettier-plugin-toml": "3.0.2",
+    "prettier-plugin-toml": "4.0.0",
     "renovate": "44.166.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.2"
