@@ -239,7 +239,7 @@ describe("WLED integration", { timeout: 30000 }, () => {
       5000,
       "subscribe wled/test1/g",
     );
-    handle = await startBridge(config);
+    handle = await startBridge(config, "integration");
     await bridgeSubPromise;
 
     client = new HttpClient("test-client", "127.0.0.1", handle.hapPort);

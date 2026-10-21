@@ -55,23 +55,26 @@ describe(
 
       directory = mkdtempSync(path.join(tmpdir(), "hoboken-drop-"));
       HAPStorage.setCustomStoragePath(directory);
-      handle = await startBridge({
-        bridge: {
-          name: "MQTT dropped session integration",
-          mac: "0E:36:29:42:81:23",
-          pincode: "031-45-155",
-          port: 0,
-        },
-        mqtt: { url: `mqtt://127.0.0.1:${String(address.port)}` },
-        devices: [
-          {
-            name: "Light",
-            type: "z2m",
-            topic: "zigbee2mqtt/light",
-            capabilities: ["on_off"],
+      handle = await startBridge(
+        {
+          bridge: {
+            name: "MQTT dropped session integration",
+            mac: "0E:36:29:42:81:23",
+            pincode: "031-45-155",
+            port: 0,
           },
-        ],
-      });
+          mqtt: { url: `mqtt://127.0.0.1:${String(address.port)}` },
+          devices: [
+            {
+              name: "Light",
+              type: "z2m",
+              topic: "zigbee2mqtt/light",
+              capabilities: ["on_off"],
+            },
+          ],
+        },
+        "integration",
+      );
     });
 
     after(async () => {

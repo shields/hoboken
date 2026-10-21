@@ -81,41 +81,44 @@ async function write(values: Record<string, number | boolean>): Promise<void> {
 }
 
 try {
-  handle = await startBridge({
-    bridge: {
-      name: "Tucson qualification",
-      mac: "0E:36:29:42:81:20",
-      pincode: "031-45-154",
-      port: 0,
+  handle = await startBridge(
+    {
+      bridge: {
+        name: "Tucson qualification",
+        mac: "0E:36:29:42:81:20",
+        pincode: "031-45-154",
+        port: 0,
+      },
+      mqtt: { url },
+      devices: [],
+      curtains: curtainMode
+        ? [
+            {
+              name: "Curtain",
+              prefix: "tuya",
+              controller: "bed",
+            },
+          ]
+        : [],
+      heatedBedding: curtainMode
+        ? []
+        : [
+            {
+              name: "Bed Side A",
+              prefix: "tuya",
+              controller: "bed",
+              zone: "side_a",
+            },
+            {
+              name: "Bed Side B",
+              prefix: "tuya",
+              controller: "bed",
+              zone: "side_b",
+            },
+          ],
     },
-    mqtt: { url },
-    devices: [],
-    curtains: curtainMode
-      ? [
-          {
-            name: "Curtain",
-            prefix: "tuya",
-            controller: "bed",
-          },
-        ]
-      : [],
-    heatedBedding: curtainMode
-      ? []
-      : [
-          {
-            name: "Bed Side A",
-            prefix: "tuya",
-            controller: "bed",
-            zone: "side_a",
-          },
-          {
-            name: "Bed Side B",
-            prefix: "tuya",
-            controller: "bed",
-            zone: "side_b",
-          },
-        ],
-  });
+    "integration",
+  );
   client = new HttpClient(
     "tucson-test-controller",
     "127.0.0.1",

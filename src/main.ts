@@ -14,7 +14,7 @@
 
 import { HAPStorage } from "@homebridge/hap-nodejs";
 import { loadConfig, resolveMQTTCredentials } from "./config.ts";
-import { startBridge } from "./bridge.ts";
+import { readVersion, startBridge } from "./bridge.ts";
 import * as log from "./log.ts";
 
 // eslint-disable-next-line prefer-const -- assigned after signal handlers are installed
@@ -69,6 +69,6 @@ HAPStorage.setCustomStoragePath(process.env.PERSIST_PATH ?? "/persist");
 
 const config = loadConfig(configPath);
 const credentials = resolveMQTTCredentials(config.mqtt);
-const handle = await startBridge(config, credentials);
+const handle = await startBridge(config, readVersion(), credentials);
 shutdown = handle.shutdown;
 if (pendingSignal !== undefined) runShutdown(handle.shutdown);

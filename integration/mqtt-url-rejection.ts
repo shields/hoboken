@@ -83,7 +83,7 @@ function bridgeConfig(url: string) {
 // A bridge that starts anyway would keep the process alive after the assertion
 // fails.
 async function startThenStop(url: string): Promise<void> {
-  const handle = await startBridge(bridgeConfig(url));
+  const handle = await startBridge(bridgeConfig(url), "integration");
   await handle.shutdown();
 }
 

@@ -181,8 +181,30 @@ function checkCredentials(
   }
 }
 
+export function readVersion(): string {
+  let version = "unknown";
+  try {
+    version = readFileSync(
+      new URL("../VERSION", import.meta.url),
+      "utf8",
+    ).trim();
+  } catch {
+    try {
+      version = execFileSync(
+        fileURLToPath(new URL("../scripts/gitcalver.sh", import.meta.url)),
+        ["--dirty", "-dev"],
+        { encoding: "utf8" },
+      ).trim();
+    } catch {
+      /* version stays "unknown" */
+    }
+  }
+  return version;
+}
+
 export async function startBridge(
   config: Config,
+  version: string,
   credentials?: MQTTCredentials,
 ): Promise<BridgeHandle> {
   checkCredentials(config.mqtt, credentials);
@@ -371,24 +393,6 @@ export async function startBridge(
     (p) => p,
     (t) => `${t}/set`,
   );
-
-  let version = "unknown";
-  try {
-    version = readFileSync(
-      new URL("../VERSION", import.meta.url),
-      "utf8",
-    ).trim();
-  } catch {
-    try {
-      version = execFileSync(
-        fileURLToPath(new URL("../scripts/gitcalver.sh", import.meta.url)),
-        ["--dirty", "-dev"],
-        { encoding: "utf8" },
-      ).trim();
-    } catch {
-      /* version stays "unknown" */
-    }
-  }
 
   if (metricsRegister && config.metrics) {
     const getStatus = () =>

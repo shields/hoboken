@@ -266,18 +266,21 @@ describe(
         true,
       );
       HAPStorage.setCustomStoragePath(path.join(directory, "hap"));
-      handle = await startBridge({
-        bridge: {
-          name: "Heated bedding integration",
-          mac: "0E:36:29:42:81:12",
-          pincode: "031-45-154",
-          port: 0,
+      handle = await startBridge(
+        {
+          bridge: {
+            name: "Heated bedding integration",
+            mac: "0E:36:29:42:81:12",
+            pincode: "031-45-154",
+            port: 0,
+          },
+          mqtt: { url: broker.url },
+          devices: [],
+          heatedBedding: [...ZONES, GROUP],
+          metrics: { port: 0, bind: "127.0.0.1" },
         },
-        mqtt: { url: broker.url },
-        devices: [],
-        heatedBedding: [...ZONES, GROUP],
-        metrics: { port: 0, bind: "127.0.0.1" },
-      });
+        "integration",
+      );
       handle.bridge.on("characteristic-warning", (warning) => {
         warnings.push(warning.type);
       });

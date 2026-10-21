@@ -431,6 +431,7 @@ describe(
             curtains: [CURTAIN],
             metrics: { port: 0, bind: "127.0.0.1" },
           },
+          "integration",
           credentials,
         );
         client = new HttpClient(
@@ -767,6 +768,7 @@ describe(
               ],
               metrics: { port: 0, bind: "127.0.0.1" },
             },
+            "integration",
             attempt.credentials,
           );
         });

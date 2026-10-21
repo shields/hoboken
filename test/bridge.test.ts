@@ -194,7 +194,13 @@ mock.module("mqtt", () => ({
   },
 }));
 
-const { startBridge, buildStatusData } = await import("../src/bridge.ts");
+const { startBridge, buildStatusData, readVersion } =
+  await import("../src/bridge.ts");
+
+// Read at load, outside any test's timeout, because gitcalver's git commands
+// slow down with machine load.
+const checkoutVersion = readVersion();
+const VERSION = "20261021.1-test";
 
 const HEATED_BEDDING = [
   { name: "Bed Side A", prefix: "tuya", controller: "bed", zone: "side_a" },
@@ -329,7 +335,10 @@ describe("startBridge", () => {
         "test",
       ).curtains,
     ).toEqual([{ name: "Curtain", topic, state: null, pending: 0 }]);
-    const { bridge, metricsPort, shutdown } = await startBridge(config);
+    const { bridge, metricsPort, shutdown } = await startBridge(
+      config,
+      VERSION,
+    );
     const client = mockClient;
     const service = bridge.bridgedAccessories[0]!.getService(
       Service.WindowCovering,
@@ -395,7 +404,10 @@ describe("startBridge", () => {
   });
 
   test("each device state update produces one dashboard SSE event", async () => {
-    const { metricsPort, shutdown } = await startBridge(metricsConfig());
+    const { metricsPort, shutdown } = await startBridge(
+      metricsConfig(),
+      VERSION,
+    );
     const controller = new AbortController();
     try {
       const nextEvent = await openEvents(metricsPort!, controller.signal);
@@ -419,11 +431,14 @@ describe("startBridge", () => {
   });
 
   test("each heated bedding message produces one dashboard SSE event", async () => {
-    const { metricsPort, shutdown } = await startBridge({
-      ...metricsConfig(),
-      devices: [],
-      heatedBedding: HEATED_BEDDING,
-    });
+    const { metricsPort, shutdown } = await startBridge(
+      {
+        ...metricsConfig(),
+        devices: [],
+        heatedBedding: HEATED_BEDDING,
+      },
+      VERSION,
+    );
     const client = mockClient;
     const controller = new AbortController();
     try {
@@ -467,7 +482,7 @@ describe("startBridge", () => {
       ],
     };
     const count = mockClients.length;
-    const { bridge, shutdown } = await startBridge(config);
+    const { bridge, shutdown } = await startBridge(config, VERSION);
     try {
       expect(mockClients.length - count).toBe(1);
       expect(mockClient.options?.protocolVersion).toBe(5);
@@ -507,7 +522,10 @@ describe("startBridge", () => {
       devices: [],
       heatedBedding: HEATED_BEDDING,
     };
-    const { bridge, metricsPort, shutdown } = await startBridge(config);
+    const { bridge, metricsPort, shutdown } = await startBridge(
+      config,
+      VERSION,
+    );
     const client = mockClient;
     const fan = bridge.bridgedAccessories[0]!.getService(Service.Fanv2)!;
     const active = fan.getCharacteristic(Characteristic.Active);
@@ -629,7 +647,10 @@ describe("startBridge", () => {
       heatedBedding: [...HEATED_BEDDING, group],
     };
     const count = mockClients.length;
-    const { bridge, metricsPort, shutdown } = await startBridge(config);
+    const { bridge, metricsPort, shutdown } = await startBridge(
+      config,
+      VERSION,
+    );
     const client = mockClient;
     try {
       expect(mockClients.length - count).toBe(1);
@@ -757,7 +778,7 @@ describe("startBridge", () => {
   test("mixed bridges keep legacy subscriptions and conversions on their own client", async () => {
     const count = mockClients.length;
     const config = { ...testConfig(), heatedBedding: HEATED_BEDDING };
-    const { bridge, shutdown } = await startBridge(config);
+    const { bridge, shutdown } = await startBridge(config, VERSION);
     try {
       const legacy = mockClients[count]!;
       const heatedBedding = mockClients[count + 1]!;
@@ -799,12 +820,15 @@ describe("startBridge", () => {
 
   test("mixed bedding and curtain bridges maintain independent state and report both shutdown failures", async () => {
     const count = mockClients.length;
-    const { bridge, shutdown } = await startBridge({
-      ...testConfig(),
-      devices: [],
-      heatedBedding: HEATED_BEDDING,
-      curtains: CURTAINS,
-    });
+    const { bridge, shutdown } = await startBridge(
+      {
+        ...testConfig(),
+        devices: [],
+        heatedBedding: HEATED_BEDDING,
+        curtains: CURTAINS,
+      },
+      VERSION,
+    );
     const bedding = mockClients[count]!;
     const curtain = mockClients[count + 1]!;
     readyHeatedBedding(bedding);
@@ -852,10 +876,13 @@ describe("startBridge", () => {
 
   test("a heated bedding shutdown failure still unpublishes and closes the legacy client", async () => {
     const count = mockClients.length;
-    const { bridge, shutdown } = await startBridge({
-      ...testConfig(),
-      heatedBedding: HEATED_BEDDING,
-    });
+    const { bridge, shutdown } = await startBridge(
+      {
+        ...testConfig(),
+        heatedBedding: HEATED_BEDDING,
+      },
+      VERSION,
+    );
     const legacy = mockClients[count]!;
     const heatedBedding = mockClients[count + 1]!;
     heatedBedding.end = (_force, complete) => {
@@ -886,13 +913,17 @@ describe("startBridge", () => {
   });
 
   test("creates bridge and connects MQTT", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     expect(mockClient).toBeDefined();
     await shutdown();
   });
 
+  test("reads its version from gitcalver in a source checkout", () => {
+    expect(checkoutVersion).toBe(expectedVersion);
+  });
+
   test("sets AccessoryInformation on the bridge", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     const info = bridge.getService(Service.AccessoryInformation);
     expect(info).toBeDefined();
     expect(info?.getCharacteristic(Characteristic.Manufacturer).value).toBe(
@@ -905,13 +936,13 @@ describe("startBridge", () => {
       "0E:42:A1:B2:C3:D4",
     );
     expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
-      expectedVersion,
+      VERSION,
     );
     await shutdown();
   });
 
   test("sets AccessoryInformation on light accessories", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     const accessory = bridge.bridgedAccessories.find(
       (a) => a.displayName === "Living Room",
     );
@@ -926,13 +957,13 @@ describe("startBridge", () => {
       "zigbee2mqtt/living_room",
     );
     expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
-      expectedVersion,
+      VERSION,
     );
     await shutdown();
   });
 
   test("sets AccessoryInformation on scene accessories", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     const accessory = bridge.bridgedAccessories.find(
       (a) => a.displayName === "Movie Mode",
     );
@@ -945,13 +976,13 @@ describe("startBridge", () => {
       "zigbee2mqtt/living_room:scene:1",
     );
     expect(info?.getCharacteristic(Characteristic.FirmwareRevision).value).toBe(
-      expectedVersion,
+      VERSION,
     );
     await shutdown();
   });
 
   test("subscribes to device topics on MQTT connect", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -966,7 +997,7 @@ describe("startBridge", () => {
   test("requests initial state on MQTT connect", async () => {
     const origRandom = Math.random;
     Math.random = () => 0.5;
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     jest.useFakeTimers();
     try {
       emitConnect();
@@ -986,7 +1017,7 @@ describe("startBridge", () => {
   });
 
   test("MQTT message updates state cache and accessory", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1008,7 +1039,7 @@ describe("startBridge", () => {
   });
 
   test("ignores messages for unknown topics", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1021,7 +1052,7 @@ describe("startBridge", () => {
   });
 
   test("ignores messages for unconfigured topics", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1034,7 +1065,7 @@ describe("startBridge", () => {
   });
 
   test("ignores malformed JSON messages", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1047,7 +1078,7 @@ describe("startBridge", () => {
   });
 
   test("MQTT error does not crash", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
 
     const origError = console.error;
     console.error = () => {
@@ -1062,7 +1093,7 @@ describe("startBridge", () => {
   });
 
   test("HomeKit set publishes to MQTT when connected", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1088,7 +1119,7 @@ describe("startBridge", () => {
   });
 
   test("HomeKit brightness publishes Z2M-converted brightness", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1123,7 +1154,7 @@ describe("startBridge", () => {
         },
       ],
     };
-    const { bridge, shutdown } = await startBridge(cfg);
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1159,7 +1190,7 @@ describe("startBridge", () => {
         },
       ],
     };
-    const { bridge, shutdown } = await startBridge(cfg);
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1194,7 +1225,7 @@ describe("startBridge", () => {
         },
       ],
     };
-    const { bridge, shutdown } = await startBridge(cfg);
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1238,7 +1269,7 @@ describe("startBridge", () => {
         },
       ],
     };
-    const { bridge, shutdown } = await startBridge(cfg);
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1264,7 +1295,7 @@ describe("startBridge", () => {
   });
 
   test("HomeKit set reports error when MQTT disconnected", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
 
     const accessory = bridge.bridgedAccessories.find(
       (a) => a.displayName === "Living Room",
@@ -1281,7 +1312,7 @@ describe("startBridge", () => {
   });
 
   test("Z2M get with no cached state returns SERVICE_COMMUNICATION_FAILURE", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1301,7 +1332,7 @@ describe("startBridge", () => {
   });
 
   test("HomeKit get returns cached MQTT state", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1326,30 +1357,30 @@ describe("startBridge", () => {
   });
 
   test("shutdown completes without error", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     await shutdown();
   });
 
   test("MQTT close event logs without crashing", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.emit("close");
     await shutdown();
   });
 
   test("MQTT reconnect event logs without crashing", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.emit("reconnect");
     await shutdown();
   });
 
   test("MQTT offline event logs without crashing", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     mockClient.emit("offline");
     await shutdown();
   });
 
   test("bridge identify event logs without crashing", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     let callbackCalled = false;
     bridge.emit("identify", false, () => {
       callbackCalled = true;
@@ -1359,31 +1390,31 @@ describe("startBridge", () => {
   });
 
   test("bridge listening event logs without crashing", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     bridge.emit("listening", 51826, "0.0.0.0");
     await shutdown();
   });
 
   test("bridge advertised event logs without crashing", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     bridge.emit("advertised");
     await shutdown();
   });
 
   test("bridge paired event logs without crashing", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     bridge.emit("paired");
     await shutdown();
   });
 
   test("bridge unpaired event logs without crashing", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     bridge.emit("unpaired");
     await shutdown();
   });
 
   test("bridge characteristic-warning event logs without crashing", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     const warning = {
       characteristic: {},
       type: "slow-write",
@@ -1395,7 +1426,7 @@ describe("startBridge", () => {
   });
 
   test("HAP server pair event logs without crashing", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     const server = bridge._server;
     expect(server).toBeDefined();
     // Accessory's own pair handler calls the callback; our listener only logs.
@@ -1405,7 +1436,7 @@ describe("startBridge", () => {
   });
 
   test("HAP server connection-closed event logs without crashing", async () => {
-    const { bridge, shutdown } = await startBridge(testConfig());
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
     const server = bridge._server;
     expect(server).toBeDefined();
     const fakeConnection = {
@@ -1439,7 +1470,7 @@ describe("startBridge", () => {
     }
 
     test("suppresses color bounce after HomeKit write", async () => {
-      const { bridge, shutdown } = await startBridge(colorConfig());
+      const { bridge, shutdown } = await startBridge(colorConfig(), VERSION);
       mockClient.connected = true;
       mockClient.emit("connect");
 
@@ -1484,7 +1515,7 @@ describe("startBridge", () => {
       Date.now = () => now;
 
       try {
-        const { bridge, shutdown } = await startBridge(colorConfig());
+        const { bridge, shutdown } = await startBridge(colorConfig(), VERSION);
         mockClient.connected = true;
         mockClient.emit("connect");
 
@@ -1526,7 +1557,7 @@ describe("startBridge", () => {
     });
 
     test("accepts color updates with no prior publish", async () => {
-      const { bridge, shutdown } = await startBridge(colorConfig());
+      const { bridge, shutdown } = await startBridge(colorConfig(), VERSION);
       mockClient.connected = true;
       mockClient.emit("connect");
 
@@ -1581,7 +1612,7 @@ function wledConfig(): Config {
 
 describe("WLED device support", () => {
   test("subscribes to WLED sub-topics on MQTT connect", async () => {
-    const { shutdown } = await startBridge(wledConfig());
+    const { shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1597,7 +1628,7 @@ describe("WLED device support", () => {
     // WLED has no side-effect-free state request over MQTT. Sending {} to
     // /api is a no-op (stateUpdated guard fails when nothing changed).
     // The bridge relies on the next WLED state change to populate the cache.
-    const { shutdown } = await startBridge(wledConfig());
+    const { shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1613,7 +1644,7 @@ describe("WLED device support", () => {
   });
 
   test("WLED get with no cached state returns SERVICE_COMMUNICATION_FAILURE", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1633,7 +1664,7 @@ describe("WLED device support", () => {
   });
 
   test("WLED brightness message updates state and accessory", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1649,7 +1680,7 @@ describe("WLED device support", () => {
   });
 
   test("WLED brightness 0 sets state OFF", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1665,7 +1696,7 @@ describe("WLED device support", () => {
   });
 
   test("WLED color message updates hue and saturation", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1684,7 +1715,7 @@ describe("WLED device support", () => {
   });
 
   test("WLED ignores invalid brightness", async () => {
-    const { shutdown } = await startBridge(wledConfig());
+    const { shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1697,7 +1728,7 @@ describe("WLED device support", () => {
   });
 
   test("WLED ignores invalid hex color", async () => {
-    const { shutdown } = await startBridge(wledConfig());
+    const { shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1706,7 +1737,7 @@ describe("WLED device support", () => {
   });
 
   test("HomeKit set publishes WLED JSON API format", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1728,7 +1759,7 @@ describe("WLED device support", () => {
   });
 
   test("HomeKit brightness publishes WLED bri field", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1751,7 +1782,7 @@ describe("WLED device support", () => {
   });
 
   test("HomeKit color publishes WLED seg col format", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1775,7 +1806,7 @@ describe("WLED device support", () => {
   });
 
   test("HomeKit white (H=0/S=0) activates WLED white channel", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1799,7 +1830,7 @@ describe("WLED device support", () => {
   });
 
   test("WLED color write-back is suppressed after HomeKit write", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1826,7 +1857,7 @@ describe("WLED device support", () => {
   });
 
   test("WLED brightness passes through during color suppression window", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1850,7 +1881,7 @@ describe("WLED device support", () => {
   });
 
   test("WLED getState returns normalized HK state from cache", async () => {
-    const { bridge, shutdown } = await startBridge(wledConfig());
+    const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1911,7 +1942,7 @@ describe("WLED device support", () => {
       ],
     };
 
-    const { shutdown } = await startBridge(cfg);
+    const { shutdown } = await startBridge(cfg, VERSION);
     jest.useFakeTimers();
     try {
       emitConnect();
@@ -1960,7 +1991,7 @@ function fanConfig(): Config {
 
 describe("Fan device support", () => {
   test("fan device creates Fanv2 accessory", async () => {
-    const { bridge, shutdown } = await startBridge(fanConfig());
+    const { bridge, shutdown } = await startBridge(fanConfig(), VERSION);
     const accessory = bridge.bridgedAccessories.find(
       (a) => a.displayName === "Ceiling Fan",
     );
@@ -1971,7 +2002,7 @@ describe("Fan device support", () => {
   });
 
   test("fan state update updates Active characteristic", async () => {
-    const { bridge, shutdown } = await startBridge(fanConfig());
+    const { bridge, shutdown } = await startBridge(fanConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -1998,7 +2029,7 @@ describe("Fan device support", () => {
   });
 
   test("HomeKit set publishes fan_state to MQTT", async () => {
-    const { bridge, shutdown } = await startBridge(fanConfig());
+    const { bridge, shutdown } = await startBridge(fanConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -2024,7 +2055,7 @@ describe("Fan device support", () => {
   });
 
   test("HomeKit RotationSpeed publishes fan_mode to MQTT", async () => {
-    const { bridge, shutdown } = await startBridge(fanConfig());
+    const { bridge, shutdown } = await startBridge(fanConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -2050,7 +2081,7 @@ describe("Fan device support", () => {
   });
 
   test("HomeKit TargetFanState AUTO publishes fan_mode smart", async () => {
-    const { bridge, shutdown } = await startBridge(fanConfig());
+    const { bridge, shutdown } = await startBridge(fanConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -2076,7 +2107,7 @@ describe("Fan device support", () => {
   });
 
   test("fan state passes through write-back suppression window", async () => {
-    const { bridge, shutdown } = await startBridge(fanConfig());
+    const { bridge, shutdown } = await startBridge(fanConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -2175,7 +2206,7 @@ describe("startBridge subscription results", () => {
   }
 
   async function connected() {
-    const handle = await startBridge(metricsConfig());
+    const handle = await startBridge(metricsConfig(), VERSION);
     emitConnect();
     return handle;
   }
@@ -2291,7 +2322,7 @@ describe("startBridge with MQTT credentials", () => {
   test("a devices-only bridge authenticates and retries a refused login", async () => {
     const count = mockClients.length;
     const config = loginConfig();
-    const { shutdown } = await startBridge(config, CREDENTIALS);
+    const { shutdown } = await startBridge(config, VERSION, CREDENTIALS);
     try {
       expect(mockClients.length - count).toBe(1);
       expect(mockClient.url).toBe(config.mqtt.url);
@@ -2312,7 +2343,7 @@ describe("startBridge with MQTT credentials", () => {
   test("a mixed bridge authenticates both clients and retries a refused login only on the legacy one", async () => {
     const count = mockClients.length;
     const config = { ...loginConfig(), heatedBedding: HEATED_BEDDING };
-    const { shutdown } = await startBridge(config, CREDENTIALS);
+    const { shutdown } = await startBridge(config, VERSION, CREDENTIALS);
     try {
       expect(mockClients.length - count).toBe(2);
       const legacy = mockClients[count]!;
@@ -2350,7 +2381,7 @@ describe("startBridge with MQTT credentials", () => {
       devices: [],
       heatedBedding: HEATED_BEDDING,
     };
-    const { shutdown } = await startBridge(config, CREDENTIALS);
+    const { shutdown } = await startBridge(config, VERSION, CREDENTIALS);
     try {
       expect(mockClients.length - count).toBe(1);
       expect(mockClient.url).toBe(config.mqtt.url);
@@ -2374,7 +2405,7 @@ describe("startBridge with MQTT credentials", () => {
       heatedBedding: HEATED_BEDDING,
       curtains: CURTAINS,
     };
-    const { shutdown } = await startBridge(config, CREDENTIALS);
+    const { shutdown } = await startBridge(config, VERSION, CREDENTIALS);
     try {
       expect(mockClients.length - count).toBe(2);
       for (const client of mockClients.slice(count)) {
@@ -2431,7 +2462,7 @@ describe("startBridge with MQTT credentials", () => {
       try {
         let failure: unknown;
         try {
-          await startBridge(config, credentials);
+          await startBridge(config, VERSION, credentials);
         } catch (error) {
           failure = error;
         }
@@ -2449,7 +2480,7 @@ describe("startBridge with MQTT credentials", () => {
     const count = mockClients.length;
     const config = loginConfig();
     config.mqtt.passwordFile = "/run/secrets/mqtt_password";
-    const { shutdown } = await startBridge(config, CREDENTIALS);
+    const { shutdown } = await startBridge(config, VERSION, CREDENTIALS);
     try {
       expect(mockClients.length - count).toBe(1);
       expect(mockClient.options).toMatchObject({
@@ -2470,7 +2501,11 @@ describe("startBridge with MQTT credentials", () => {
     };
     const controller = new AbortController();
     try {
-      const { metricsPort, shutdown } = await startBridge(config, CREDENTIALS);
+      const { metricsPort, shutdown } = await startBridge(
+        config,
+        VERSION,
+        CREDENTIALS,
+      );
       let bodies: string[];
       try {
         const legacy = mockClients[count]!;
@@ -2532,7 +2567,7 @@ describe("startBridge with MQTT credentials", () => {
       try {
         const config = metricsConfig();
         config.mqtt.url = url;
-        const { metricsPort, shutdown } = await startBridge(config);
+        const { metricsPort, shutdown } = await startBridge(config, VERSION);
         let page: string;
         try {
           page = await (
@@ -2575,7 +2610,7 @@ describe("startBridge with an mqtt.url that is not well formed", () => {
 
   async function failureOf(config: Config): Promise<unknown> {
     try {
-      await startBridge(config);
+      await startBridge(config, VERSION);
     } catch (error) {
       return error;
     }
@@ -2680,6 +2715,7 @@ describe("main MQTT connection reconnects", () => {
   async function startReconnectTest(credentials?: MQTTCredentials) {
     const { shutdown } = await startBridge(
       credentials ? loginConfig() : testConfig(),
+      VERSION,
       credentials,
     );
     let attempts = 0;
@@ -2701,7 +2737,7 @@ describe("main MQTT connection reconnects", () => {
   }
 
   test("an anonymous bridge passes only the reconnect and subscription options", async () => {
-    const { shutdown } = await startBridge(testConfig());
+    const { shutdown } = await startBridge(testConfig(), VERSION);
     try {
       expect(mockClient.options).toStrictEqual({
         reconnectPeriod: 1000,
@@ -2817,13 +2853,13 @@ describe("main MQTT connection reconnects", () => {
 
 describe("startBridge with metrics", () => {
   test("starts and stops metrics server", async () => {
-    const { shutdown } = await startBridge(metricsConfig());
+    const { shutdown } = await startBridge(metricsConfig(), VERSION);
     await shutdown();
   });
 
   test("metrics server serves /metrics endpoint", async () => {
     const cfg = metricsConfig();
-    const { metricsPort, shutdown } = await startBridge(cfg);
+    const { metricsPort, shutdown } = await startBridge(cfg, VERSION);
     expect(metricsPort).toBeGreaterThan(0);
 
     const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
@@ -2837,7 +2873,7 @@ describe("startBridge with metrics", () => {
       ...metricsConfig(),
       metrics: { port: 0, bind: "127.0.0.1" },
     };
-    const { metricsPort, shutdown } = await startBridge(cfg);
+    const { metricsPort, shutdown } = await startBridge(cfg, VERSION);
     expect(metricsPort).toBeGreaterThan(0);
 
     const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
@@ -2847,7 +2883,7 @@ describe("startBridge with metrics", () => {
 
   test("status page reflects bridge state", async () => {
     const cfg = metricsConfig();
-    const { metricsPort, shutdown } = await startBridge(cfg);
+    const { metricsPort, shutdown } = await startBridge(cfg, VERSION);
 
     mockClient.connected = true;
     mockClient.emit("connect");
@@ -2869,7 +2905,7 @@ describe("startBridge with metrics", () => {
 
   test("mqtt connect sets mqttConnected to 1", async () => {
     const cfg = metricsConfig();
-    const { shutdown } = await startBridge(cfg);
+    const { shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -2880,7 +2916,7 @@ describe("startBridge with metrics", () => {
 
   test("mqtt close sets mqttConnected to 0", async () => {
     const cfg = metricsConfig();
-    const { shutdown } = await startBridge(cfg);
+    const { shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
     mockClient.emit("close");
@@ -2889,14 +2925,14 @@ describe("startBridge with metrics", () => {
 
   test("mqtt offline sets mqttConnected to 0", async () => {
     const cfg = metricsConfig();
-    const { shutdown } = await startBridge(cfg);
+    const { shutdown } = await startBridge(cfg, VERSION);
     mockClient.emit("offline");
     await shutdown();
   });
 
   test("mqtt error increments mqttErrors", async () => {
     const cfg = metricsConfig();
-    const { shutdown } = await startBridge(cfg);
+    const { shutdown } = await startBridge(cfg, VERSION);
     const origError = console.error;
     console.error = () => {
       /* suppress */
@@ -2911,7 +2947,7 @@ describe("startBridge with metrics", () => {
 
   test("mqtt message increments mqttMessagesReceived", async () => {
     const cfg = metricsConfig();
-    const { shutdown } = await startBridge(cfg);
+    const { shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -2925,7 +2961,7 @@ describe("startBridge with metrics", () => {
 
   test("publish increments mqttMessagesPublished", async () => {
     const cfg = metricsConfig();
-    const { bridge, shutdown } = await startBridge(cfg);
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -2941,14 +2977,14 @@ describe("startBridge with metrics", () => {
 
   test("devicesConfigured gauge is set at startup", async () => {
     const cfg = metricsConfig();
-    const { shutdown } = await startBridge(cfg);
+    const { shutdown } = await startBridge(cfg, VERSION);
     // devicesConfigured is set synchronously during startBridge
     await shutdown();
   });
 
   test("HAP connection-opened increments hapConnectionsActive", async () => {
     const cfg = metricsConfig();
-    const { bridge, shutdown } = await startBridge(cfg);
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
     const server = bridge._server;
     expect(server).toBeDefined();
 
@@ -2969,7 +3005,7 @@ describe("startBridge with metrics", () => {
 
   test("HAP connection-closed decrements hapConnectionsActive", async () => {
     const cfg = metricsConfig();
-    const { bridge, shutdown } = await startBridge(cfg);
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
     const server = bridge._server;
     expect(server).toBeDefined();
 
@@ -2985,7 +3021,7 @@ describe("startBridge with metrics", () => {
 
   test("HAP authenticated increments hapPairVerify", async () => {
     const cfg = metricsConfig();
-    const { bridge, shutdown } = await startBridge(cfg);
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
     const server = bridge._server;
     expect(server).toBeDefined();
 
@@ -3015,7 +3051,7 @@ describe("get retry", () => {
   });
 
   async function startRetryTest(cfg?: Config) {
-    const result = await startBridge(cfg ?? testConfig());
+    const result = await startBridge(cfg ?? testConfig(), VERSION);
     jest.useFakeTimers();
     emitConnect();
     return result;
@@ -3220,7 +3256,7 @@ describe("get retry", () => {
 describe("devicesStateUnknown metric", () => {
   test("starts at total device count on startup", async () => {
     const cfg = metricsConfig();
-    const { metricsPort, shutdown } = await startBridge(cfg);
+    const { metricsPort, shutdown } = await startBridge(cfg, VERSION);
 
     const res = await fetch(`http://127.0.0.1:${String(metricsPort)}/metrics`);
     const body = await res.text();
@@ -3232,7 +3268,7 @@ describe("devicesStateUnknown metric", () => {
 
   test("decreases as devices respond", async () => {
     const cfg = metricsConfig();
-    const { metricsPort, shutdown } = await startBridge(cfg);
+    const { metricsPort, shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -3252,7 +3288,7 @@ describe("devicesStateUnknown metric", () => {
 
   test("no double-decrement on subsequent updates to same device", async () => {
     const cfg = metricsConfig();
-    const { metricsPort, shutdown } = await startBridge(cfg);
+    const { metricsPort, shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 
@@ -3277,7 +3313,7 @@ describe("devicesStateUnknown metric", () => {
 
   test("recomputed correctly on reconnect with cached state", async () => {
     const cfg = metricsConfig();
-    const { metricsPort, shutdown } = await startBridge(cfg);
+    const { metricsPort, shutdown } = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
 

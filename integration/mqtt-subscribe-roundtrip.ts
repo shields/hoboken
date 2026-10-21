@@ -121,30 +121,33 @@ describe(
 
       directory = mkdtempSync(path.join(tmpdir(), "hoboken-subscribe-"));
       HAPStorage.setCustomStoragePath(directory);
-      handle = await startBridge({
-        bridge: {
-          name: "MQTT subscription integration",
-          mac: "0E:36:29:42:81:22",
-          pincode: "031-45-154",
-          port: 0,
+      handle = await startBridge(
+        {
+          bridge: {
+            name: "MQTT subscription integration",
+            mac: "0E:36:29:42:81:22",
+            pincode: "031-45-154",
+            port: 0,
+          },
+          mqtt: { url: `mqtt://127.0.0.1:${String(address.port)}` },
+          devices: [
+            {
+              name: "Granted Light",
+              type: "z2m",
+              topic: GRANTED,
+              capabilities: ["on_off"],
+            },
+            {
+              name: "Refused Light",
+              type: "z2m",
+              topic: REFUSED,
+              capabilities: ["on_off"],
+            },
+          ],
+          metrics: { port: 0, bind: "127.0.0.1" },
         },
-        mqtt: { url: `mqtt://127.0.0.1:${String(address.port)}` },
-        devices: [
-          {
-            name: "Granted Light",
-            type: "z2m",
-            topic: GRANTED,
-            capabilities: ["on_off"],
-          },
-          {
-            name: "Refused Light",
-            type: "z2m",
-            topic: REFUSED,
-            capabilities: ["on_off"],
-          },
-        ],
-        metrics: { port: 0, bind: "127.0.0.1" },
-      });
+        "integration",
+      );
     });
 
     after(async () => {
