@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# All dependencies are pure JS (no native modules), so Bun can install them
-# for a Node.js runtime without binary compatibility issues.
+# Production dependencies are pure JS, so one native Bun install can serve
+# every target architecture and the Node.js runtime.
 # Digests pin to OCI image indexes (multi-arch) covering amd64 and arm64.
-FROM oven/bun:1.4.3@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS build
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.3@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS build
 ARG GIT_VERSION=unknown
 WORKDIR /app
 COPY package.json bun.lock ./

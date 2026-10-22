@@ -18,7 +18,9 @@ const repoFile = (path: string) =>
   Bun.file(new URL(`../${path}`, import.meta.url));
 
 const dockerBunTag = async (dockerfile: string) =>
-  /^FROM oven\/bun:(\S+)@sha256:/m.exec(await repoFile(dockerfile).text())?.[1];
+  /^FROM (?:--platform=\S+ )?oven\/bun:(\S+)@sha256:/m.exec(
+    await repoFile(dockerfile).text(),
+  )?.[1];
 
 const dockerPlaywrightVersion = async () =>
   /^FROM mcr\.microsoft\.com\/playwright:v(\d+\.\d+\.\d+)(?:-[^\s@]+)?@sha256:/m.exec(
