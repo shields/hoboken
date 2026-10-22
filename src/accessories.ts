@@ -22,7 +22,11 @@ import {
   uuid,
 } from "@homebridge/hap-nodejs";
 import type { Capability, DeviceConfig, SceneConfig } from "./config.ts";
-import { clampColorTemp, type HomeKitState } from "./convert.ts";
+import {
+  clampColorTemp,
+  FAN_SPEED_STEP,
+  type HomeKitState,
+} from "./convert.ts";
 export type PublishFn = (
   topic: string,
   payload: Record<string, unknown>,
@@ -184,7 +188,13 @@ export function createFanAccessory(
       setPayload,
       getState,
       device.topic,
-    );
+    ).setProps({
+      minValue: 0,
+      // Off the step grid, because HAP-NodeJS refuses a write above the
+      // maximum, and scenes and Siri can still send 100 for high.
+      maxValue: 100,
+      minStep: FAN_SPEED_STEP,
+    });
     addSimpleCharacteristic(
       service,
       Characteristic.TargetFanState,
@@ -310,7 +320,7 @@ function addSimpleCharacteristic(
   getState: GetStateFn,
   topic: string,
   onGetTransform?: (value: boolean | number) => boolean | number,
-): void {
+): Characteristic {
   const c = service.getCharacteristic(characteristicClass);
 
   c.onGet(() => {
@@ -324,4 +334,6 @@ function addSimpleCharacteristic(
   c.onSet((value) => {
     setPayload({ [key]: value });
   });
+
+  return c;
 }

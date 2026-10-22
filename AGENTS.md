@@ -73,6 +73,16 @@ Each module is independently testable with dependency injection:
   Service, Characteristic) are lightweight enough to instantiate directly in tests.
 - **Scenes as momentary switches**: `onSet(true)` publishes `{"scene_recall": id}`,
   then auto-resets to off after 1 second.
+- **Fan speed**: a `fan_speed` device's `RotationSpeed` is a percentage on a
+  grid of `FAN_SPEED_STEP` (33), so `off`, `low`, `medium`, and `high` are 0,
+  33, 66, and 99. The range still ends at 100, because a scene saved at 100% or
+  a Siri request can send 100 for `high`. HAP-NodeJS snaps the values the
+  bridge sets to the grid, but checks a controller's write only against the
+  range: one above 100 fails with `INVALID_VALUE_IN_REQUEST` before `onSet`
+  runs, and only the `HAP-NodeJS:Characteristic` debug namespace shows why. Any
+  other value is published as sent and stays on the characteristic until the
+  next read or Zigbee2MQTT report replaces it. `homeKitSpeedToZ2mFanMode` maps
+  it to the nearest step, except that any positive value is at least `low`.
 - **MQTT disconnect handling**: `onSet` throws
   `HapStatusError(SERVICE_COMMUNICATION_FAILURE)` when MQTT is disconnected.
 - **Invalid heated bedding messages**: An invalid heated bedding MQTT message
@@ -237,7 +247,7 @@ Each module is independently testable with dependency injection:
 | `color_temp` | `Characteristic.ColorTemperature`  | mireds, passthrough       |
 | `color_hs`   | `Hue` + `Saturation`               | ranges match, passthrough |
 | `fan`        | `Active` (FanV2 service)           | `fan_state` ON/OFF ↔ 1/0  |
-| `fan_speed`  | `RotationSpeed` + `TargetFanState` | speed thirds, smart=AUTO  |
+| `fan_speed`  | `RotationSpeed` + `TargetFanState` | 33% steps, smart=AUTO     |
 
 ## Naming Conventions
 

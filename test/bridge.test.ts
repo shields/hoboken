@@ -2026,7 +2026,7 @@ describe("Fan device support", () => {
     const speed = accessory
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.RotationSpeed);
-    expect(speed.value).toBe(67);
+    expect(speed.value).toBe(66);
 
     await shutdown();
   });
@@ -2069,7 +2069,7 @@ describe("Fan device support", () => {
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.RotationSpeed);
 
-    speed.setValue(100);
+    speed.setValue(99);
     await flush();
 
     expect(
@@ -2109,7 +2109,7 @@ describe("Fan device support", () => {
     await shutdown();
   });
 
-  test("fan state passes through write-back suppression window", async () => {
+  test("fan state from Z2M replaces the value HomeKit wrote", async () => {
     const { bridge, shutdown } = await startBridge(fanConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
@@ -2119,21 +2119,20 @@ describe("Fan device support", () => {
     )!;
     const service = accessory.getService(Service.Fanv2)!;
 
-    // HomeKit writes rotation speed, triggering suppression window
-    service.getCharacteristic(Characteristic.RotationSpeed).setValue(100);
+    // Z2M reports a different mode than the one written, so the speed assertion
+    // below holds only if the report is applied.
+    service.getCharacteristic(Characteristic.RotationSpeed).setValue(33);
     await flush();
 
-    // Z2M sends back fan state during suppression window
     mockClient.emit(
       "message",
       "zigbee2mqtt/ceiling_fan",
       Buffer.from(JSON.stringify({ fan_state: "ON", fan_mode: "high" })),
     );
 
-    // Fan properties should pass through (not be suppressed)
     expect(service.getCharacteristic(Characteristic.Active).value).toBe(1);
     expect(service.getCharacteristic(Characteristic.RotationSpeed).value).toBe(
-      100,
+      99,
     );
 
     await shutdown();

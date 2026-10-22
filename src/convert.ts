@@ -40,16 +40,20 @@ export function clampColorTemp(mireds: number): number {
   return Math.max(COLOR_TEMP_MIN, Math.min(COLOR_TEMP_MAX, mireds));
 }
 
+// RotationSpeed is a percentage, because Siri's low, medium, and high are
+// reported to break on a 0-3 scale, and steps of 33 keep every step whole.
+export const FAN_SPEED_STEP = 33;
+
 export function z2mFanModeToHomeKit(mode: string): Partial<HomeKitState> {
   switch (mode) {
     case "off":
       return { rotation_speed: 0, target_fan_state: 0 };
     case "low":
-      return { rotation_speed: 33, target_fan_state: 0 };
+      return { rotation_speed: FAN_SPEED_STEP, target_fan_state: 0 };
     case "medium":
-      return { rotation_speed: 67, target_fan_state: 0 };
+      return { rotation_speed: 2 * FAN_SPEED_STEP, target_fan_state: 0 };
     case "high":
-      return { rotation_speed: 100, target_fan_state: 0 };
+      return { rotation_speed: 3 * FAN_SPEED_STEP, target_fan_state: 0 };
     case "smart":
       return { target_fan_state: 1 };
     case "on":
@@ -60,8 +64,9 @@ export function z2mFanModeToHomeKit(mode: string): Partial<HomeKitState> {
 
 export function homeKitSpeedToZ2mFanMode(speed: number): string {
   if (speed <= 0) return "off";
-  if (speed <= 33) return "low";
-  return speed <= 67 ? "medium" : "high";
+  const step = Math.round(speed / FAN_SPEED_STEP);
+  if (step <= 1) return "low";
+  return step === 2 ? "medium" : "high";
 }
 
 export function wledBrightnessToHomeKit(wled: number): number {

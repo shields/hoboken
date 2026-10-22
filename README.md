@@ -75,7 +75,7 @@ Devices declare capabilities in `config.yaml`:
 | `color_temp` | `ColorTemperature`                 | mireds, no conversion needed | not supported              |
 | `color_hs`   | `Hue` + `Saturation`               | ranges match, no conversion  | HSV ↔ RGB conversion       |
 | `fan`        | `Active` (FanV2)                   | `fan_state` ON/OFF ↔ 1/0     | not supported              |
-| `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ speed thirds    | not supported              |
+| `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ 33% steps       | not supported              |
 
 ### Scenes
 
@@ -615,6 +615,14 @@ kubectl -n hoboken logs deploy/hoboken
 The bridge logs lifecycle events: MQTT connection state, HAP server listening
 address, mDNS advertisement, identify requests, pair-setup completion, and
 connection close events.
+
+To see what the Home app and Siri read and write, set
+`DEBUG=HAP-NodeJS:Accessory,HAP-NodeJS:Characteristic` in the container's
+environment. HAP-NodeJS then logs each characteristic read and write request
+(`Processing characteristic set: ...`), and the reason it rejects a value, such
+as a Zigbee2MQTT fan speed above 100, which the bridge never sees. Unset it
+afterwards, because it logs every request. Do not widen the pattern; see
+[MQTT authentication](#mqtt-authentication).
 
 ### Tucson curtains
 

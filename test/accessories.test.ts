@@ -21,7 +21,12 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { Characteristic, HAPStatus, Service } from "@homebridge/hap-nodejs";
+import {
+  Characteristic,
+  type HAPConnection,
+  HAPStatus,
+  Service,
+} from "@homebridge/hap-nodejs";
 import type { DeviceConfig } from "../src/config.ts";
 import {
   createFanAccessory,
@@ -733,8 +738,8 @@ describe("createFanAccessory", () => {
 
     expect(service.getCharacteristic(Characteristic.Active)).toBeDefined();
     expect(
-      service.getCharacteristic(Characteristic.RotationSpeed),
-    ).toBeDefined();
+      service.getCharacteristic(Characteristic.RotationSpeed).props,
+    ).toMatchObject({ minValue: 0, maxValue: 100, minStep: 33 });
     expect(
       service.getCharacteristic(Characteristic.TargetFanState),
     ).toBeDefined();
@@ -786,8 +791,8 @@ describe("createFanAccessory", () => {
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.RotationSpeed);
 
-    stateMap.set("test_fan", { rotation_speed: 67 });
-    expect(await speed.handleGetRequest()).toBe(67);
+    stateMap.set("test_fan", { rotation_speed: 66 });
+    expect(await speed.handleGetRequest()).toBe(66);
   });
 
   test("onGet RotationSpeed throws SERVICE_COMMUNICATION_FAILURE when no state", async () => {
@@ -803,16 +808,41 @@ describe("createFanAccessory", () => {
     expect(speed.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
   });
 
-  test("onSet RotationSpeed publishes rotation_speed value", async () => {
+  // HAP-NodeJS checks a write against the characteristic's props only when it
+  // arrives on a controller's connection.
+  const connection = {} as HAPConnection;
+
+  test.each([50, 99, 100])(
+    "onSet RotationSpeed publishes a controller's %p as sent",
+    async (value) => {
+      const device = makeFanDevice();
+      const accessory = createFanAccessory(device, publish, getState);
+      const speed = accessory
+        .getService(Service.Fanv2)!
+        .getCharacteristic(Characteristic.RotationSpeed);
+
+      await speed.handleSetRequest(value, connection);
+      await flush();
+      expect(publish).toHaveBeenCalledWith("test_fan", {
+        rotation_speed: value,
+      });
+    },
+  );
+
+  test("onSet RotationSpeed rejects a controller's 101 without publishing", async () => {
     const device = makeFanDevice();
     const accessory = createFanAccessory(device, publish, getState);
     const speed = accessory
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.RotationSpeed);
 
-    speed.setValue(50);
+    expect(
+      await Promise.allSettled([speed.handleSetRequest(101, connection)]),
+    ).toEqual([
+      { status: "rejected", reason: HAPStatus.INVALID_VALUE_IN_REQUEST },
+    ]);
     await flush();
-    expect(publish).toHaveBeenCalledWith("test_fan", { rotation_speed: 50 });
+    expect(publish).not.toHaveBeenCalled();
   });
 
   test("onGet TargetFanState returns cached value", async () => {
@@ -857,7 +887,7 @@ describe("createFanAccessory", () => {
     const service = accessory.getService(Service.Fanv2)!;
 
     service.getCharacteristic(Characteristic.Active).setValue(1);
-    service.getCharacteristic(Characteristic.RotationSpeed).setValue(67);
+    service.getCharacteristic(Characteristic.RotationSpeed).setValue(66);
 
     expect(publish).not.toHaveBeenCalled();
     await flush();
@@ -865,7 +895,7 @@ describe("createFanAccessory", () => {
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenCalledWith("test_fan", {
       active: 1,
-      rotation_speed: 67,
+      rotation_speed: 66,
     });
   });
 });
@@ -901,7 +931,7 @@ describe("updateFanAccessoryState", () => {
 
     updateFanAccessoryState(
       accessory,
-      { rotation_speed: 67, target_fan_state: 0 },
+      { rotation_speed: 66, target_fan_state: 0 },
       ["fan", "fan_speed"],
     );
     const speed = accessory
@@ -910,7 +940,7 @@ describe("updateFanAccessoryState", () => {
     const target = accessory
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.TargetFanState);
-    expect(speed.value).toBe(67);
+    expect(speed.value).toBe(66);
     expect(target.value).toBe(0);
   });
 
@@ -920,7 +950,7 @@ describe("updateFanAccessoryState", () => {
 
     updateFanAccessoryState(
       accessory,
-      { active: 1, rotation_speed: 67, target_fan_state: 1 },
+      { active: 1, rotation_speed: 66, target_fan_state: 1 },
       ["fan"],
     );
     const service = accessory.getService(Service.Fanv2)!;
