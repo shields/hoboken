@@ -2026,7 +2026,7 @@ describe("Fan device support", () => {
     const speed = accessory
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.RotationSpeed);
-    expect(speed.value).toBe(66);
+    expect(speed.value).toBe(2 * (100 / 3));
 
     await shutdown();
   });
@@ -2069,7 +2069,7 @@ describe("Fan device support", () => {
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.RotationSpeed);
 
-    speed.setValue(99);
+    speed.setValue(100);
     await flush();
 
     expect(
@@ -2132,7 +2132,7 @@ describe("Fan device support", () => {
 
     expect(service.getCharacteristic(Characteristic.Active).value).toBe(1);
     expect(service.getCharacteristic(Characteristic.RotationSpeed).value).toBe(
-      99,
+      100,
     );
 
     await shutdown();

@@ -739,7 +739,7 @@ describe("createFanAccessory", () => {
     expect(service.getCharacteristic(Characteristic.Active)).toBeDefined();
     expect(
       service.getCharacteristic(Characteristic.RotationSpeed).props,
-    ).toMatchObject({ minValue: 0, maxValue: 100, minStep: 33 });
+    ).toMatchObject({ minValue: 0, maxValue: 100, minStep: 100 / 3 });
     expect(
       service.getCharacteristic(Characteristic.TargetFanState),
     ).toBeDefined();
@@ -791,8 +791,8 @@ describe("createFanAccessory", () => {
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.RotationSpeed);
 
-    stateMap.set("test_fan", { rotation_speed: 66 });
-    expect(await speed.handleGetRequest()).toBe(66);
+    stateMap.set("test_fan", { rotation_speed: 67 });
+    expect(await speed.handleGetRequest()).toBe(2 * (100 / 3));
   });
 
   test("onGet RotationSpeed throws SERVICE_COMMUNICATION_FAILURE when no state", async () => {
@@ -812,7 +812,7 @@ describe("createFanAccessory", () => {
   // arrives on a controller's connection.
   const connection = {} as HAPConnection;
 
-  test.each([50, 99, 100])(
+  test.each([50, 100 / 3, 100])(
     "onSet RotationSpeed publishes a controller's %p as sent",
     async (value) => {
       const device = makeFanDevice();
@@ -887,7 +887,7 @@ describe("createFanAccessory", () => {
     const service = accessory.getService(Service.Fanv2)!;
 
     service.getCharacteristic(Characteristic.Active).setValue(1);
-    service.getCharacteristic(Characteristic.RotationSpeed).setValue(66);
+    service.getCharacteristic(Characteristic.RotationSpeed).setValue(100);
 
     expect(publish).not.toHaveBeenCalled();
     await flush();
@@ -895,7 +895,7 @@ describe("createFanAccessory", () => {
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenCalledWith("test_fan", {
       active: 1,
-      rotation_speed: 66,
+      rotation_speed: 100,
     });
   });
 });
@@ -931,7 +931,7 @@ describe("updateFanAccessoryState", () => {
 
     updateFanAccessoryState(
       accessory,
-      { rotation_speed: 66, target_fan_state: 0 },
+      { rotation_speed: 67, target_fan_state: 0 },
       ["fan", "fan_speed"],
     );
     const speed = accessory
@@ -940,7 +940,7 @@ describe("updateFanAccessoryState", () => {
     const target = accessory
       .getService(Service.Fanv2)!
       .getCharacteristic(Characteristic.TargetFanState);
-    expect(speed.value).toBe(66);
+    expect(speed.value).toBe(2 * (100 / 3));
     expect(target.value).toBe(0);
   });
 
@@ -950,7 +950,7 @@ describe("updateFanAccessoryState", () => {
 
     updateFanAccessoryState(
       accessory,
-      { active: 1, rotation_speed: 66, target_fan_state: 1 },
+      { active: 1, rotation_speed: 67, target_fan_state: 1 },
       ["fan"],
     );
     const service = accessory.getService(Service.Fanv2)!;

@@ -1735,7 +1735,7 @@ describe("status page (GET /)", () => {
       state: { fan_state: "ON", fan_mode: "medium" },
     });
     expect(body).toContain("RotationSpeed");
-    expect(body).toContain("66%");
+    expect(body).toContain("67%");
     expect(body).toContain("TargetFanState");
     expect(body).toContain("MANUAL");
   });
@@ -1794,7 +1794,7 @@ describe("status page (GET /)", () => {
       capabilities: ["fan", "fan_speed"],
       state: { fan_mode: "high" },
     });
-    expect(body).toContain("\u{2192} 99%");
+    expect(body).toContain("\u{2192} 100%");
   });
 
   test("fan_mode smart annotation shows auto", async () => {

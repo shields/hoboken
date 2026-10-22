@@ -41,19 +41,20 @@ export function clampColorTemp(mireds: number): number {
 }
 
 // RotationSpeed is a percentage, because Siri's low, medium, and high are
-// reported to break on a 0-3 scale, and steps of 33 keep every step whole.
-export const FAN_SPEED_STEP = 33;
+// reported to break on a 0-3 scale. The step must be exactly 100 / 3: HAP-NodeJS
+// caps the range at the last whole step, so 33 or 33.33 would top out below 100.
+export const FAN_SPEED_STEP = 100 / 3;
 
 export function z2mFanModeToHomeKit(mode: string): Partial<HomeKitState> {
   switch (mode) {
     case "off":
       return { rotation_speed: 0, target_fan_state: 0 };
     case "low":
-      return { rotation_speed: FAN_SPEED_STEP, target_fan_state: 0 };
+      return { rotation_speed: 33, target_fan_state: 0 };
     case "medium":
-      return { rotation_speed: 2 * FAN_SPEED_STEP, target_fan_state: 0 };
+      return { rotation_speed: 67, target_fan_state: 0 };
     case "high":
-      return { rotation_speed: 3 * FAN_SPEED_STEP, target_fan_state: 0 };
+      return { rotation_speed: 100, target_fan_state: 0 };
     case "smart":
       return { target_fan_state: 1 };
     case "on":

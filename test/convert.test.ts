@@ -394,7 +394,7 @@ describe("z2mToHomeKit", () => {
 
   test("converts fan_mode medium to rotation_speed and target_fan_state", () => {
     expect(z2mToHomeKit({ fan_mode: "medium" })).toEqual({
-      rotation_speed: 66,
+      rotation_speed: 67,
       target_fan_state: 0,
     });
   });
@@ -412,7 +412,7 @@ describe("z2mToHomeKit", () => {
   test("converts fan_state and fan_mode together", () => {
     expect(z2mToHomeKit({ fan_state: "ON", fan_mode: "high" })).toEqual({
       active: 1,
-      rotation_speed: 99,
+      rotation_speed: 100,
       target_fan_state: 0,
     });
   });
@@ -554,7 +554,7 @@ describe("homeKitToZ2m", () => {
 
   test("rotation_speed → fan_mode via speed mapping", () => {
     expect(homeKitToZ2m({ rotation_speed: 33 })).toEqual({ fan_mode: "low" });
-    expect(homeKitToZ2m({ rotation_speed: 66 })).toEqual({
+    expect(homeKitToZ2m({ rotation_speed: 67 })).toEqual({
       fan_mode: "medium",
     });
     expect(homeKitToZ2m({ rotation_speed: 0 })).toEqual({ fan_mode: "off" });
@@ -585,7 +585,7 @@ describe("homeKitToZ2m", () => {
   });
 
   test("active and rotation_speed together", () => {
-    expect(homeKitToZ2m({ active: 1, rotation_speed: 99 })).toEqual({
+    expect(homeKitToZ2m({ active: 1, rotation_speed: 100 })).toEqual({
       fan_state: "ON",
       fan_mode: "high",
     });
@@ -607,16 +607,16 @@ describe("z2mFanModeToHomeKit", () => {
     });
   });
 
-  test("medium → rotation_speed: 66, target_fan_state: 0", () => {
+  test("medium → rotation_speed: 67, target_fan_state: 0", () => {
     expect(z2mFanModeToHomeKit("medium")).toEqual({
-      rotation_speed: 66,
+      rotation_speed: 67,
       target_fan_state: 0,
     });
   });
 
-  test("high → rotation_speed: 99, target_fan_state: 0", () => {
+  test("high → rotation_speed: 100, target_fan_state: 0", () => {
     expect(z2mFanModeToHomeKit("high")).toEqual({
-      rotation_speed: 99,
+      rotation_speed: 100,
       target_fan_state: 0,
     });
   });
@@ -649,12 +649,12 @@ describe("homeKitSpeedToZ2mFanMode", () => {
 
   test.each([
     [33, "low"],
+    [100 / 3, "low"],
     [49, "low"],
     [50, "medium"],
-    [66, "medium"],
-    [82, "medium"],
-    [83, "high"],
-    [99, "high"],
+    [200 / 3, "medium"],
+    [83, "medium"],
+    [84, "high"],
     [100, "high"],
   ])("%p → %s, the nearest step", (speed, mode) => {
     expect(homeKitSpeedToZ2mFanMode(speed)).toBe(mode);

@@ -75,7 +75,7 @@ Devices declare capabilities in `config.yaml`:
 | `color_temp` | `ColorTemperature`                 | mireds, no conversion needed | not supported              |
 | `color_hs`   | `Hue` + `Saturation`               | ranges match, no conversion  | HSV ↔ RGB conversion       |
 | `fan`        | `Active` (FanV2)                   | `fan_state` ON/OFF ↔ 1/0     | not supported              |
-| `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ 33% steps       | not supported              |
+| `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ speed thirds    | not supported              |
 
 ### Scenes
 

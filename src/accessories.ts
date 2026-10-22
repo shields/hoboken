@@ -188,13 +188,7 @@ export function createFanAccessory(
       setPayload,
       getState,
       device.topic,
-    ).setProps({
-      minValue: 0,
-      // Off the step grid, because HAP-NodeJS refuses a write above the
-      // maximum, and scenes and Siri can still send 100 for high.
-      maxValue: 100,
-      minStep: FAN_SPEED_STEP,
-    });
+    ).setProps({ minValue: 0, maxValue: 100, minStep: FAN_SPEED_STEP });
     addSimpleCharacteristic(
       service,
       Characteristic.TargetFanState,
