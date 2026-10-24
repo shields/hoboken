@@ -30,7 +30,7 @@
     "prettier": "3.9.10",
     "prettier-plugin-toml": "4.1.0",
     "renovate": "44.175.5",
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "typescript-eslint": "8.72.0"
   },
   "trustedDependencies": []
