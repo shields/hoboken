@@ -647,6 +647,31 @@ describe("heated bedding source", () => {
     expect(sent).toHaveLength(1);
   });
 
+  test.each([8500, 8501])(
+    "a confirmation at %s ms times out before the timer callback runs",
+    async (confirmationTime) => {
+      ready();
+      const outcome = Promise.allSettled([
+        source.writeFan(TOPIC, { active: true }),
+      ]);
+      advance(50);
+      receive(TOPIC, { ...BASELINE, power: true, ...TIMER });
+      expect(source.pendingCount(TOPIC)).toBe(1);
+
+      now = confirmationTime;
+      confirm("request-1");
+      expect(await outcome).toMatchObject([
+        {
+          status: "rejected",
+          reason: { hapStatus: HAPStatus.OPERATION_TIMED_OUT },
+        },
+      ]);
+      expect(source.pendingCount(TOPIC)).toBe(0);
+      expect(source.getState(TOPIC).power).toBe(true);
+      expect(sent).toHaveLength(1);
+    },
+  );
+
   test("a preheat write succeeds only after reported confirmation", async () => {
     ready();
     const write = source.writePreheat(TOPIC, true);

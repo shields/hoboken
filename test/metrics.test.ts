@@ -768,6 +768,21 @@ describe("status page (GET /)", () => {
     expect(body).toMatch(/class="na"[^>]*>\u{2014}</u);
   });
 
+  test("an empty state shows unavailable HomeKit color temperature without a Kelvin hint", async () => {
+    const body = await renderDevice({
+      name: "Lamp",
+      topic: "lamp",
+      type: "z2m",
+      capabilities: ["color_temp"],
+      state: {},
+    });
+    expect(body).toContain("ColorTemperature");
+    expect(body).toMatch(/class="na"[^>]*>\u{2014}</u);
+    expect(body).not.toContain('class="hint"');
+    expect(body).toContain('<span class="na">Empty state</span>');
+    expect(body).not.toContain("No state received");
+  });
+
   test("HomeKit Hue and Saturation from color_hs capability", async () => {
     const register = new Registry();
     const getStatus: GetStatusFn = () =>

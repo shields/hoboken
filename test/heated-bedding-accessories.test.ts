@@ -205,6 +205,15 @@ describe("heated bedding HomeKit accessories", () => {
     expect(speed().value).toBe(10);
   });
 
+  test("the Active getter reports a powered-on zone", async () => {
+    ready();
+    source.handle(generation, TOPIC, { ...BASELINE, power: true }, false);
+    expect(await active().handleGetRequest()).toBe(
+      Characteristic.Active.ACTIVE,
+    );
+    expect(sent).toHaveLength(0);
+  });
+
   test.each([false, true])(
     "off dominates paired writes when speed comes first: %s",
     async (speedFirst) => {

@@ -23,7 +23,7 @@ import {
 } from "bun:test";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -923,6 +923,18 @@ describe("startBridge", () => {
 
   test("reads its version from gitcalver in a source checkout", () => {
     expect(checkoutVersion).toBe(expectedVersion);
+  });
+
+  test("returns an unknown version when gitcalver cannot read a repository", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "hoboken-version-"));
+    const cwd = process.cwd();
+    try {
+      process.chdir(directory);
+      expect(readVersion()).toBe("unknown");
+    } finally {
+      process.chdir(cwd);
+      rmSync(directory, { recursive: true });
+    }
   });
 
   test("sets AccessoryInformation on the bridge", async () => {
