@@ -29,7 +29,7 @@
     "pngjs": "7.0.0",
     "prettier": "3.9.10",
     "prettier-plugin-toml": "4.1.0",
-    "renovate": "44.186.3",
+    "renovate": "44.186.4",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.1"
   },
