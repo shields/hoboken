@@ -23,7 +23,7 @@ to collectively as heated bedding. Use short zone names such as "Bed Side A".
   `@types/node` major in package.json must agree (`test/toolchain.test.ts`).
   `integration/tucson-roundtrip.ts` requires the workflow's major.
 - **Test runner**: Bun test (`bun test`, `bun test --coverage`)
-- **TypeScript 6.0**: type checking only (`noEmit`), `erasableSyntaxOnly`
+- **TypeScript 7**: type checking only (`noEmit`), `erasableSyntaxOnly`
 - **ESLint 10**: `typescript-eslint` with `strictTypeChecked` + `stylisticTypeChecked`
 - **Container**: `gcr.io/distroless/nodejs26-debian13`
 
@@ -44,10 +44,12 @@ make golden-screenshot    # Regenerate status page golden file (Docker)
 ```
 
 Follow the [shared TypeScript guide](https://github.com/shields/right-answers/blob/main/typescript.md)
-and its configuration baselines. TypeScript remains at 6.0.3 because the current
-typescript-eslint 8.71.2 peer range is `>=4.8.4 <6.1.0`, excluding TypeScript
-7.0.2. Recheck compatibility before upgrading the compiler. ESLint 10 is supported
-by that parser release.
+and its configuration baselines. The `@typescript/native` npm alias supplies
+TypeScript 7's `tsc`. The `typescript` alias points to `@typescript/typescript6`,
+which supplies the TypeScript 6 API required by typescript-eslint; TypeScript 7.0
+has no compiler API. Keep these aliases until typescript-eslint supports the
+native compiler's API. See Microsoft's
+[side-by-side setup](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6.0).
 
 ## Module Architecture
 
