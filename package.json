@@ -19,7 +19,7 @@
     "@types/pngjs": "6.0.5",
     "@typescript/native": "npm:typescript@7.0.2",
     "aedes": "1.2.0",
-    "eslint": "10.13.0",
+    "eslint": "10.14.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-unicorn": "79.0.0",
     "hap-controller": "0.10.2",
