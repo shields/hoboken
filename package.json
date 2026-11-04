@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "packageManager": "bun@1.4.4",
   "dependencies": {
-    "@homebridge/hap-nodejs": "2.2.3",
+    "@homebridge/hap-nodejs": "2.3.0",
     "mqtt": "5.16.1",
     "pino": "10.4.0",
     "prom-client": "^15.1.3",
