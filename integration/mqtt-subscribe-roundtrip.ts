@@ -88,7 +88,7 @@ describe(
     async function reconnect(): Promise<void> {
       const before = subscribes;
       assert.equal(clients.size, 1);
-      for (const client of clients) client.close();
+      for (const client of clients) client.conn.end();
       await poll(() => subscribes === before + 1);
     }
 

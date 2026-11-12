@@ -30,7 +30,7 @@ to collectively as heated bedding. Use short zone names such as "Bed Side A".
 ## Commands
 
 ```sh
-make setup                # Frozen dependencies, Renovate's re2, Lefthook pre-commit checks
+make setup                # Frozen dependencies and Lefthook pre-commit checks
 make fmt                  # ESLint fixes and Prettier for code and non-code files
 bun install               # Install dependencies
 make lint                 # tsc --noEmit, ESLint, Renovate config validation, Prettier
