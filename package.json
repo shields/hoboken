@@ -28,7 +28,7 @@
     "pixelmatch": "8.0.0",
     "playwright": "1.65.0",
     "pngjs": "7.0.0",
-    "prettier": "3.9.10",
+    "prettier": "3.10.0",
     "prettier-plugin-toml": "4.1.0",
     "renovate": "44.227.4",
     "typescript": "npm:@typescript/typescript6@6.0.2",
