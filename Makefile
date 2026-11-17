@@ -15,8 +15,8 @@
 PRETTIER = bunx --no-install prettier --no-error-on-unmatched-pattern
 FORMAT_PATHS = "**/*.ts" "**/*.md" "**/*.json" "**/*.json5" "**/*.yaml" "**/*.yml" "**/*.toml"
 NODE ?= node
-TEST_BROKER_VERSION = v2.1.2
-TEST_BROKER_REVISION = 99fa50f30e325609394c324c8ff71cfbbe95d8ab
+TEST_BROKER_VERSION = v2.1.4
+TEST_BROKER_REVISION = d69b6b757d05857fc54fd3c12628f22cf4b1540d
 TEST_BROKER_SOURCE = .build/mosquitto-source
 TEST_BROKER_BUILD = .build/mosquitto-build/$(TEST_BROKER_REVISION)
 TEST_BROKER_BIN = $(abspath $(TEST_BROKER_BUILD)/src/mosquitto)
