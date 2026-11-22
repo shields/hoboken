@@ -1,3 +1,7 @@
+[install]
+# Three days, as in Renovate's npm cooldown.
+minimumReleaseAge = 259200
+
 [test]
 coverage = true
 preload = ["./test/preload.ts"]
