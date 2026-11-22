@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "packageManager": "bun@1.4.4",
+  "packageManager": "bun@1.4.5",
   "dependencies": {
     "@homebridge/hap-nodejs": "2.3.0",
     "mqtt": "5.16.1",
