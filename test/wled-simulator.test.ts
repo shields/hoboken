@@ -53,8 +53,8 @@ const { WledSimulator } = await import("../integration/wled-simulator.ts");
 
 const TOPIC = "wled/test";
 
-function createSimulator() {
-  const sim = new WledSimulator("mqtt://localhost", TOPIC);
+function createSimulator(segmentCount?: number) {
+  const sim = new WledSimulator("mqtt://localhost", TOPIC, segmentCount);
   mockClient.emit("connect");
   return sim;
 }
@@ -432,6 +432,46 @@ describe("WledSimulator", () => {
       // Initial col is [255, 160, 0]; only green is supplied.
       sendMessage("/api", JSON.stringify({ seg: [{ col: [{ g: 99 }] }] }));
       expect(sim.state.col).toEqual([255, 99, 0]);
+    });
+
+    test("seg col object ignores a channel that is not a byte", () => {
+      const sim = createSimulator();
+      sendMessage(
+        "/api",
+        JSON.stringify({ seg: [{ col: [{ r: 300, g: -1, b: 1.5, w: 7 }] }] }),
+      );
+      expect(sim.segments[0]?.col).toEqual([255, 160, 0, 7]);
+    });
+
+    test("a seg array element whose id is not a byte uses its index", () => {
+      const sim = createSimulator(3);
+      sendMessage(
+        "/api",
+        JSON.stringify({
+          seg: [
+            { id: -1, col: [[1, 1, 1]] },
+            { id: 1.5, col: [[2, 2, 2]] },
+            { id: 256, col: [[3, 3, 3]] },
+          ],
+        }),
+      );
+      expect(sim.segments.map((seg) => seg.col)).toEqual([
+        [1, 1, 1, 0],
+        [2, 2, 2, 0],
+        [3, 3, 3, 0],
+      ]);
+    });
+
+    test("a seg object whose id is not a whole number applies to the selected segments", () => {
+      const sim = createSimulator(2);
+      sendMessage(
+        "/api",
+        JSON.stringify({ seg: { id: 1.5, col: [[9, 9, 9]] } }),
+      );
+      expect(sim.segments.map((seg) => seg.col)).toEqual([
+        [9, 9, 9, 0],
+        [255, 160, 0, 0],
+      ]);
     });
 
     test("seg col with a non-numeric array element reads it as 0", () => {

@@ -123,7 +123,9 @@ primary color of every selected segment (§6). Unselected segments are not
 touched. `stateUpdated` then reads the global primary color back from the first
 selected segment, or the main segment when none is selected (§6), so with no
 selected segment the color is discarded and `{topic}/c` shows the main
-segment's unchanged color. An empty payload leaves the color alone.
+segment's unchanged color. The simulator ignores an empty payload and one
+that does not begin with a number; WLED still runs `colorUpdated` for them,
+with the stale global color for an empty payload and with 0 for the other.
 
 Real WLED publishes only when `bri` or `stateChanged` changed, and
 `Segment::setColor` sets `stateChanged` only when the color differs, so a
@@ -189,8 +191,10 @@ Fields are processed in this order within `deserializeState`:
      `copyArray` into a zero-initialised array. A missing channel is therefore
      0, so `[R, G, B]` sets W to 0 and does not keep the old white. Fewer than
      three elements is valid (`[R]` sets G, B and W to 0). An empty array
-     leaves the color alone. An element that is not a number reads as 0.
-     Each channel is truncated to a byte (`RGBW32`).
+     leaves the color alone. Each channel is truncated to a byte (`RGBW32`).
+     The simulator reads an element that is not a number as 0; `copyArray`
+     converts with `as<int>()`, which does more for booleans and numeric
+     strings.
 
    - **Hex string**: `"RRGGBB"` or `"RRGGBBWW"`. Parsed by `colorFromHexString`
      (`colors.cpp`), which reads the channels left-to-right. The string must be
@@ -208,7 +212,8 @@ Fields are processed in this order within `deserializeState`:
 
    - **Object**: `{"r": R, "g": G, "b": B, "w": W}`. Each field is optional
      and keeps the segment's current value when it is absent or not an
-     integer, white included.
+     integer from 0 to 255, white included (`oCol["r"] | R(seg.colors[i])`,
+     where `R()` is a `byte`).
 
    A number (Kelvin; 0 is black) and `"r"` (random) are real WLED colors that
    the simulator ignores. Examples: `{"seg":[{"col":[[0, 255, 0]]}]}` sets the

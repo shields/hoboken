@@ -42,6 +42,14 @@ function channel(value: unknown): number {
   return typeof value === "number" ? Math.trunc(value) & 0xff : 0;
 }
 
+function isByte(value: unknown): value is number {
+  return (
+    Number.isInteger(value) &&
+    (value as number) >= 0 &&
+    (value as number) <= 255
+  );
+}
+
 function boolOrToggle(value: unknown, current: boolean): boolean {
   if (typeof value === "string" && value.startsWith("t")) return !current;
   return typeof value === "boolean" ? value : current;
@@ -253,12 +261,11 @@ export class WledSimulator {
     if (Array.isArray(seg)) {
       for (const [index, elem] of (seg as unknown[]).entries()) {
         if (!isRecord(elem)) continue;
-        const id = typeof elem.id === "number" ? elem.id : index;
-        this.applySegElement(elem, id);
+        this.applySegElement(elem, isByte(elem.id) ? elem.id : index);
       }
     } else if (isRecord(seg)) {
-      if (typeof seg.id === "number" && seg.id >= 0) {
-        this.applySegElement(seg, seg.id);
+      if (Number.isInteger(seg.id) && (seg.id as number) >= 0) {
+        this.applySegElement(seg, seg.id as number);
       } else {
         for (let i = 0; i < this.segs.length; i++) {
           if (this.segs[i]?.sel) this.applySegElement(seg, i);
@@ -306,7 +313,7 @@ export class WledSimulator {
       const rgbw: WledColor = [...current];
       for (const [i, key] of keys.entries()) {
         const v = entry[key];
-        if (typeof v === "number" && Number.isInteger(v)) rgbw[i] = v & 0xff;
+        if (isByte(v)) rgbw[i] = v;
       }
       return rgbw;
     }
