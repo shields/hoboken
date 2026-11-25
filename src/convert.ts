@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// HAP-NodeJS's entry point fails to load under Bun without test/preload.ts,
-// which demo/screenshot.ts does not have when it renders the status page.
-import { ColorUtils } from "@homebridge/hap-nodejs/dist/lib/util/color-utils.js";
-
-// Zigbee2MQTT's "neutral" and "warm" presets: 2700 K and 2200 K in mireds.
+// Zigbee2MQTT's "cool", "neutral", and "warm" presets: 4000 K, 2700 K, and
+// 2200 K in mireds.
+export const COOL_WHITE_COLOR_TEMP = 250;
 export const DEFAULT_WHITE_COLOR_TEMP = 370;
 export const WARM_WHITE_COLOR_TEMP = 454;
 
@@ -26,9 +24,100 @@ export function isWhite(h: number | undefined, s: number | undefined): boolean {
   return s === 0 || (h === 228 && s === 56);
 }
 
-// Siri's "warm white".
-function isWarmWhite(h: number | undefined, s: number | undefined): boolean {
-  return h === 31 && s === 33;
+// The Home app's color for a color temperature, which is what it writes to a
+// light that has Hue and Saturation but no ColorTemperature, and how it tells
+// whether a light that has all three shows a temperature. Each channel is
+// a + b / (kelvins + c), limited to 0-1; the constants are those of
+// HFGetColorForLightTemperature in Apple's Home framework.
+export function colorTempToHueSaturation(mireds: number): {
+  hue: number;
+  saturation: number;
+} {
+  const k = 1e6 / mireds;
+  const channel = (a: number, b: number, c: number) =>
+    Math.min(1, Math.max(0, a + b / (k + c)));
+  const warm = k <= 6500;
+  const r = warm
+    ? 1
+    : channel(0.5599538913993148, 1745.0425298314171, -2666.3474220535695);
+  const g = warm
+    ? channel(1.3302673723350029, -2902.1955373783176, 1669.5803561666639)
+    : channel(0.7038120314055455, 1216.6168361476491, -2173.101234308223);
+  const b = channel(1.8993753891711276, -8257.799727892569, 2575.2827530017594);
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  let hue = 0;
+  if (d > 0) {
+    if (max === r) hue = ((g - b) / d + 6) % 6;
+    else if (max === g) hue = (b - r) / d + 2;
+    else hue = (r - g) / d + 4;
+  }
+  return { hue: hue * 60, saturation: (d / max) * 100 };
+}
+
+// The Home app's temperature wheel reaches 10000 K, and HomeKit's coolest
+// ColorTemperature is 140 mireds; a cooler request is limited to that.
+const CURVE_MIN = 100;
+
+// Rounding a point of the curve to a whole hue and saturation moves it at most
+// 0.88 in the plane below, and Siri's "warm white" is 1.01 from the curve.
+const CURVE_TOLERANCE = 1;
+
+function plane(hue: number, saturation: number): [number, number] {
+  const angle = (hue * Math.PI) / 180;
+  return [saturation * Math.cos(angle), saturation * Math.sin(angle)];
+}
+
+let curve: [number, number][] | undefined;
+
+// The color temperature that a hue and saturation stand for, when they lie on
+// the Home app's curve. Hue is an angle and means little at low saturation, so
+// the distance is measured where hue and saturation are polar coordinates.
+export function hueSaturationToColorTemp(
+  hue: number,
+  saturation: number,
+): number | undefined {
+  curve ??= Array.from({ length: COLOR_TEMP_MAX - CURVE_MIN + 1 }, (_, i) => {
+    const color = colorTempToHueSaturation(CURVE_MIN + i);
+    return plane(color.hue, color.saturation);
+  });
+  const [x, y] = plane(hue, saturation);
+  let nearest = Infinity;
+  let mireds = CURVE_MIN;
+  let [ax, ay] = plane(0, 0);
+  for (const [i, [bx, by]] of curve.entries()) {
+    if (i > 0) {
+      const dx = bx - ax;
+      const dy = by - ay;
+      const t = Math.min(
+        1,
+        Math.max(0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)),
+      );
+      const distance = Math.hypot(ax + t * dx - x, ay + t * dy - y);
+      if (distance < nearest) {
+        nearest = distance;
+        mireds = CURVE_MIN + i - 1 + t;
+      }
+    }
+    [ax, ay] = [bx, by];
+  }
+  return nearest <= CURVE_TOLERANCE ? mireds : undefined;
+}
+
+// The color temperature that a write of hue and saturation asks for, if it
+// asks for a white: Siri's "white", "warm white" (H=31 S=33), and "cool white"
+// (H=208 S=17), or a point of the Home app's curve.
+function requestedColorTemp(
+  h: number | undefined,
+  s: number | undefined,
+  whiteColorTemp: number | undefined,
+): number | undefined {
+  if (isWhite(h, s)) return whiteColorTemp ?? DEFAULT_WHITE_COLOR_TEMP;
+  if (h === 31 && s === 33) return WARM_WHITE_COLOR_TEMP;
+  if (h === 208 && s === 17) return COOL_WHITE_COLOR_TEMP;
+  if (h === undefined || s === undefined) return undefined;
+  const mireds = hueSaturationToColorTemp(h, s);
+  return mireds === undefined ? undefined : clampColorTemp(Math.round(mireds));
 }
 
 export function z2mBrightnessToHomeKit(z2m: number): number {
@@ -155,35 +244,63 @@ export interface HomeKitState {
 // Zigbee2MQTT keeps reporting the fields of the color mode that is not active:
 // in "hs" or "xy" mode a color_temp derived from the color, and in "color_temp"
 // mode a color derived from the temperature. Only the active mode's fields
-// describe the bulb, and HomeKit shows a temperature as the hue and saturation
-// of ColorUtils.
-function z2mColorToHomeKit(state: RawState): HomeKitState {
+// describe the bulb. The Home app shows a light as a color only while its
+// ColorTemperature is the minimum, and otherwise as a temperature.
+function z2mColorToHomeKit(
+  state: RawState,
+  capabilities?: readonly string[],
+): HomeKitState {
   const hk: HomeKitState = {};
   const { color_mode: mode, color_temp: colorTemp } = state;
   if (mode === "color_temp" && typeof colorTemp === "number") {
+    const color = colorTempToHueSaturation(clampColorTemp(colorTemp));
     hk.color_temp = colorTemp;
-    Object.assign(
-      hk,
-      ColorUtils.colorTemperatureToHueAndSaturation(clampColorTemp(colorTemp)),
-    );
+    hk.hue = Math.round(color.hue);
+    hk.saturation = Math.round(color.saturation);
     return hk;
   }
-  if ("color_temp" in state && typeof mode !== "string")
+  if (typeof mode === "string") {
+    // A light without Hue and Saturation has no color to show, and keeps its
+    // last temperature.
+    if (mode !== "color_temp" && capabilities?.includes("color_hs") !== false)
+      hk.color_temp = COLOR_TEMP_MIN;
+  } else if ("color_temp" in state) {
     hk.color_temp = colorTemp as number;
+  }
   const color = state.color as Record<string, unknown> | null | undefined;
   if (typeof color?.hue === "number") hk.hue = color.hue;
   if (typeof color?.saturation === "number") hk.saturation = color.saturation;
   return hk;
 }
 
+// What HomeKit should show after a write, for the characteristics that the
+// write did not set: the report that follows a write is suppressed.
+export function z2mWriteToHomeKit(
+  message: Record<string, unknown>,
+): HomeKitState {
+  if (typeof message.color_temp === "number") {
+    return z2mColorToHomeKit({
+      color_mode: "color_temp",
+      color_temp: message.color_temp,
+    });
+  }
+  return typeof message.color === "object"
+    ? z2mColorToHomeKit({ color_mode: "hs", color: message.color })
+    : {};
+}
+
 // `merged` is the whole cached state when `raw` is one update to it.
-export function z2mToHomeKit(raw: RawState, merged = raw): HomeKitState {
+export function z2mToHomeKit(
+  raw: RawState,
+  merged = raw,
+  capabilities?: readonly string[],
+): HomeKitState {
   const hk: HomeKitState = {};
   if ("state" in raw) hk.on = raw.state === "ON";
   if ("brightness" in raw)
     hk.brightness = z2mBrightnessToHomeKit(raw.brightness as number);
   if ("color" in raw || "color_temp" in raw || "color_mode" in raw)
-    Object.assign(hk, z2mColorToHomeKit(merged));
+    Object.assign(hk, z2mColorToHomeKit(merged, capabilities));
   if ("fan_state" in raw) hk.active = raw.fan_state === "ON" ? 1 : 0;
   if ("fan_mode" in raw) {
     const fanHk = z2mFanModeToHomeKit(raw.fan_mode as string);
@@ -229,7 +346,13 @@ export function homeKitToZ2m(
   if ("on" in payload) z2m.state = payload.on ? "ON" : "OFF";
   if ("brightness" in payload)
     z2m.brightness = homeKitBrightnessToZ2M(payload.brightness as number);
-  if ("color_temp" in payload) {
+  // A light that shows a color reports the minimum ColorTemperature, so a
+  // controller that writes all three back, as a scene does, means the color.
+  const colorWithMinimum =
+    payload.color_temp === COLOR_TEMP_MIN &&
+    "hue" in payload &&
+    "saturation" in payload;
+  if ("color_temp" in payload && !colorWithMinimum) {
     // Zigbee2MQTT sends a command for each of color_temp and color, so a
     // write with both publishes only the temperature.
     z2m.color_temp = payload.color_temp;
@@ -243,15 +366,16 @@ export function homeKitToZ2m(
       light.whiteColorTemp !== undefined ||
       light.capabilities?.includes("color_temp") === true ||
       cachedRaw?.color_temp !== undefined;
-    if (whiteLEDs && isWhite(h, s)) {
-      z2m.color_temp = light.whiteColorTemp ?? DEFAULT_WHITE_COLOR_TEMP;
-    } else if (whiteLEDs && isWarmWhite(h, s)) {
-      z2m.color_temp = WARM_WHITE_COLOR_TEMP;
-    } else {
+    const colorTemp = whiteLEDs
+      ? requestedColorTemp(h, s, light.whiteColorTemp)
+      : undefined;
+    if (colorTemp === undefined) {
       const color: Record<string, unknown> = {};
       if ("hue" in payload) color.hue = payload.hue;
       if ("saturation" in payload) color.saturation = payload.saturation;
       z2m.color = color;
+    } else {
+      z2m.color_temp = colorTemp;
     }
   }
 

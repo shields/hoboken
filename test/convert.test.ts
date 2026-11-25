@@ -17,8 +17,12 @@ import {
   clampColorTemp,
   homeKitToWled,
   homeKitToZ2m,
+  COOL_WHITE_COLOR_TEMP,
+  colorTempToHueSaturation,
   DEFAULT_WHITE_COLOR_TEMP,
+  hueSaturationToColorTemp,
   WARM_WHITE_COLOR_TEMP,
+  z2mWriteToHomeKit,
   isWhite,
   homeKitBrightnessToZ2M,
   homeKitBrightnessToWled,
@@ -63,6 +67,108 @@ describe("isWhite", () => {
   test("a hue without a saturation is not white", () => {
     expect(isWhite(0, undefined)).toBe(false);
     expect(isWhite(228, undefined)).toBe(false);
+  });
+});
+
+describe("colorTempToHueSaturation", () => {
+  test.each([
+    [100, 221.786, 20.21],
+    [150, 290.99, 2.544],
+    [160, 0.218, 3.632],
+    [250, 29.433, 35.651],
+    [370, 29.918, 66.52],
+    [500, 29.479, 90.55],
+  ])("%d mireds is the Home app's color", (mireds, hue, saturation) => {
+    const color = colorTempToHueSaturation(mireds);
+    expect(color.hue).toBeCloseTo(hue, 2);
+    expect(color.saturation).toBeCloseTo(saturation, 2);
+  });
+});
+
+describe("hueSaturationToColorTemp", () => {
+  test.each([
+    [222, 20, 101],
+    [251, 5, 142],
+    [28, 23, 211],
+    [30, 48, 293],
+    [30, 67, 372],
+  ])(
+    "the Home app's swatch H=%d S=%d is %d mireds",
+    (hue, saturation, mireds) => {
+      expect(Math.round(hueSaturationToColorTemp(hue, saturation)!)).toBe(
+        mireds,
+      );
+    },
+  );
+
+  test("recovers every whole temperature from its rounded color", () => {
+    for (let mireds = 140; mireds <= 500; mireds++) {
+      const color = colorTempToHueSaturation(mireds);
+      const recovered = hueSaturationToColorTemp(
+        Math.round(color.hue),
+        Math.round(color.saturation),
+      );
+      expect(recovered).toBeDefined();
+      expect(Math.abs(recovered! - mireds)).toBeLessThan(3.5);
+    }
+  });
+
+  test("recovers a temperature exactly from its unrounded color", () => {
+    const color = colorTempToHueSaturation(300);
+    expect(hueSaturationToColorTemp(color.hue, color.saturation)).toBeCloseTo(
+      300,
+      6,
+    );
+  });
+
+  test.each([
+    [240, 100],
+    [0, 100],
+    [120, 100],
+    [30, 100],
+    [60, 50],
+    [255, 68],
+    [228, 56],
+    [45, 80],
+    [57, 18],
+    [27, 42],
+  ])("H=%d S=%d is a color, not a temperature", (hue, saturation) => {
+    expect(hueSaturationToColorTemp(hue, saturation)).toBeUndefined();
+  });
+});
+
+describe("z2mWriteToHomeKit", () => {
+  test("a color_temp write shows the temperature and the Home app's color for it", () => {
+    expect(z2mWriteToHomeKit({ state: "ON", color_temp: 250 })).toEqual({
+      color_temp: 250,
+      hue: 29,
+      saturation: 36,
+    });
+  });
+
+  test("a color write shows the color and the minimum temperature", () => {
+    expect(z2mWriteToHomeKit({ color: { hue: 240, saturation: 100 } })).toEqual(
+      { color_temp: 140, hue: 240, saturation: 100 },
+    );
+  });
+
+  test("a hue or a saturation alone still shows the minimum temperature", () => {
+    expect(z2mWriteToHomeKit({ color: { hue: 240 } })).toEqual({
+      color_temp: 140,
+      hue: 240,
+    });
+    expect(z2mWriteToHomeKit({ color: { saturation: 50 } })).toEqual({
+      color_temp: 140,
+      saturation: 50,
+    });
+  });
+
+  test.each([
+    { state: "ON", brightness: 254 },
+    { color_temp: "warm" },
+    { scene_recall: 3 },
+  ])("%j says nothing about the color", (message) => {
+    expect(z2mWriteToHomeKit(message)).toEqual({});
   });
 });
 
@@ -410,24 +516,24 @@ describe("z2mToHomeKit", () => {
     });
   });
 
-  test("in color_temp mode, reports HomeKit's hue and saturation for the temperature", () => {
+  test("in color_temp mode, reports the Home app's hue and saturation for the temperature", () => {
     expect(
       z2mToHomeKit({
         color: { hue: 32, saturation: 82, x: 0.4599, y: 0.4106 },
         color_mode: "color_temp",
         color_temp: 370,
       }),
-    ).toEqual({ color_temp: 370, hue: 27, saturation: 42 });
+    ).toEqual({ color_temp: 370, hue: 30, saturation: 67 });
   });
 
   test("in color_temp mode, a temperature outside HomeKit's range uses the nearest", () => {
     expect(z2mToHomeKit({ color_mode: "color_temp", color_temp: 574 })).toEqual(
-      { color_temp: 574, hue: 28, saturation: 64 },
+      { color_temp: 574, hue: 29, saturation: 91 },
     );
   });
 
   test.each(["hs", "xy"])(
-    "in %s mode, leaves out the color_temp derived from the color",
+    "in %s mode, reports the minimum in place of the color_temp derived from the color",
     (mode) => {
       expect(
         z2mToHomeKit({
@@ -435,9 +541,24 @@ describe("z2mToHomeKit", () => {
           color_mode: mode,
           color_temp: 574,
         }),
-      ).toEqual({ hue: 240, saturation: 100 });
+      ).toEqual({ color_temp: 140, hue: 240, saturation: 100 });
     },
   );
+
+  test("in a color mode, a light without color_hs gets no color_temp", () => {
+    const blue = {
+      color: { hue: 240, saturation: 100 },
+      color_mode: "xy",
+      color_temp: 574,
+    };
+    expect(z2mToHomeKit(blue, blue, ["on_off", "color_temp"])).toEqual({
+      hue: 240,
+      saturation: 100,
+    });
+    expect(
+      z2mToHomeKit(blue, blue, ["on_off", "color_temp", "color_hs"]),
+    ).toEqual({ color_temp: 140, hue: 240, saturation: 100 });
+  });
 
   test("in color_temp mode without a numeric color_temp, passes the color through", () => {
     expect(
@@ -470,8 +591,8 @@ describe("z2mToHomeKit", () => {
     ])("an update with only %j reports the whole color state", (partial) => {
       expect(z2mToHomeKit(partial, white)).toEqual({
         color_temp: 370,
-        hue: 27,
-        saturation: 42,
+        hue: 30,
+        saturation: 67,
       });
     });
 
@@ -485,7 +606,7 @@ describe("z2mToHomeKit", () => {
             color_temp: 574,
           },
         ),
-      ).toEqual({ hue: 240, saturation: 100 });
+      ).toEqual({ color_temp: 140, hue: 240, saturation: 100 });
     });
   });
 
@@ -740,6 +861,45 @@ describe("homeKitToZ2m", () => {
     ).toEqual({ color_temp: WARM_WHITE_COLOR_TEMP });
   });
 
+  test("cool white (H=208/S=17) sends 4000 K", () => {
+    expect(COOL_WHITE_COLOR_TEMP).toBe(250);
+    expect(
+      homeKitToZ2m({ hue: 208, saturation: 17 }, { color_temp: 300 }),
+    ).toEqual({ color_temp: COOL_WHITE_COLOR_TEMP });
+  });
+
+  test("cool white without white LEDs stays a color", () => {
+    expect(homeKitToZ2m({ hue: 208, saturation: 17 })).toEqual({
+      color: { hue: 208, saturation: 17 },
+    });
+  });
+
+  test.each([
+    [28, 23, 211],
+    [30, 48, 293],
+    [30, 67, 372],
+    [30, 84, 460],
+  ])(
+    "H=%d/S=%d on the Home app's temperature curve sends %d mireds",
+    (hue, saturation, mireds) => {
+      expect(homeKitToZ2m({ hue, saturation }, { color_temp: 300 })).toEqual({
+        color_temp: mireds,
+      });
+    },
+  );
+
+  test("a temperature cooler than HomeKit's range sends the coolest", () => {
+    expect(
+      homeKitToZ2m({ hue: 222, saturation: 20 }, { color_temp: 300 }),
+    ).toEqual({ color_temp: 140 });
+  });
+
+  test("a color on the temperature curve without white LEDs stays a color", () => {
+    expect(homeKitToZ2m({ hue: 30, saturation: 67 })).toEqual({
+      color: { hue: 30, saturation: 67 },
+    });
+  });
+
   test("warm white ignores whiteColorTemp", () => {
     expect(
       homeKitToZ2m({ hue: 31, saturation: 33 }, undefined, {
@@ -770,6 +930,28 @@ describe("homeKitToZ2m", () => {
         capabilities: ["on_off", "color_hs"],
       }),
     ).toEqual({ color: { hue: 0, saturation: 0 } });
+  });
+
+  test("the minimum color temperature with a hue and saturation is the color", () => {
+    expect(
+      homeKitToZ2m({ color_temp: 140, hue: 240, saturation: 100 }),
+    ).toEqual({ color: { hue: 240, saturation: 100 } });
+  });
+
+  test("the minimum color temperature with a white is that white", () => {
+    expect(
+      homeKitToZ2m(
+        { color_temp: 140, hue: 30, saturation: 67 },
+        { color_temp: 300 },
+      ),
+    ).toEqual({ color_temp: 372 });
+  });
+
+  test("the minimum color temperature alone, or with a hue alone, is a temperature", () => {
+    expect(homeKitToZ2m({ color_temp: 140 })).toEqual({ color_temp: 140 });
+    expect(homeKitToZ2m({ color_temp: 140, hue: 240 })).toEqual({
+      color_temp: 140,
+    });
   });
 
   test("a color temperature wins over a color in the same write", () => {

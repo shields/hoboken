@@ -1188,6 +1188,8 @@ describe("startBridge", () => {
           p.message === JSON.stringify({ color_temp: 370 }),
       ),
     ).toBe(true);
+    expect(service.testCharacteristic(Characteristic.Hue)).toBe(false);
+    expect(service.testCharacteristic(Characteristic.Saturation)).toBe(false);
 
     await shutdown();
   });
@@ -1350,7 +1352,7 @@ describe("startBridge", () => {
       return { service, value, report, sets, shutdown };
     }
 
-    test("in color_temp mode, shows the temperature and HomeKit's color for it", async () => {
+    test("in color_temp mode, shows the temperature and the Home app's color for it", async () => {
       const { value, report, shutdown } = await startDual();
       report({
         state: "ON",
@@ -1360,13 +1362,13 @@ describe("startBridge", () => {
       });
 
       expect(value(Characteristic.ColorTemperature)).toBe(370);
-      expect(value(Characteristic.Hue)).toBe(27);
-      expect(value(Characteristic.Saturation)).toBe(42);
+      expect(value(Characteristic.Hue)).toBe(30);
+      expect(value(Characteristic.Saturation)).toBe(67);
 
       await shutdown();
     });
 
-    test("in a color mode, shows the color and keeps the last temperature", async () => {
+    test("in a color mode, shows the color and the minimum temperature", async () => {
       const { value, report, shutdown } = await startDual();
       report({ color_mode: "color_temp", color_temp: 250 });
       report({
@@ -1377,7 +1379,7 @@ describe("startBridge", () => {
 
       expect(value(Characteristic.Hue)).toBe(240);
       expect(value(Characteristic.Saturation)).toBe(100);
-      expect(value(Characteristic.ColorTemperature)).toBe(250);
+      expect(value(Characteristic.ColorTemperature)).toBe(140);
 
       await shutdown();
     });
@@ -1392,8 +1394,8 @@ describe("startBridge", () => {
       report({ color_mode: "color_temp" });
 
       expect(value(Characteristic.ColorTemperature)).toBe(370);
-      expect(value(Characteristic.Hue)).toBe(27);
-      expect(value(Characteristic.Saturation)).toBe(42);
+      expect(value(Characteristic.Hue)).toBe(30);
+      expect(value(Characteristic.Saturation)).toBe(67);
 
       await shutdown();
     });
@@ -1404,8 +1406,80 @@ describe("startBridge", () => {
       await flush();
 
       expect(sets()).toEqual([{ color_temp: 250 }]);
-      expect(value(Characteristic.Hue)).toBe(27);
-      expect(value(Characteristic.Saturation)).toBe(21);
+      expect(value(Characteristic.ColorTemperature)).toBe(250);
+      expect(value(Characteristic.Hue)).toBe(29);
+      expect(value(Characteristic.Saturation)).toBe(36);
+
+      await shutdown();
+    });
+
+    test("a color write shows the minimum temperature", async () => {
+      const { service, value, report, sets, shutdown } = await startDual();
+      report({ color_mode: "color_temp", color_temp: 370 });
+      service.getCharacteristic(Characteristic.Hue).setValue(240);
+      service.getCharacteristic(Characteristic.Saturation).setValue(100);
+      await flush();
+
+      expect(sets()).toEqual([{ color: { hue: 240, saturation: 100 } }]);
+      expect(value(Characteristic.ColorTemperature)).toBe(140);
+      expect(value(Characteristic.Hue)).toBe(240);
+      expect(value(Characteristic.Saturation)).toBe(100);
+
+      await shutdown();
+    });
+
+    test("a white write shows its temperature and keeps the written color", async () => {
+      const { service, value, sets, shutdown } = await startDual();
+      service.getCharacteristic(Characteristic.Hue).setValue(0);
+      service.getCharacteristic(Characteristic.Saturation).setValue(0);
+      await flush();
+
+      expect(sets()).toEqual([{ color_temp: 370 }]);
+      expect(value(Characteristic.ColorTemperature)).toBe(370);
+      expect(value(Characteristic.Hue)).toBe(0);
+      expect(value(Characteristic.Saturation)).toBe(0);
+
+      await shutdown();
+    });
+
+    test("a hue written alone shows the minimum temperature", async () => {
+      const { service, value, report, shutdown } = await startDual();
+      report({ color_mode: "color_temp", color_temp: 370 });
+      service.getCharacteristic(Characteristic.Hue).setValue(240);
+      await flush();
+
+      expect(value(Characteristic.ColorTemperature)).toBe(140);
+
+      await shutdown();
+    });
+
+    test("writing back the state of a light that shows a color publishes the color", async () => {
+      const { service, report, sets, shutdown } = await startDual();
+      report({
+        color: { hue: 240, saturation: 100 },
+        color_mode: "hs",
+        color_temp: 574,
+      });
+      service.getCharacteristic(Characteristic.ColorTemperature).setValue(140);
+      service.getCharacteristic(Characteristic.Hue).setValue(240);
+      service.getCharacteristic(Characteristic.Saturation).setValue(100);
+      await flush();
+
+      expect(sets()).toEqual([{ color: { hue: 240, saturation: 100 } }]);
+
+      await shutdown();
+    });
+
+    test("cool white and a Home app temperature swatch publish temperatures", async () => {
+      const { service, sets, shutdown } = await startDual();
+      service.getCharacteristic(Characteristic.Hue).setValue(208);
+      service.getCharacteristic(Characteristic.Saturation).setValue(17);
+      await flush();
+      service.getCharacteristic(Characteristic.Hue).setValue(30);
+      service.getCharacteristic(Characteristic.Saturation).setValue(67);
+      await flush();
+
+      expect(sets()).toEqual([{ color_temp: 250 }, { color_temp: 372 }]);
 
       await shutdown();
     });
@@ -1446,8 +1520,8 @@ describe("startBridge", () => {
         color_temp: 370,
       });
       expect(await get(Characteristic.ColorTemperature)).toBe(370);
-      expect(await get(Characteristic.Hue)).toBe(27);
-      expect(await get(Characteristic.Saturation)).toBe(42);
+      expect(await get(Characteristic.Hue)).toBe(30);
+      expect(await get(Characteristic.Saturation)).toBe(67);
 
       report({
         color: { hue: 240, saturation: 100 },
@@ -1456,7 +1530,7 @@ describe("startBridge", () => {
       });
       expect(await get(Characteristic.Hue)).toBe(240);
       expect(await get(Characteristic.Saturation)).toBe(100);
-      expect(await get(Characteristic.ColorTemperature)).toBe(370);
+      expect(await get(Characteristic.ColorTemperature)).toBe(140);
 
       await shutdown();
     });

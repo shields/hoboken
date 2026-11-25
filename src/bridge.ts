@@ -69,12 +69,14 @@ import {
 } from "./accessories.ts";
 import type { PublishFn } from "./accessories.ts";
 import {
+  type HomeKitState,
   type RawState,
   homeKitToWled,
   homeKitToZ2m,
   parseWledMessage,
   wledToHomeKit,
   z2mToHomeKit,
+  z2mWriteToHomeKit,
 } from "./convert.ts";
 import { createMetrics, startMetricsServer } from "./metrics.ts";
 import type {
@@ -364,9 +366,11 @@ export async function startBridge(
       raw?: RawState,
     ) => Record<string, unknown>,
     mqttTopic: (topic: string) => string,
+    written?: (converted: Record<string, unknown>) => HomeKitState,
   ): PublishFn {
     return (topic, payload) => {
-      const message = JSON.stringify(convert(payload, stateCache.get(topic)));
+      const converted = convert(payload, stateCache.get(topic));
+      const message = JSON.stringify(converted);
       rawPublish(mqttTopic(topic), message);
       log.log(
         `HomeKit write for "${device.name}": ${JSON.stringify(payload)} published to ${mqttTopic(topic)} as ${message}`,
@@ -378,6 +382,14 @@ export async function startBridge(
       ) {
         lastColorPublish.set(topic, Date.now());
       }
+      const entry = accessoryMap.get(topic);
+      if (!written || !entry) return;
+      // The controller's own values stand for what it wrote: a white is
+      // published as a temperature, but the write was a hue and saturation.
+      const follow = Object.fromEntries(
+        Object.entries(written(converted)).filter(([key]) => !(key in payload)),
+      );
+      entry.updateState(entry.accessory, follow, device.capabilities);
     };
   }
 
@@ -389,6 +401,7 @@ export async function startBridge(
           device,
           (p, raw) => homeKitToZ2m(p, raw, device),
           z2mSetTopic,
+          z2mWriteToHomeKit,
         ),
       toHomeKit: z2mToHomeKit,
     },
@@ -454,7 +467,7 @@ export async function startBridge(
     const getState = (topic: string) => {
       const raw = stateCache.get(topic);
       if (!raw) return;
-      return proto.toHomeKit(raw);
+      return proto.toHomeKit(raw, raw, device.capabilities);
     };
 
     const isFan = device.capabilities.includes("fan");
@@ -667,7 +680,11 @@ export async function startBridge(
     const lastPub = lastColorPublish.get(deviceTopic);
     const suppressing =
       lastPub !== undefined && Date.now() - lastPub < WRITE_BACK_SUPPRESSION_MS;
-    const hkState = protocols[entry.device.type].toHomeKit(rawPartial, merged);
+    const hkState = protocols[entry.device.type].toHomeKit(
+      rawPartial,
+      merged,
+      entry.device.capabilities,
+    );
     if (suppressing) {
       delete hkState.hue;
       delete hkState.saturation;

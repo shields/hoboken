@@ -80,13 +80,16 @@ Devices declare capabilities in `config.yaml`:
 ### White on color lights
 
 "Set the lights to white" arrives from HomeKit as a color with zero
-saturation, and "warm white" as hue 31 and saturation 33. For a Zigbee2MQTT
-light that reports a `color_temp`, Hoboken publishes a color temperature
-instead, so that the bulb uses its white LEDs. White is the device's
-`whiteColorTemp` in mireds (1,000,000 / kelvins, from 140 to 500), or 370
-(2700 K) without one, and warm white is 454 (2200 K). A device with
-`whiteColorTemp` or the `color_temp` capability gets the color temperature
-even before it has reported any state.
+saturation, "warm white" as hue 31 and saturation 33, and "cool white" as
+hue 208 and saturation 17. For a Zigbee2MQTT light that reports a
+`color_temp`, Hoboken publishes a color temperature instead, so that the
+bulb uses its white LEDs. White is the device's `whiteColorTemp` in mireds
+(1,000,000 / kelvins, from 140 to 500), or 370 (2700 K) without one; warm
+white is 454 (2200 K) and cool white 250 (4000 K). The Home app's
+Temperature tab and white swatches write a hue and saturation too, and
+those become the temperature they stand for. A device with `whiteColorTemp`
+or the `color_temp` capability gets the color temperature even before it
+has reported any state.
 
 A Zigbee2MQTT light can have `color_temp` and `color_hs` together. HomeKit
 then gets a color temperature as well as a color, and a request that sets

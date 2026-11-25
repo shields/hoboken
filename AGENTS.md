@@ -85,34 +85,47 @@ Each module is independently testable with dependency injection:
   published as sent and stays on the characteristic until the next read or
   Zigbee2MQTT report replaces it. `homeKitSpeedToZ2mFanMode` maps it to the
   nearest step, except that any positive value is at least `low`.
-- **White on `color_hs` lights**: a HomeKit write with zero saturation, with
-  any hue or none, or with hue 228 and saturation 56 (the Home app's white
-  swatch) is a request for white (`isWhite`), and one with hue 31 and
-  saturation 33 is Siri's "warm white". `homeKitToZ2m` publishes each as
-  `color_temp`, so that the bulb uses its white LEDs: white as the device's
-  `whiteColorTemp` or `DEFAULT_WHITE_COLOR_TEMP` (370 mireds, 2700 K), and
-  warm white as `WARM_WHITE_COLOR_TEMP` (454, 2200 K), which are
-  Zigbee2MQTT's `neutral` and `warm` presets. It does so only for a device
-  with white LEDs: one with `whiteColorTemp`, with the `color_temp`
-  capability, or with a `color_temp` in the state cache. Otherwise the write
-  stays a color. The cached `color_temp` is never the value published: while
-  a bulb shows a color, Zigbee2MQTT replaces it with one computed from that
-  color by McCamy's formula, which gives 574 mireds for blue. WLED gets RGB
-  (255, 255, 255); which LEDs light is the strip's Auto White setting. See
-  `doc/color-coalescing.md`.
+- **White on `color_hs` lights**: `homeKitToZ2m` publishes a HomeKit write
+  that asks for a white as `color_temp`, so that the bulb uses its white
+  LEDs (`requestedColorTemp`). Zero saturation, with any hue or none, or hue
+  228 and saturation 56 (a Home app white swatch) is white (`isWhite`): the
+  device's `whiteColorTemp` or `DEFAULT_WHITE_COLOR_TEMP` (370 mireds,
+  2700 K). Siri's "warm white" (31, 33) is `WARM_WHITE_COLOR_TEMP` (454,
+  2200 K) and its "cool white" (208, 17) is `COOL_WHITE_COLOR_TEMP` (250,
+  4000 K); the three are Zigbee2MQTT's `neutral`, `warm`, and `cool`
+  presets. Any other hue and saturation within 1 of the Home app's
+  temperature curve (`hueSaturationToColorTemp`) is the temperature it stands
+  for, limited to 140–500, which covers the Home app's Temperature tab and
+  preset swatches on a light without `ColorTemperature`. All of this applies
+  only to a device with white LEDs: one with `whiteColorTemp`, with the
+  `color_temp` capability, or with a `color_temp` in the state cache.
+  Otherwise the write stays a color. The cached `color_temp` is never the
+  value published: while a bulb shows a color, Zigbee2MQTT replaces it with
+  one computed from that color by McCamy's formula, which gives 574 mireds
+  for blue. WLED gets RGB (255, 255, 255); which LEDs light is the strip's
+  Auto White setting. See `doc/color-coalescing.md`, which also records what
+  the Home app and Siri write.
+- **The Home app's temperature curve**: `colorTempToHueSaturation` is the
+  closed form of `HFGetColorForLightTemperature` in Apple's Home framework,
+  checked against that function's output. Use it, not HAP-NodeJS's
+  `ColorUtils` table, which assigns different colors (370 mireds is (30, 67)
+  on the curve and (27, 42) in the table), so that what the bridge reports
+  for a temperature is what the Home app would write for it.
 - **`color_temp` with `color_hs`**: a Z2M light may have both, against HAP
   R13 §10.11 but as Home Assistant, homebridge-hue, and homebridge-z2m do. A
   write with `ColorTemperature` and Hue or Saturation publishes only
-  `color_temp`. `z2mToHomeKit` reports only the active `color_mode`'s
-  fields: in `color_temp` mode the temperature and the hue and saturation
-  that `ColorUtils.colorTemperatureToHueAndSaturation` gives for it, in `hs`
-  or `xy` mode the color without `color_temp`, and everything when there is
-  no `color_mode`. It reads an update against the merged state. A
-  characteristic whose field the state lacks reads as its last value. A
-  `ColorTemperature` write sets Hue and Saturation from the same table.
-  `convert.ts` imports `ColorUtils` from its own file in HAP-NodeJS, because
-  the package's entry point does not load under Bun without
-  `test/preload.ts` and `demo/screenshot.ts` loads `metrics.ts` that way.
+  `color_temp`, unless it is `COLOR_TEMP_MIN` with both Hue and Saturation,
+  which is the state of a light showing a color written back, and is
+  published as the color. `z2mToHomeKit` reports only the active `color_mode`'s
+  fields: in `color_temp` mode the temperature and the curve's hue and
+  saturation for it, in `hs` or `xy` mode the color and
+  `COLOR_TEMP_MIN`, because the Home app shows a light as a color only while
+  its `ColorTemperature` is the minimum (a light without `color_hs` gets no
+  `color_temp` then), and everything when there is no `color_mode`. It reads an update against the merged state. A
+  characteristic whose field the state lacks reads as its last value. After
+  publishing a write, `makePublish` sets the characteristics that the write
+  implies and did not set (`z2mWriteToHomeKit`), because the report that
+  follows a write is suppressed.
 - **HomeKit write logs**: the `set-characteristics` listener on the HAP
   server logs each write request as it arrives, as `HAP write from <address>`
   with the accessory name, characteristic, and value of every write in it.
