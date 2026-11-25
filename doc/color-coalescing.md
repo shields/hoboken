@@ -184,15 +184,23 @@ converts the write to `color_temp`. This causes Z2M to switch to CT mode
 so the bulb uses its WW/CW LEDs instead of mixing RGB to approximate
 white. Siri's three whites get the temperatures of Z2M's `cool`,
 `neutral`, and `warm` presets, and any other hue and saturation on the
-Home app's temperature curve gets the temperature it stands for:
+Home app's temperature curve gets the temperature it stands for. Four
+light sources that Siri names, in the table below, get the temperature of
+the source. Incandescent (45, 100) and sunlight (45, 80) stay colors,
+because amber and fluorescent orange write the first pair and saffron and
+sunglow the second. Candle (30, 84) is on the curve, at 460.
 
-| Request                        | Hue          | Sat | `color_temp`                      |
-| ------------------------------ | ------------ | --- | --------------------------------- |
-| Siri "white"                   | any          | 0   | `whiteColorTemp`, or 370 (2700 K) |
-| Home app white swatch          | 228          | 56  | `whiteColorTemp`, or 370 (2700 K) |
-| Siri "warm white"              | 31           | 33  | 454 (2200 K)                      |
-| Siri "cool white"              | 208          | 17  | 250 (4000 K)                      |
-| Home app temperature or swatch | on the curve |     | the curve's, from 140 to 500      |
+| Request                          | Hue          | Sat | `color_temp`                      |
+| -------------------------------- | ------------ | --- | --------------------------------- |
+| Siri "white"                     | any          | 0   | `whiteColorTemp`, or 370 (2700 K) |
+| Home app white swatch            | 228          | 56  | `whiteColorTemp`, or 370 (2700 K) |
+| Siri "warm white"                | 31           | 33  | 454 (2200 K)                      |
+| Siri "cool white"                | 208          | 17  | 250 (4000 K)                      |
+| Siri "halogen"                   | 33           | 12  | 313 (3200 K)                      |
+| Siri "warm fluorescent"          | 35           | 10  | 333 (3000 K)                      |
+| Siri "fluorescent"               | 153          | 4   | 250 (4000 K)                      |
+| Siri "full spectrum fluorescent" | 9            | 5   | 200 (5000 K)                      |
+| Home app temperature or swatch   | on the curve |     | the curve's, from 140 to 500      |
 
 `hueSaturationToColorTemp` finds the nearest point of the curve from 100
 to 500 mireds, treating hue and saturation as polar coordinates, because

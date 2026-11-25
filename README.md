@@ -70,8 +70,9 @@ light that reports a `color_temp`, or that has `whiteColorTemp` or the
 `color_temp` capability, Hoboken publishes a color temperature instead, so that
 the bulb uses its white LEDs. White is the device's `whiteColorTemp` in mireds
 (1,000,000 / kelvins, from 140 to 500), or 370 (2700 K) without one; Siri's
-"warm white" is 454 (2200 K) and "cool white" 250 (4000 K). The Home app's
-Temperature tab and white swatches become the temperature they stand for.
+"warm white" is 454 (2200 K) and "cool white" 250 (4000 K), and its halogen
+and fluorescents are temperatures too. The Home app's Temperature tab and
+white swatches become the temperature they stand for.
 
 A Zigbee2MQTT light can have `color_temp` and `color_hs` together, which the
 HomeKit specification does not allow but other bridges also do.

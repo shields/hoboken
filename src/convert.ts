@@ -104,18 +104,52 @@ export function hueSaturationToColorTemp(
   return nearest <= CURVE_TOLERANCE ? mireds : undefined;
 }
 
+// Siri's names for light sources, by the rounded hue and saturation it writes,
+// and the temperature of each source in mireds. Incandescent (45, 100) and
+// sunlight (45, 80) are left out because amber and saffron are the same pairs.
+const NAMED_WHITES: readonly {
+  name: string;
+  hue: number;
+  saturation: number;
+  mireds: number;
+}[] = [
+  {
+    name: "warm white",
+    hue: 31,
+    saturation: 33,
+    mireds: WARM_WHITE_COLOR_TEMP,
+  },
+  {
+    name: "cool white",
+    hue: 208,
+    saturation: 17,
+    mireds: COOL_WHITE_COLOR_TEMP,
+  },
+  { name: "halogen", hue: 33, saturation: 12, mireds: 313 },
+  { name: "warm fluorescent", hue: 35, saturation: 10, mireds: 333 },
+  {
+    name: "fluorescent",
+    hue: 153,
+    saturation: 4,
+    mireds: COOL_WHITE_COLOR_TEMP,
+  },
+  { name: "full spectrum fluorescent", hue: 9, saturation: 5, mireds: 200 },
+];
+
 // The color temperature that a write of hue and saturation asks for, if it
-// asks for a white: Siri's "white", "warm white" (H=31 S=33), and "cool white"
-// (H=208 S=17), or a point of the Home app's curve.
+// asks for a white: Siri's "white", a light source it names (`NAMED_WHITES`),
+// or a point of the Home app's curve.
 function requestedColorTemp(
   h: number | undefined,
   s: number | undefined,
   whiteColorTemp: number | undefined,
 ): number | undefined {
   if (isWhite(h, s)) return whiteColorTemp ?? DEFAULT_WHITE_COLOR_TEMP;
-  if (h === 31 && s === 33) return WARM_WHITE_COLOR_TEMP;
-  if (h === 208 && s === 17) return COOL_WHITE_COLOR_TEMP;
   if (h === undefined || s === undefined) return undefined;
+  const named = NAMED_WHITES.find(
+    (white) => white.hue === h && white.saturation === s,
+  );
+  if (named) return named.mireds;
   const mireds = hueSaturationToColorTemp(h, s);
   return mireds === undefined ? undefined : clampColorTemp(Math.round(mireds));
 }

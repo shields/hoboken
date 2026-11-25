@@ -1110,6 +1110,43 @@ describe("homeKitToZ2m", () => {
     ).toEqual({ color_temp: COOL_WHITE_COLOR_TEMP });
   });
 
+  test.each([
+    ["halogen", 33, 12, 313],
+    ["warm fluorescent", 35, 10, 333],
+    ["standard fluorescent", 153, 4, COOL_WHITE_COLOR_TEMP],
+    ["full spectrum fluorescent", 9, 5, 200],
+  ])(
+    "Siri's %s (H=%d/S=%d) sends %d mireds",
+    (_name, hue, saturation, mireds) => {
+      expect(homeKitToZ2m({ hue, saturation }, { color_temp: 300 })).toEqual({
+        color_temp: mireds,
+      });
+    },
+  );
+
+  test.each([
+    ["incandescent", 45, 100],
+    ["sunlight", 45, 80],
+  ])("Siri's %s (H=%d/S=%d) stays a color", (_name, hue, saturation) => {
+    expect(homeKitToZ2m({ hue, saturation }, { color_temp: 300 })).toEqual({
+      color: { hue, saturation },
+    });
+  });
+
+  test("a named light source ignores whiteColorTemp", () => {
+    expect(
+      homeKitToZ2m({ hue: 33, saturation: 12 }, undefined, {
+        whiteColorTemp: 250,
+      }),
+    ).toEqual({ color_temp: 313 });
+  });
+
+  test("a named light source without white LEDs stays a color", () => {
+    expect(homeKitToZ2m({ hue: 33, saturation: 12 })).toEqual({
+      color: { hue: 33, saturation: 12 },
+    });
+  });
+
   test("cool white without white LEDs stays a color", () => {
     expect(homeKitToZ2m({ hue: 208, saturation: 17 })).toEqual({
       color: { hue: 208, saturation: 17 },
