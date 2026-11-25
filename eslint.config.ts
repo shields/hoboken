@@ -60,6 +60,7 @@ export default defineConfig(
     files: [
       "src/accessories.ts",
       "test/accessories.test.ts",
+      "test/adaptive-lighting.test.ts",
       "test/bridge.test.ts",
     ],
     rules: {

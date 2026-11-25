@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  type Accessory,
   Characteristic,
   HAPStatus,
   HAPStorage,
@@ -36,6 +37,9 @@ import {
 import type { Config, MQTTCredentials } from "../src/config.ts";
 import { INVALID_MQTT_URL, MALFORMED_MQTT_URLS, SECRET } from "./mqtt-urls.ts";
 import { HeatedBeddingSource } from "../src/heated-bedding-source.ts";
+import { adaptiveLightingController } from "../src/accessories.ts";
+import { colorTempToHueSaturation } from "../src/convert.ts";
+import { hubStartsAdaptiveLighting } from "./adaptive-lighting-hub.ts";
 import type {
   ClientSubscribeCallback,
   IClientOptions,
@@ -4133,5 +4137,940 @@ describe("buildStatusData", () => {
     for (const device of result.devices) {
       expect(device.state).toBeNull();
     }
+  });
+});
+
+describe("Adaptive Lighting", () => {
+  const TOPIC = "zigbee2mqtt/lamp";
+  const controllers: { disableAdaptiveLighting: () => void }[] = [];
+  let output: ReturnType<typeof captureConsole>;
+
+  beforeEach(() => {
+    output = captureConsole();
+  });
+
+  afterEach(() => {
+    for (const controller of controllers.splice(0))
+      controller.disableAdaptiveLighting();
+    jest.useRealTimers();
+    output.restore();
+  });
+
+  const logged = (prefix: string) =>
+    output
+      .lines()
+      .map((line) => line.slice(line.indexOf(" ") + 1))
+      .filter((line) => line.startsWith(prefix));
+
+  function lampConfig(mac = "0E:42:A1:B2:C3:D4"): Config {
+    return {
+      ...testConfig(),
+      bridge: { ...testConfig().bridge, mac },
+      devices: [
+        {
+          name: "Lamp",
+          type: "z2m",
+          topic: TOPIC,
+          capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+        },
+      ],
+    };
+  }
+
+  async function startLamp(config = lampConfig(), connect = true) {
+    const started = await startBridge(config, VERSION);
+    if (connect) {
+      mockClient.connected = true;
+      mockClient.emit("connect");
+    }
+    const accessory = started.bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Lamp",
+    )!;
+    const controller = adaptiveLightingController(accessory)!;
+    controllers.push(controller);
+    const service = accessory.getService(Service.Lightbulb)!;
+    const characteristic = (type: typeof Characteristic.Hue) =>
+      service.getCharacteristic(type);
+    const report = (state: Record<string, unknown>) => {
+      mockClient.emit("message", TOPIC, Buffer.from(JSON.stringify(state)));
+    };
+    const sent = () =>
+      mockClient.published
+        .filter((p) => p.topic === `${TOPIC}/set`)
+        .map((p) => JSON.parse(p.message) as unknown);
+    const start = (options?: Parameters<typeof hubStartsAdaptiveLighting>[1]) =>
+      hubStartsAdaptiveLighting(accessory, options);
+    return {
+      ...started,
+      accessory,
+      controller,
+      characteristic,
+      report,
+      sent,
+      start,
+    };
+  }
+
+  const ON = {
+    state: "ON",
+    brightness: 254,
+    color_mode: "color_temp",
+    color_temp: 300,
+  };
+  const OFF = { ...ON, state: "OFF" };
+
+  test("starting it on a light that is on publishes the temperature as Adaptive Lighting's", async () => {
+    const { controller, characteristic, report, sent, start, shutdown } =
+      await startLamp();
+    report(ON);
+    await start();
+    await flush();
+
+    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(logged("Adaptive Lighting for")).toEqual([
+      `Adaptive Lighting for "Lamp": {"color_temp":350} published to ${TOPIC}/set as {"color_temp":350}`,
+    ]);
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    expect(characteristic(Characteristic.Hue).value).toBe(
+      Math.round(colorTempToHueSaturation(350).hue),
+    );
+    await shutdown();
+  });
+
+  test("a light that is off is sent nothing, and the turn-on write carries the temperature", async () => {
+    const { controller, report, sent, start, characteristic, shutdown } =
+      await startLamp();
+    report(OFF);
+    await start();
+    await flush();
+    expect(sent()).toEqual([]);
+
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    expect(sent()).toEqual([{ state: "ON", color_temp: 350 }]);
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    expect(logged("HomeKit write for")).toEqual([
+      `HomeKit write for "Lamp": {"on":true} with the temperature of Adaptive Lighting published to ${TOPIC}/set as {"state":"ON","color_temp":350}`,
+    ]);
+    await shutdown();
+  });
+
+  test("a light turned on at another brightness is sent the temperature for that brightness", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(OFF);
+    await start();
+    await flush();
+
+    // HAP-NodeJS handles a write request in the nextTick callback that ends
+    // the request body, so the flush precedes the recomputed temperature.
+    process.nextTick(() => {
+      void characteristic(Characteristic.Brightness).handleSetRequest(
+        20,
+        {} as never,
+      );
+      void characteristic(Characteristic.On).handleSetRequest(
+        true,
+        {} as never,
+      );
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sent()).toEqual([
+      { state: "ON", brightness: 50, color_temp: 350 },
+      { color_temp: 390 },
+    ]);
+    await shutdown();
+  });
+
+  test("a light that HomeKit has just turned off is not sent a recomputed temperature", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(ON);
+    await start();
+    await flush();
+    characteristic(Characteristic.On).setValue(false);
+    await flush();
+
+    report({ brightness: 51 });
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 350 }, { state: "OFF" }]);
+    await shutdown();
+  });
+
+  test("a light that HomeKit turned off and on within the write-back window is sent the temperature", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(ON);
+    await start();
+    await flush();
+    characteristic(Characteristic.On).setValue(false);
+    await flush();
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    expect(sent()).toEqual([
+      { color_temp: 350 },
+      { state: "OFF" },
+      { state: "ON", color_temp: 350 },
+    ]);
+    await shutdown();
+  });
+
+  test("a turn-on write with its own temperature or color gets none added", async () => {
+    for (const [writes, expected] of [
+      [[[Characteristic.ColorTemperature, 300]], { color_temp: 300 }],
+      [
+        [
+          [Characteristic.Hue, 120],
+          [Characteristic.Saturation, 100],
+        ],
+        { color: { hue: 120, saturation: 100 } },
+      ],
+    ] as const) {
+      const { report, sent, start, characteristic, shutdown } =
+        await startLamp();
+      report(OFF);
+      await start();
+      await flush();
+      characteristic(Characteristic.On).setValue(true);
+      for (const [type, value] of writes) characteristic(type).setValue(value);
+      await flush();
+      expect(sent()).toEqual([{ state: "ON", ...expected }]);
+      await shutdown();
+    }
+  });
+
+  test("a temperature that the light already shows is not sent again, until it shows another", async () => {
+    jest.useFakeTimers();
+    const { controller, report, sent, start, shutdown } = await startLamp();
+    report(ON);
+    await start();
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 350 }]);
+
+    report({ ...ON, color_temp: 348 });
+    jest.advanceTimersByTime(60000);
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 350 }]);
+
+    report({ ...ON, color_temp: 400 });
+    jest.advanceTimersByTime(60000);
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 350 }, { color_temp: 347 }]);
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    await shutdown();
+  });
+
+  // A schedule that takes weeks to change holds one temperature for a Brightness.
+  const FLAT = { spanMs: 4e9 };
+
+  test("a bulb that clamps the temperature is sent it twice and then left alone", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, shutdown } = await startLamp();
+    report(ON);
+    await start(FLAT);
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 350 }]);
+
+    report({ ...ON, color_temp: 370 });
+    for (let minute = 0; minute < 4; minute++) {
+      jest.advanceTimersByTime(60000);
+      await flush();
+    }
+    expect(sent()).toEqual([{ color_temp: 350 }, { color_temp: 350 }]);
+    await shutdown();
+  });
+
+  test("a bulb that clamps the temperature is sent it again once Adaptive Lighting is turned on again", async () => {
+    jest.useFakeTimers();
+    const { controller, report, sent, start, characteristic, shutdown } =
+      await startLamp();
+    report(ON);
+    await start(FLAT);
+    await flush();
+    report({ ...ON, color_temp: 370 });
+    for (let minute = 0; minute < 3; minute++) {
+      jest.advanceTimersByTime(60000);
+      await flush();
+    }
+    expect(sent()).toEqual([{ color_temp: 350 }, { color_temp: 350 }]);
+
+    characteristic(Characteristic.ColorTemperature).setValue(370);
+    await flush();
+    expect(controller.isAdaptiveLightingActive()).toBe(false);
+    jest.advanceTimersByTime(1000);
+    report({ ...ON, color_temp: 370 });
+    await start(FLAT);
+    await flush();
+    expect(sent()).toEqual([
+      { color_temp: 350 },
+      { color_temp: 350 },
+      { color_temp: 370 },
+      { color_temp: 350 },
+    ]);
+    await shutdown();
+  });
+
+  test("a command that never takes effect is sent twice", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, shutdown } = await startLamp();
+    report(ON);
+    await start(FLAT);
+    await flush();
+    for (let minute = 0; minute < 4; minute++) {
+      report({ ...ON, color_temp: 310 });
+      jest.advanceTimersByTime(60000);
+      await flush();
+    }
+    expect(sent()).toEqual([{ color_temp: 350 }, { color_temp: 350 }]);
+    await shutdown();
+  });
+
+  test("a bulb that clamps the temperature is sent it again after it shows another", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, shutdown } = await startLamp();
+    report(ON);
+    await start(FLAT);
+    await flush();
+    for (const shown of [370, 370, 370, 300, 370, 370, 370]) {
+      report({ ...ON, color_temp: shown });
+      jest.advanceTimersByTime(60000);
+      await flush();
+    }
+    // Asked at the start, at 370 (recorded), at 300, and at 370 again.
+    expect(sent()).toHaveLength(4);
+    await shutdown();
+  });
+
+  test("a bulb that clamps the temperature is sent a different temperature at once", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, shutdown } = await startLamp();
+    report(ON);
+    await start(FLAT);
+    await flush();
+    report({ ...ON, color_temp: 370 });
+    for (let minute = 0; minute < 3; minute++) {
+      jest.advanceTimersByTime(60000);
+      await flush();
+    }
+    expect(sent()).toHaveLength(2);
+
+    report({ ...ON, brightness: 25, color_temp: 370 });
+    await flush();
+    for (let minute = 0; minute < 3; minute++) {
+      report({ ...ON, brightness: 25, color_temp: 370 });
+      jest.advanceTimersByTime(60000);
+      await flush();
+    }
+    expect(sent().slice(2)).toEqual([{ color_temp: 395 }, { color_temp: 395 }]);
+    await shutdown();
+  });
+
+  test("a light that takes the temperature is corrected each time it is changed to the same value outside HomeKit", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, shutdown } = await startLamp();
+    report(ON);
+    await start(FLAT);
+    await flush();
+    expect(sent()).toHaveLength(1);
+    for (let change = 0; change < 4; change++) {
+      report({ ...ON, color_temp: 350 });
+      jest.advanceTimersByTime(60000);
+      await flush();
+      report({ ...ON, color_temp: 370 });
+      jest.advanceTimersByTime(60000);
+      await flush();
+    }
+    expect(sent()).toHaveLength(5);
+    await shutdown();
+  });
+
+  test("a Brightness write to a light that is off carries the temperature, and the recomputed one follows", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(OFF);
+    await start();
+    await flush();
+
+    process.nextTick(() => {
+      void characteristic(Characteristic.Brightness).handleSetRequest(
+        20,
+        {} as never,
+      );
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sent()).toEqual([
+      { brightness: 50, color_temp: 350 },
+      { color_temp: 390 },
+    ]);
+    await shutdown();
+  });
+
+  test("a Brightness write to a light that is on gets no temperature added", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(ON);
+    await start();
+    await flush();
+
+    process.nextTick(() => {
+      void characteristic(Characteristic.Brightness).handleSetRequest(
+        20,
+        {} as never,
+      );
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sent()).toEqual([
+      { color_temp: 350 },
+      { brightness: 50 },
+      { color_temp: 390 },
+    ]);
+    await shutdown();
+  });
+
+  test("a write of On to a light that is already on gets no temperature added", async () => {
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(ON);
+    await start();
+    await flush();
+
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 350 }, { state: "ON" }]);
+    await shutdown();
+  });
+
+  test("a Brightness of zero without On is not a turn-on", async () => {
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(OFF);
+    await start();
+    await flush();
+
+    process.nextTick(() => {
+      void characteristic(Characteristic.Brightness).handleSetRequest(
+        0,
+        {} as never,
+      );
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sent()).toEqual([{ brightness: 0 }]);
+    await shutdown();
+  });
+
+  test("a light turned off and on again is sent the temperature even if it showed it before", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report({ ...ON, color_temp: 350 });
+    await start();
+    await flush();
+    expect(sent()).toEqual([]);
+
+    report({ ...ON, state: "OFF", color_temp: 200 });
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    expect(sent()).toEqual([{ state: "ON", color_temp: 350 }]);
+    await shutdown();
+  });
+
+  test("a report that brightens the light recomputes the temperature", async () => {
+    const { report, sent, start, shutdown } = await startLamp();
+    report({ ...ON, brightness: 25 });
+    await start();
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 395 }]);
+
+    report({ ...ON, brightness: 254, color_temp: 395 });
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 395 }, { color_temp: 350 }]);
+    await shutdown();
+  });
+
+  test("a published temperature brings no notification of Hue or Saturation", async () => {
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report({ ...ON, brightness: 25 });
+    await start();
+    await flush();
+    // HAP-NodeJS notifies controllers of an update only if it changes the value.
+    const notified: unknown[] = [];
+    for (const type of [Characteristic.Hue, Characteristic.Saturation]) {
+      characteristic(type).on("change", (change) => {
+        if (change.oldValue !== change.newValue)
+          notified.push([
+            characteristic(type).displayName,
+            change.oldValue,
+            change.newValue,
+          ]);
+      });
+    }
+
+    report({ ...ON, brightness: 254, color_temp: 395 });
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 395 }, { color_temp: 350 }]);
+    const color = colorTempToHueSaturation(350);
+    expect(characteristic(Characteristic.Hue).value).toBe(
+      Math.round(color.hue),
+    );
+    expect(characteristic(Characteristic.Saturation).value).toBe(
+      Math.round(color.saturation),
+    );
+    expect(notified).toEqual([]);
+    await shutdown();
+  });
+
+  test("a color in a report turns it off", async () => {
+    const { controller, report, sent, start, characteristic, shutdown } =
+      await startLamp();
+    report(OFF);
+    await start();
+    await flush();
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+
+    report({
+      state: "ON",
+      color_mode: "hs",
+      color: { hue: 120, saturation: 100 },
+      color_temp: 500,
+    });
+    expect(controller.isAdaptiveLightingActive()).toBe(false);
+    expect(characteristic(Characteristic.ColorTemperature).value).toBe(140);
+    expect(sent()).toEqual([]);
+    expect(logged("Adaptive Lighting off for")).toEqual([
+      'Adaptive Lighting off for "Lamp": the light shows a color',
+    ]);
+    await shutdown();
+  });
+
+  test("a color in a report inside the write-back window does not turn it off", async () => {
+    jest.useFakeTimers();
+    const { controller, report, sent, start, shutdown } = await startLamp();
+    report(ON);
+    await start();
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 350 }]);
+
+    report({
+      color_mode: "hs",
+      color: { hue: 120, saturation: 100 },
+      color_temp: 500,
+    });
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    await shutdown();
+  });
+
+  test("a color in a report just outside the write-back window turns it off", async () => {
+    jest.useFakeTimers();
+    for (const [elapsed, active] of [
+      [499, true],
+      [500, false],
+    ] as const) {
+      const { controller, report, start, shutdown } = await startLamp();
+      report(ON);
+      await start();
+      await flush();
+      jest.advanceTimersByTime(elapsed);
+      report({
+        color_mode: "hs",
+        color: { hue: 120, saturation: 100 },
+        color_temp: 500,
+      });
+      expect(controller.isAdaptiveLightingActive()).toBe(active);
+      await shutdown();
+    }
+  });
+
+  test("a Brightness of zero without On is not sent a recomputed temperature", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(ON);
+    await start();
+    await flush();
+
+    process.nextTick(() => {
+      void characteristic(Characteristic.Brightness).handleSetRequest(
+        0,
+        {} as never,
+      );
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(sent()).toEqual([{ color_temp: 350 }, { brightness: 0 }]);
+    await shutdown();
+  });
+
+  test("a power write stands for the light for 500 ms", async () => {
+    jest.useFakeTimers();
+    for (const [elapsed, recomputed] of [
+      [499, [{ color_temp: 395 }]],
+      [500, []],
+    ] as const) {
+      const { report, sent, start, characteristic, shutdown } =
+        await startLamp();
+      report(OFF);
+      await start(FLAT);
+      await flush();
+      characteristic(Characteristic.On).setValue(true);
+      await flush();
+      jest.advanceTimersByTime(elapsed);
+      report({ ...OFF, brightness: 25 });
+      await flush();
+      expect(sent()).toEqual([{ state: "ON", color_temp: 350 }, ...recomputed]);
+      await shutdown();
+    }
+  });
+
+  test("a write of only a temperature does not keep an earlier power write alive", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(OFF);
+    await start(FLAT);
+    await flush();
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    jest.advanceTimersByTime(400);
+    report({ ...OFF, brightness: 25 });
+    await flush();
+    jest.advanceTimersByTime(50);
+    report({ ...OFF, brightness: 254 });
+    await flush();
+    jest.advanceTimersByTime(250);
+    report({ ...OFF, brightness: 25 });
+    await flush();
+    expect(sent()).toEqual([
+      { state: "ON", color_temp: 350 },
+      { color_temp: 395 },
+      { color_temp: 350 },
+    ]);
+    await shutdown();
+  });
+
+  test("a temperature write stands for the light for 500 ms", async () => {
+    jest.useFakeTimers();
+    for (const [elapsed, again] of [
+      [499, []],
+      [500, [{ color_temp: 395 }]],
+    ] as const) {
+      const { report, sent, start, shutdown } = await startLamp();
+      report({ ...ON, color_temp: 300 });
+      await start(FLAT);
+      await flush();
+      jest.advanceTimersByTime(60000 - elapsed);
+      report({ ...ON, brightness: 25, color_temp: 300 });
+      await flush();
+      jest.advanceTimersByTime(elapsed);
+      await flush();
+      expect(sent()).toEqual([
+        { color_temp: 350 },
+        { color_temp: 395 },
+        ...again,
+      ]);
+      await shutdown();
+    }
+  });
+
+  test("a power write does not keep an earlier temperature alive", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report({ ...ON, brightness: 25, color_temp: 300 });
+    await start(FLAT);
+    await flush();
+    jest.advanceTimersByTime(59400);
+    report({ ...ON, color_temp: 300 });
+    await flush();
+    jest.advanceTimersByTime(300);
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    jest.advanceTimersByTime(300);
+    await flush();
+    expect(sent()).toEqual([
+      { color_temp: 395 },
+      { color_temp: 350 },
+      { state: "ON" },
+      { color_temp: 350 },
+    ]);
+    await shutdown();
+  });
+
+  const lampWithScene = () => {
+    const config = lampConfig();
+    config.devices[0]!.scenes = [{ name: "Movie", id: 1 }];
+    config.devices.push({
+      name: "Hall",
+      type: "z2m",
+      topic: "zigbee2mqtt/hall",
+      capabilities: ["on_off", "brightness", "color_temp"],
+      scenes: [{ name: "Hall Movie", id: 2 }],
+    });
+    return config;
+  };
+  const recall = (
+    bridge: { bridgedAccessories: { displayName: string }[] },
+    name: string,
+  ) =>
+    (bridge.bridgedAccessories.find((a) => a.displayName === name) as Accessory)
+      .getService(Service.Switch)!
+      .getCharacteristic(Characteristic.On)
+      .setValue(true);
+
+  test("recalling a scene of its device turns Adaptive Lighting off", async () => {
+    const { bridge, controller, report, sent, start, shutdown } =
+      await startLamp(lampWithScene());
+    report(ON);
+    await start();
+    await flush();
+
+    recall(bridge, "Movie");
+    await flush();
+    expect(sent()).toEqual([{ color_temp: 350 }, { scene_recall: 1 }]);
+    expect(controller.isAdaptiveLightingActive()).toBe(false);
+    expect(logged("Adaptive Lighting off for")).toEqual([
+      'Adaptive Lighting off for "Lamp": a scene was recalled',
+    ]);
+
+    recall(bridge, "Movie");
+    await flush();
+    expect(logged("Adaptive Lighting off for")).toHaveLength(1);
+    await shutdown();
+  });
+
+  test("a scene recall that cannot be published leaves Adaptive Lighting on", async () => {
+    const { bridge, controller, report, start, shutdown } =
+      await startLamp(lampWithScene());
+    report(ON);
+    await start();
+    await flush();
+
+    mockClient.connected = false;
+    recall(bridge, "Movie");
+    await flush();
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    expect(logged("Adaptive Lighting off for")).toEqual([]);
+    await shutdown();
+  });
+
+  test("recalling a scene of another device leaves Adaptive Lighting on", async () => {
+    const { bridge, controller, report, start, shutdown } =
+      await startLamp(lampWithScene());
+    report(ON);
+    await start();
+    await flush();
+
+    recall(bridge, "Hall Movie");
+    await flush();
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    expect(logged("Adaptive Lighting off for")).toEqual([]);
+    await shutdown();
+  });
+
+  describe("on a WLED light with white segments", () => {
+    async function startNook() {
+      const config = wledConfig();
+      config.devices = [
+        {
+          name: "Lamp",
+          type: "wled",
+          topic: "wled/nook",
+          capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+          colorSegments: [0],
+          whiteSegments: [1, 2],
+          whiteChannels: { r: 5500, g: 2400, b: 5500, w: 2400 },
+          gamma: 2.2,
+        },
+      ];
+      const { bridge, shutdown } = await startBridge(config, VERSION);
+      mockClient.connected = true;
+      mockClient.emit("connect");
+      const accessory = bridge.bridgedAccessories.find(
+        (a) => a.displayName === "Lamp",
+      )!;
+      const controller = adaptiveLightingController(accessory)!;
+      controllers.push(controller);
+      await hubStartsAdaptiveLighting(accessory);
+      await flush();
+      return { controller, shutdown };
+    }
+
+    test("the white at the end with no lit w channel, reported after a restart, leaves it on", async () => {
+      const { controller, shutdown } = await startNook();
+      mockClient.emit("message", "wled/nook/c", Buffer.from("#FF00FF"));
+      expect(controller.isAdaptiveLightingActive()).toBe(true);
+      expect(logged("Adaptive Lighting off for")).toEqual([]);
+      await shutdown();
+    });
+
+    test("an ordinary color in a report turns it off", async () => {
+      const { controller, shutdown } = await startNook();
+      mockClient.emit("message", "wled/nook/c", Buffer.from("#00FF00"));
+      expect(controller.isAdaptiveLightingActive()).toBe(false);
+      await shutdown();
+    });
+  });
+
+  test("a white at the minimum temperature in a report does not turn it off", async () => {
+    const { controller, report, start, shutdown } = await startLamp();
+    report(OFF);
+    await start();
+    report({ state: "ON", color_mode: "color_temp", color_temp: 140 });
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    expect(logged("Adaptive Lighting off for")).toEqual([]);
+    await shutdown();
+  });
+
+  test("a temperature that changes outside HomeKit does not turn it off", async () => {
+    const { controller, report, start, shutdown } = await startLamp();
+    report(OFF);
+    await start();
+    report({ color_temp: 250, color_mode: "color_temp" });
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    await shutdown();
+  });
+
+  test("a HomeKit write of a temperature, or of Hue and Saturation, turns it off", async () => {
+    for (const type of [
+      Characteristic.ColorTemperature,
+      Characteristic.Hue,
+      Characteristic.Saturation,
+    ]) {
+      const { controller, report, start, characteristic, shutdown } =
+        await startLamp();
+      report(OFF);
+      await start();
+      characteristic(type).setValue(type === Characteristic.Hue ? 30 : 250);
+      await flush();
+      expect(controller.isAdaptiveLightingActive()).toBe(false);
+      await shutdown();
+    }
+  });
+
+  test("a write while MQTT is down neither throws nor publishes, and the temperature is remembered", async () => {
+    const { controller, report, sent, start, characteristic, shutdown } =
+      await startLamp();
+    report(ON);
+    mockClient.connected = false;
+    const temperature = characteristic(Characteristic.ColorTemperature);
+    const handle = temperature.handleSetRequest.bind(temperature);
+    const settled: Promise<unknown>[] = [];
+    jest
+      .spyOn(temperature, "handleSetRequest")
+      .mockImplementation((...args: Parameters<typeof handle>) => {
+        const result = handle(...args);
+        settled.push(result);
+        return result;
+      });
+    await start();
+    await flush();
+    expect(sent()).toEqual([]);
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    expect(await Promise.allSettled(settled)).toEqual([
+      { status: "fulfilled", value: undefined },
+    ]);
+
+    mockClient.connected = true;
+    report(OFF);
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    expect(sent()).toEqual([{ state: "ON", color_temp: 350 }]);
+    await shutdown();
+  });
+
+  test("a light that Adaptive Lighting no longer controls is not sent the remembered temperature", async () => {
+    const { controller, report, sent, start, characteristic, shutdown } =
+      await startLamp();
+    report(ON);
+    await start();
+    await flush();
+    characteristic(Characteristic.ColorTemperature).setValue(250);
+    await flush();
+    expect(controller.isAdaptiveLightingActive()).toBe(false);
+
+    report(OFF);
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    expect(sent().at(-1)).toEqual({ state: "ON" });
+    await shutdown();
+  });
+
+  test("shutdown leaves Adaptive Lighting on", async () => {
+    const { controller, report, start, shutdown } = await startLamp();
+    report(OFF);
+    await start();
+    await shutdown();
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+  });
+
+  test("a light without brightness or color_temp has no controller", async () => {
+    const config = lampConfig();
+    config.devices[0]!.capabilities = ["on_off", "color_temp"];
+    const { bridge, shutdown } = await startBridge(config, VERSION);
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Lamp",
+    )!;
+    expect(adaptiveLightingController(accessory)).toBeUndefined();
+    await shutdown();
+  });
+
+  test("a light with white segments gets it over its own range and publishes segment colors", async () => {
+    const config = wledConfig();
+    config.devices = [
+      {
+        name: "Lamp",
+        type: "wled",
+        topic: "wled/nook",
+        capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+        colorSegments: [0],
+        whiteSegments: [1, 2],
+        whiteChannels: { r: 5500, g: 2400, b: 5500, w: 2400 },
+        gamma: 2.2,
+      },
+    ];
+    const { bridge, shutdown } = await startBridge(config, VERSION);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+    const accessory = bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Lamp",
+    )!;
+    const controller = adaptiveLightingController(accessory)!;
+    controllers.push(controller);
+    const service = accessory.getService(Service.Lightbulb)!;
+    mockClient.emit("message", "wled/nook/g", Buffer.from("255"));
+    mockClient.emit("message", "wled/nook/c", Buffer.from("#FFA7FFA7"));
+
+    await hubStartsAdaptiveLighting(accessory);
+    await flush();
+    const written = mockClient.published.filter(
+      (p) => p.topic === "wled/nook/api",
+    );
+    expect(controller.isAdaptiveLightingActive()).toBe(true);
+    expect(
+      service.getCharacteristic(Characteristic.ColorTemperature).value,
+    ).toBe(350);
+    expect(written).toHaveLength(1);
+    expect(JSON.parse(written[0]!.message)).toMatchObject({
+      seg: [
+        { id: 0, on: false, sel: false },
+        { id: 1, on: true, sel: true },
+        { id: 2, on: true, sel: true },
+      ],
+    });
+    await shutdown();
+  });
+
+  test("is restored from the persisted transition without a connection", async () => {
+    const mac = "0E:42:A1:B2:C3:E5";
+    const first = await startLamp(lampConfig(mac), false);
+    jest.useFakeTimers();
+    await first.start();
+    jest.advanceTimersByTime(100);
+    jest.useRealTimers();
+    await first.shutdown();
+
+    const second = await startLamp(lampConfig(mac), false);
+    expect(second.controller.isAdaptiveLightingActive()).toBe(true);
+    expect(second.sent()).toEqual([]);
+
+    mockClient.connected = true;
+    mockClient.emit("connect");
+    second.report(OFF);
+    second.characteristic(Characteristic.On).setValue(true);
+    await flush();
+    expect(second.sent()).toEqual([{ state: "ON", color_temp: 350 }]);
+    await second.shutdown();
   });
 });

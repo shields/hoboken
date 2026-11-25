@@ -430,6 +430,21 @@ function whiteValuesToColorTemp(
   return strips.warm - t * (strips.warm - strips.cool);
 }
 
+// The hue and saturation that the white at the end of the range without a lit
+// w channel reads as when the bridge does not remember writing it, as after a
+// restart: a color at the minimum temperature. That end is the cool one when w
+// is a warm strip and the warm one when it is a cool strip.
+export function wledUnrememberedWhite(
+  light: WledLight,
+): { hue: number; saturation: number } | undefined {
+  const strips = whiteStrips(light);
+  if (!strips) return undefined;
+  const pattern = [strips.cool, strips.warm]
+    .map((mireds) => whiteChannelValues(mireds, strips))
+    .find((values) => values[3] === 0);
+  return pattern && rgbToHs(...wledRgb(...pattern));
+}
+
 // WLED reports one color, that of the first selected segment, and a white
 // segment with only its cool strips lit has no white channel to tell it from
 // a color. `white`, the white that the bridge last wrote, settles that case:

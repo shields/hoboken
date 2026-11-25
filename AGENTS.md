@@ -8,8 +8,10 @@ framework.
 `README.md` is the overview: what the bridge exposes, configuration,
 deployment, and failure handling. The detail is in `doc/`:
 `color-coalescing.md` for write coalescing, white and color handling, and WLED
-white segments; `mqtt.md` for the broker URL, authentication, topic
-permissions, and refusals; `tucson.md` for heated bedding and curtain behavior.
+white segments; `adaptive-lighting.md` for when a light is sent Adaptive
+Lighting's temperature and what turns it off; `mqtt.md` for the broker URL,
+authentication, topic permissions, and refusals; `tucson.md` for heated
+bedding and curtain behavior.
 Read the relevant part before changing a feature, and update it with the
 change. Keep the README short and put detail in `doc/`. This file holds only
 rules and traps that those documents, the code, and the tests do not show;
@@ -98,6 +100,13 @@ make demo               # Serve the status page with sample data
 - Convert a temperature to hue and saturation with `colorTempToHueSaturation`,
   the Home app's own curve, never HAP-NodeJS's `ColorUtils` table, which gives
   different colors.
+- Never call `disableAdaptiveLighting` or `removeController` on shutdown: both
+  erase the Adaptive Lighting schedule that HAP-NodeJS persists. A test that
+  starts Adaptive Lighting disables it itself, to release its timer.
+- HAP-NodeJS handles a write request in a `nextTick` callback, so a request's
+  writes are flushed before the changes they cause are emitted. A test of what
+  follows a write, such as the temperature that Adaptive Lighting recomputes
+  for a Brightness, must start the writes inside `process.nextTick`.
 - HAP-NodeJS checks a controller's write against a characteristic's range but
   not its `minStep`. A `fan_speed` device's `RotationSpeed` off the
   `FAN_SPEED_STEP` grid reaches `onSet` and stays on the characteristic until

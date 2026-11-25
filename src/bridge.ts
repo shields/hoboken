@@ -61,6 +61,14 @@ import {
 } from "./heated-bedding-accessories.ts";
 import * as log from "./log.ts";
 import {
+  type AdaptiveRequest,
+  showsColor,
+  shouldPublishAdaptiveTemperature,
+  withAdaptiveTemperature,
+  writtenState,
+} from "./adaptive-lighting.ts";
+import {
+  adaptiveLightingController,
   createFanAccessory,
   createLightAccessory,
   createSceneAccessory,
@@ -216,6 +224,29 @@ export async function startBridge(
   assertMQTTURL(config.mqtt.url);
   const stateCache = new Map<string, RawState>();
   const lastColorPublish = new Map<string, number>();
+  const adaptiveTemperatures = new Map<string, number>();
+  const adaptiveRequests = new Map<string, AdaptiveRequest>();
+  const recentWrites = new Map<
+    string,
+    {
+      on?: { value: boolean; at: number };
+      color_temp?: { value: number; at: number };
+    }
+  >();
+  const recentlyWritten = (topic: string): HomeKitState => {
+    const now = Date.now();
+    const writes = recentWrites.get(topic);
+    return {
+      ...(writes?.on &&
+        now - writes.on.at < WRITE_BACK_SUPPRESSION_MS && {
+          on: writes.on.value,
+        }),
+      ...(writes?.color_temp &&
+        now - writes.color_temp.at < WRITE_BACK_SUPPRESSION_MS && {
+          color_temp: writes.color_temp.value,
+        }),
+    };
+  };
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let stableTimer: ReturnType<typeof setTimeout> | undefined;
   let heatedBedding: HeatedBeddingMQTT | undefined;
@@ -373,12 +404,33 @@ export async function startBridge(
       raw?: RawState;
     },
   ): PublishFn {
-    return (topic, payload) => {
-      const converted = convert(payload, stateCache.get(topic));
+    return (topic, written, source) => {
+      const entry = accessoryMap.get(topic);
+      const adaptiveController =
+        entry && adaptiveLightingController(entry.accessory);
+      const cachedRaw = stateCache.get(topic);
+      const adaptive = adaptiveController?.isAdaptiveLightingActive() === true;
+      const payload = withAdaptiveTemperature(
+        written,
+        adaptiveTemperatures.get(topic),
+        adaptive,
+        adaptive
+          ? {
+              ...(cachedRaw &&
+                protocols[device.type].toHomeKit(cachedRaw, cachedRaw, device)),
+              ...recentlyWritten(topic),
+            }
+          : {},
+      );
+      const converted = convert(payload, cachedRaw);
       const message = JSON.stringify(converted);
       rawPublish(mqttTopic(topic), message);
+      const origin =
+        source === "adaptive-lighting"
+          ? `Adaptive Lighting for "${device.name}"`
+          : `HomeKit write for "${device.name}"`;
       log.log(
-        `HomeKit write for "${device.name}": ${JSON.stringify(payload)} published to ${mqttTopic(topic)} as ${message}`,
+        `${origin}: ${JSON.stringify(written)}${payload === written ? "" : " with the temperature of Adaptive Lighting"} published to ${mqttTopic(topic)} as ${message}`,
       );
       if (
         "hue" in payload ||
@@ -386,8 +438,19 @@ export async function startBridge(
         "color_temp" in payload
       ) {
         lastColorPublish.set(topic, Date.now());
+        // What the light showed for a temperature that Adaptive Lighting asked
+        // for says nothing once HomeKit has set its color or temperature.
+        if (source !== "adaptive-lighting") adaptiveRequests.delete(topic);
       }
-      const entry = accessoryMap.get(topic);
+      const wrote = writtenState(payload);
+      const at = Date.now();
+      recentWrites.set(topic, {
+        ...recentWrites.get(topic),
+        ...(wrote.on !== undefined && { on: { value: wrote.on, at } }),
+        ...(wrote.color_temp !== undefined && {
+          color_temp: { value: wrote.color_temp, at },
+        }),
+      });
       if (!follow || !entry) return;
       const { homeKit, raw } = follow(converted);
       const cached = stateCache.get(topic);
@@ -474,6 +537,16 @@ export async function startBridge(
     updateState: typeof updateAccessoryState;
   }
   const accessoryMap = new Map<string, AccessoryEntry>();
+
+  function disableAdaptiveLighting(
+    entry: AccessoryEntry,
+    reason: string,
+  ): void {
+    const adaptive = adaptiveLightingController(entry.accessory);
+    if (adaptive?.isAdaptiveLightingActive() !== true) return;
+    log.log(`Adaptive Lighting off for "${entry.device.name}": ${reason}`);
+    adaptive.disableAdaptiveLighting();
+  }
   const wledTopicMap = new Map<string, { device: string; sub: string }>();
 
   log.log(
@@ -492,17 +565,43 @@ export async function startBridge(
       return proto.toHomeKit(raw, raw, device);
     };
 
+    const adaptiveTemperature = (temperature: number) => {
+      adaptiveTemperatures.set(device.topic, temperature);
+      if (mqttClient?.connected !== true) return false;
+      const reported = getState(device.topic);
+      const state = { ...reported, ...recentlyWritten(device.topic) };
+      // A light that reports the temperature has taken it, so a later change
+      // to what it shows is a new one to correct.
+      if (reported?.color_temp === temperature)
+        adaptiveRequests.delete(device.topic);
+      const last = adaptiveRequests.get(device.topic);
+      if (!shouldPublishAdaptiveTemperature(state, temperature, last))
+        return false;
+      adaptiveRequests.set(device.topic, {
+        temperature,
+        shown: last?.temperature === temperature ? state.color_temp : undefined,
+      });
+      return true;
+    };
+
     const isFan = device.capabilities.includes("fan");
     const accessory = isFan
       ? createFanAccessory(device, publish, getState, prePublishCheck)
-      : createLightAccessory(device, publish, getState, prePublishCheck);
+      : createLightAccessory(
+          device,
+          publish,
+          getState,
+          prePublishCheck,
+          adaptiveTemperature,
+        );
     setAccessoryInfo(accessory, "Hoboken", device.topic, device.topic, version);
     bridge.addBridgedAccessory(accessory);
-    accessoryMap.set(device.topic, {
+    const entry: AccessoryEntry = {
       accessory,
       device,
       updateState: isFan ? updateFanAccessoryState : updateAccessoryState,
-    });
+    };
+    accessoryMap.set(device.topic, entry);
     switch (device.type) {
       case "z2m":
         break;
@@ -519,7 +618,11 @@ export async function startBridge(
     }
 
     if (device.scenes) {
-      const scenePublish = makePublish(device, (p) => p, z2mSetTopic);
+      const publishScene = makePublish(device, (p) => p, z2mSetTopic);
+      const scenePublish: PublishFn = (topic, payload, source) => {
+        publishScene(topic, payload, source);
+        disableAdaptiveLighting(entry, "a scene was recalled");
+      };
       for (const scene of device.scenes) {
         const sceneAccessory = createSceneAccessory(
           device,
@@ -712,6 +815,8 @@ export async function startBridge(
       delete hkState.saturation;
       delete hkState.color_temp;
     }
+    if (showsColor(hkState, entry.device))
+      disableAdaptiveLighting(entry, "the light shows a color");
     if (Object.keys(hkState).length > 0) {
       entry.updateState(entry.accessory, hkState, entry.device.capabilities);
     }

@@ -16,6 +16,7 @@ import { describe, expect, test } from "bun:test";
 import {
   clampColorTemp,
   colorTempRange,
+  wledUnrememberedWhite,
   homeKitToWled,
   homeKitToZ2m,
   COOL_WHITE_COLOR_TEMP,
@@ -481,6 +482,31 @@ describe("a WLED device with white segments", () => {
 
   test("its ColorTemperature range is what the strips span, in whole mireds", () => {
     expect(colorTempRange(NOOK)).toEqual([182, 416]);
+  });
+
+  test("the end without a lit w channel reads as a color when it is not remembered", () => {
+    expect(wledUnrememberedWhite(NOOK)).toEqual({ hue: 300, saturation: 100 });
+    const light = (whiteChannels: {
+      r: number;
+      g: number;
+      b: number;
+      w: number;
+    }) => ({
+      ...NOOK,
+      whiteChannels,
+    });
+    expect(
+      wledUnrememberedWhite(light({ r: 2400, g: 5500, b: 2400, w: 5500 })),
+    ).toEqual({ hue: 300, saturation: 100 });
+    expect(
+      wledUnrememberedWhite(light({ r: 2400, g: 2400, b: 2400, w: 5500 })),
+    ).toEqual({ hue: 0, saturation: 0 });
+    expect(wledToHomeKit({ col: [255, 0, 255, 0] }, undefined, NOOK)).toEqual({
+      hue: 300,
+      saturation: 100,
+      color_temp: 182,
+    });
+    expect(wledUnrememberedWhite({})).toBeUndefined();
   });
 
   test("a device without white segments has HomeKit's range", () => {

@@ -14,6 +14,7 @@
 
 import {
   Accessory,
+  AdaptiveLightingController,
   Categories,
   Characteristic,
   HAPStatus,
@@ -21,20 +22,68 @@ import {
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
+import { hasAdaptiveLighting } from "./adaptive-lighting.ts";
 import type { Capability, DeviceConfig, SceneConfig } from "./config.ts";
 import {
   clampColorTemp,
   colorTempRange,
+  colorTempToHueSaturation,
   FAN_SPEED_STEP,
   type HomeKitState,
 } from "./convert.ts";
+export type PublishSource = "adaptive-lighting";
 export type PublishFn = (
   topic: string,
   payload: Record<string, unknown>,
+  source?: PublishSource,
 ) => void;
 export type GetStateFn = (topic: string) => HomeKitState | undefined;
+// Called with each temperature that Adaptive Lighting sets, which the callee
+// may record. Returns whether to publish it.
+export type AdaptiveTemperatureFn = (temperature: number) => boolean;
 
-type SetPayloadFn = (payload: Record<string, unknown>) => void;
+type SetPayloadFn = (
+  payload: Record<string, unknown>,
+  source?: PublishSource,
+) => void;
+
+const adaptiveLightingControllers = new WeakMap<
+  Accessory,
+  AdaptiveLightingController
+>();
+
+export function adaptiveLightingController(
+  accessory: Accessory,
+): AdaptiveLightingController | undefined {
+  return adaptiveLightingControllers.get(accessory);
+}
+
+function setByAdaptiveLighting(context: unknown): boolean {
+  return (
+    typeof context === "object" &&
+    context !== null &&
+    "controller" in context &&
+    context.controller instanceof AdaptiveLightingController
+  );
+}
+
+// Before it sets a temperature, HAP-NodeJS's controller sets Hue and Saturation
+// from its own table, without a notification, and expects the accessory's
+// update to bring the same values and so notify no one. The bridge's updates
+// use the Home app's curve, so the curve's values replace the table's here,
+// also without a notification.
+function setCurveColor(service: Service, mireds: number): void {
+  if (!service.testCharacteristic(Characteristic.Hue)) return;
+  const color = colorTempToHueSaturation(mireds);
+  service.getCharacteristic(Characteristic.Hue).value = Math.round(color.hue);
+  service.getCharacteristic(Characteristic.Saturation).value = Math.round(
+    color.saturation,
+  );
+}
+
+function hasColorKey(payload: Record<string, unknown>): boolean {
+  return ["hue", "saturation", "color_temp"].some((key) => key in payload);
+}
 
 function createCoalescingPublish(
   topic: string,
@@ -42,15 +91,21 @@ function createCoalescingPublish(
   prePublishCheck?: () => void,
 ): SetPayloadFn {
   let pending: Record<string, unknown> | undefined;
+  let source: PublishSource | undefined;
   let scheduled = false;
+  let adaptiveTemperature = false;
 
   const flush = () => {
     if (!pending) return;
     const payload = pending;
+    const flushedSource = source;
     pending = undefined;
+    source = undefined;
+    adaptiveTemperature = false;
     scheduled = false;
     try {
-      publish(topic, payload);
+      if (flushedSource) publish(topic, payload, flushedSource);
+      else publish(topic, payload);
     } catch (error) {
       // Connection may have dropped between the synchronous prePublishCheck
       // and this nextTick flush. The error was already thrown to HAP-NodeJS
@@ -59,11 +114,23 @@ function createCoalescingPublish(
     }
   };
 
-  return (payload) => {
+  return (payload, payloadSource) => {
     // Run synchronously so HAP-NodeJS can catch errors (e.g. MQTT disconnect)
     // and report them back to HomeKit.
     prePublishCheck?.();
 
+    // The temperature that Adaptive Lighting computes yields to a color or
+    // temperature written by HomeKit in the same tick, in either order.
+    if (payloadSource) {
+      if (pending && !adaptiveTemperature && hasColorKey(pending)) return;
+      adaptiveTemperature = true;
+    } else if (adaptiveTemperature && hasColorKey(payload)) {
+      pending = { ...pending };
+      delete pending.color_temp;
+      adaptiveTemperature = false;
+    }
+    // A write that shares its tick with another loses the Adaptive Lighting tag.
+    source = pending ? source && payloadSource : payloadSource;
     pending = { ...pending, ...payload };
     if (scheduled) {
       return;
@@ -79,6 +146,7 @@ export function createLightAccessory(
   publish: PublishFn,
   getState: GetStateFn,
   prePublishCheck?: () => void,
+  adaptiveTemperature?: AdaptiveTemperatureFn,
 ): Accessory {
   const accessory = new Accessory(
     device.name,
@@ -87,9 +155,18 @@ export function createLightAccessory(
   accessory.category = Categories.LIGHTBULB;
 
   const service = accessory.addService(Service.Lightbulb, device.name);
+  let controller: AdaptiveLightingController | undefined;
   const setPayload = createCoalescingPublish(
     device.topic,
-    publish,
+    (topic, payload, source) => {
+      // HAP-NodeJS emits a write's change after the flush that publishes it, so
+      // a temperature that Adaptive Lighting recomputes for a Brightness write
+      // is flushed after the same request's color or temperature has turned
+      // Adaptive Lighting off.
+      if (source && controller?.isAdaptiveLightingActive() !== true) return;
+      if (source) publish(topic, payload, source);
+      else publish(topic, payload);
+    },
     prePublishCheck,
   );
 
@@ -123,6 +200,7 @@ export function createLightAccessory(
       getState,
       device.topic,
       (v) => clampColorTemp(Number(v)),
+      adaptiveTemperature,
     );
     // HAP-NodeJS warns when a new range excludes the value that is there.
     colorTemperature.updateValue(minValue);
@@ -146,6 +224,14 @@ export function createLightAccessory(
       getState,
       device.topic,
     );
+  }
+
+  if (hasAdaptiveLighting(device)) {
+    controller = new AdaptiveLightingController(service);
+    // HAP-NodeJS restores a persisted transition when the bridge publishes, so
+    // the controller joins the accessory before that.
+    accessory.configureController(controller);
+    adaptiveLightingControllers.set(accessory, controller);
   }
 
   return accessory;
@@ -313,6 +399,7 @@ function addSimpleCharacteristic(
   getState: GetStateFn,
   topic: string,
   onGetTransform?: (value: boolean | number) => boolean | number,
+  adaptiveTemperature?: AdaptiveTemperatureFn,
 ): Characteristic {
   const c = service.getCharacteristic(characteristicClass);
 
@@ -326,7 +413,13 @@ function addSimpleCharacteristic(
     return onGetTransform ? onGetTransform(raw) : raw;
   });
 
-  c.onSet((value) => {
+  c.onSet((value, context) => {
+    if (adaptiveTemperature && setByAdaptiveLighting(context)) {
+      setCurveColor(service, value as number);
+      if (adaptiveTemperature(value as number))
+        setPayload({ [key]: value }, "adaptive-lighting");
+      return;
+    }
     setPayload({ [key]: value });
   });
 

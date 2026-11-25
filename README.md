@@ -110,6 +110,16 @@ color of the lowest-numbered selected segment, so deselect in WLED any
 selected segment that is in neither list and has a lower id than the listed
 ones.
 
+### Adaptive Lighting
+
+A light with both `brightness` and `color_temp` offers Adaptive Lighting in
+the Home app, with no configuration. It needs a home hub, which runs the
+schedule. A light that is off is sent nothing, and is sent the current
+temperature when HomeKit turns it on. Setting a color or a temperature from
+HomeKit, or a color anywhere else, turns Adaptive Lighting off. It survives a
+restart if `PERSIST_PATH` is persistent.
+[doc/adaptive-lighting.md](doc/adaptive-lighting.md) has the detail.
+
 ### Scenes
 
 Scenes are exposed as momentary switches. "Hey Siri, turn on Movie Mode"
