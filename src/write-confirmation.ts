@@ -151,6 +151,29 @@ export function groupValues(
   );
 }
 
+// A characteristic holds a whole number, so a report's hue of 100.4 shows as
+// the 100 that HomeKit already has.
+const wholeNumber = (value: boolean | number): boolean | number =>
+  typeof value === "number" ? Math.round(value) : value;
+
+export function changedGroups(
+  groups: readonly WriteGroup[],
+  state: HomeKitState,
+  shown: HomeKitState,
+): WriteGroup[] {
+  return groups.filter((group) =>
+    GROUP_KEYS[group].some((key) => {
+      const value = state[key];
+      const current = shown[key];
+      return (
+        value !== undefined &&
+        current !== undefined &&
+        wholeNumber(value) !== wholeNumber(current)
+      );
+    }),
+  );
+}
+
 export function writtenGroups(pending: Unconfirmed): WriteGroup[] {
   return GROUPS.filter((group) => pending[group]?.written);
 }

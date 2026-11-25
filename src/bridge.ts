@@ -67,6 +67,11 @@ import {
   withAdaptiveTemperature,
 } from "./adaptive-lighting.ts";
 import {
+  BRIGHTNESS_SETTLE_MS,
+  decideBrightnessHold,
+} from "./brightness-hold.ts";
+import {
+  changedGroups,
   CONFIRMATION_MS,
   expireWrites,
   groupValues,
@@ -90,6 +95,7 @@ import type { PublishFn } from "./accessories.ts";
 import {
   type HomeKitState,
   type RawState,
+  clampColorTemp,
   homeKitToWled,
   homeKitToZ2m,
   parseWledMessage,
@@ -107,10 +113,6 @@ import type {
   StatusData,
 } from "./metrics.ts";
 
-// How long a brightness that a report changed must stand before Adaptive
-// Lighting acts on it, so that a switch's brightness that flickers on the way
-// to its setting costs the light no color.
-const BRIGHTNESS_SETTLE_MS = 10000;
 const GET_RETRY_INITIAL_MS = 2000;
 const GET_RETRY_MAX_MS = 1_024_000;
 const GET_JITTER_FRACTION = 0.25;
@@ -241,7 +243,10 @@ export async function startBridge(
   const adaptiveRequests = new Map<string, AdaptiveRequest>();
   const unconfirmedWrites = new Map<string, Unconfirmed>();
   const confirmationTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  const settleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const heldBrightness = new Map<
+    string,
+    { brightness: number; timer: ReturnType<typeof setTimeout> }
+  >();
   const recentlyWritten = (topic: string): HomeKitState =>
     overlayOf(unconfirmedWrites.get(topic) ?? {});
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -412,35 +417,93 @@ export async function startBridge(
     const entry = accessoryMap.get(topic);
     const raw = stateCache.get(topic);
     if (!entry || !raw) return;
-    if (expired.length > 0) {
+    const values = groupValues(
+      protocols[entry.device.type].toHomeKit(raw, raw, entry.device),
+      expired,
+    );
+    const changed = changedGroups(
+      expired,
+      values.color_temp === undefined
+        ? values
+        : { ...values, color_temp: clampColorTemp(values.color_temp) },
+      shownState(entry),
+    );
+    if (changed.length > 0) {
       log.log(
-        `No report confirmed the ${expired.join(", ")} written to "${entry.device.name}" within ${String(CONFIRMATION_MS)} ms; HomeKit shows the reported state`,
+        `No report confirmed the ${changed.join(", ")} written to "${entry.device.name}" within ${String(CONFIRMATION_MS)} ms; HomeKit shows the reported state`,
       );
     }
-    applyToHomeKit(
-      entry,
-      groupValues(
-        protocols[entry.device.type].toHomeKit(raw, raw, entry.device),
-        expired,
-      ),
-      false,
-    );
+    applyToHomeKit(entry, values, false);
   }
 
-  function endBrightnessSettle(topic: string): void {
-    clearTimeout(settleTimers.get(topic));
-    settleTimers.delete(topic);
+  // Only the characteristics that the light has: getCharacteristic adds the
+  // others.
+  function shownState(entry: AccessoryEntry): HomeKitState {
+    const service = entry.accessory.getService(Service.Lightbulb);
+    const shown: HomeKitState = {};
+    if (!service) return shown;
+    const read = (type: typeof Characteristic.On) =>
+      service.testCharacteristic(type)
+        ? service.getCharacteristic(type).value
+        : undefined;
+    const on = read(Characteristic.On);
+    if (typeof on === "boolean") shown.on = on;
+    for (const [key, type] of [
+      ["brightness", Characteristic.Brightness],
+      ["hue", Characteristic.Hue],
+      ["saturation", Characteristic.Saturation],
+      ["color_temp", Characteristic.ColorTemperature],
+    ] as const) {
+      const value = read(type);
+      if (typeof value === "number") shown[key] = value;
+    }
+    return shown;
   }
 
-  function startBrightnessSettle(entry: AccessoryEntry): void {
+  function dropHeldBrightness(topic: string): void {
+    clearTimeout(heldBrightness.get(topic)?.timer);
+    heldBrightness.delete(topic);
+  }
+
+  function holdBrightness(entry: AccessoryEntry, brightness: number): void {
     const topic = entry.device.topic;
-    endBrightnessSettle(topic);
+    dropHeldBrightness(topic);
     const timer = setTimeout(() => {
-      settleTimers.delete(topic);
-      publishRememberedTemperature(entry);
+      heldBrightness.delete(topic);
+      applyToHomeKit(entry, { brightness }, true);
     }, BRIGHTNESS_SETTLE_MS);
     timer.unref();
-    settleTimers.set(topic, timer);
+    heldBrightness.set(topic, { brightness, timer });
+  }
+
+  // A Zigbee2MQTT light's brightness reaches HomeKit once it has stood, so the
+  // values that a group passes through before settling never show.
+  function withHeldBrightness(
+    entry: AccessoryEntry,
+    applied: HomeKitState,
+    first: boolean,
+  ): HomeKitState {
+    const topic = entry.device.topic;
+    const { brightness, ...rest } = applied;
+    if (
+      entry.device.type !== "z2m" ||
+      brightness === undefined ||
+      !entry.device.capabilities.includes("brightness")
+    )
+      return applied;
+    const decision = decideBrightnessHold({
+      brightness,
+      shown: shownState(entry).brightness,
+      held: heldBrightness.get(topic)?.brightness,
+      first,
+    });
+    if (decision === "keep") return rest;
+    if (decision === "hold") {
+      holdBrightness(entry, brightness);
+      return rest;
+    }
+    dropHeldBrightness(topic);
+    return applied;
   }
 
   function publishRememberedTemperature(entry: AccessoryEntry): void {
@@ -458,8 +521,7 @@ export async function startBridge(
   }
 
   // `outside` is whether the state is a report of something that HomeKit did
-  // not write: a brightness that a HomeKit write brought needs no time to
-  // settle, and a write that is undone turns no light on.
+  // not write: a write that is undone turns no light on.
   function applyToHomeKit(
     entry: AccessoryEntry,
     hkState: HomeKitState,
@@ -476,15 +538,6 @@ export async function startBridge(
       : undefined;
     const on = service?.getCharacteristic(Characteristic.On);
     const wasOn = on?.value;
-    // Adaptive Lighting recomputes for a Brightness the moment it changes.
-    if (
-      outside &&
-      service &&
-      hkState.brightness !== undefined &&
-      hkState.brightness !==
-        service.getCharacteristic(Characteristic.Brightness).value
-    )
-      startBrightnessSettle(entry);
     if (Object.keys(hkState).length > 0) {
       entry.updateState(entry.accessory, hkState, entry.device.capabilities);
     }
@@ -541,8 +594,7 @@ export async function startBridge(
         ("hue" in payload || "saturation" in payload || "color_temp" in payload)
       )
         adaptiveRequests.delete(topic);
-      // The Brightness that HomeKit writes is the one to adapt to, at once.
-      if ("brightness" in payload) endBrightnessSettle(topic);
+      if ("brightness" in payload) dropHeldBrightness(topic);
       setUnconfirmed(
         topic,
         recordWrite(unconfirmedWrites.get(topic) ?? {}, payload, Date.now()),
@@ -642,7 +694,6 @@ export async function startBridge(
   ): void {
     const adaptive = adaptiveLightingController(entry.accessory);
     if (adaptive?.isAdaptiveLightingActive() !== true) return;
-    endBrightnessSettle(entry.device.topic);
     log.log(`Adaptive Lighting off for "${entry.device.name}": ${reason}`);
     adaptive.disableAdaptiveLighting();
   }
@@ -661,10 +712,12 @@ export async function startBridge(
     const getState = (topic: string) => {
       const raw = stateCache.get(topic);
       if (!raw) return;
-      return withoutWritten(
+      const state = withoutWritten(
         proto.toHomeKit(raw, raw, device),
         unconfirmedWrites.get(topic) ?? {},
       );
+      if (heldBrightness.has(topic)) delete state.brightness;
+      return state;
     };
 
     const acceptsAdaptiveTemperature = (temperature: number) => {
@@ -686,10 +739,7 @@ export async function startBridge(
     };
     const adaptiveTemperature = (temperature: number) => {
       adaptiveTemperatures.set(device.topic, temperature);
-      return (
-        !settleTimers.has(device.topic) &&
-        acceptsAdaptiveTemperature(temperature)
-      );
+      return acceptsAdaptiveTemperature(temperature);
     };
 
     const isFan = device.capabilities.includes("fan");
@@ -915,16 +965,18 @@ export async function startBridge(
 
     const protocol = protocols[entry.device.type];
     const before = unconfirmedWrites.get(deviceTopic) ?? {};
+    const previous =
+      previousRaw && protocol.toHomeKit(previousRaw, previousRaw, entry.device);
     const { applied, pending } = settleReport(
       before,
       protocol.toHomeKit(rawPartial, merged, entry.device),
-      previousRaw && protocol.toHomeKit(previousRaw, previousRaw, entry.device),
+      previous,
     );
     setUnconfirmed(deviceTopic, pending);
     const awaited = writtenGroups(before);
     applyToHomeKit(
       entry,
-      applied,
+      withHeldBrightness(entry, applied, previous?.brightness === undefined),
       !awaited.includes("power") && !awaited.includes("brightness"),
     );
   }
@@ -1089,11 +1141,11 @@ export async function startBridge(
       cancelAllRetries();
       for (const timer of [
         ...confirmationTimers.values(),
-        ...settleTimers.values(),
+        ...[...heldBrightness.values()].map(({ timer }) => timer),
       ])
         clearTimeout(timer);
       confirmationTimers.clear();
-      settleTimers.clear();
+      heldBrightness.clear();
       let tucsonFailure: { error: unknown } | undefined;
       try {
         const stopped = await Promise.allSettled([

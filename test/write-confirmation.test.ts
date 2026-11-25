@@ -14,6 +14,7 @@
 
 import { describe, expect, test } from "bun:test";
 import {
+  changedGroups,
   CONFIRMATION_MS,
   expireWrites,
   groupValues,
@@ -216,4 +217,45 @@ test("a state is without the values of the groups written and not yet confirmed"
     { on: true, brightness: 60 },
   );
   expect(withoutWritten(state, {})).toEqual(state);
+});
+
+test("a group has changed when a value of it differs from what HomeKit shows", () => {
+  const groups = ["power", "brightness", "color"] as const;
+  const shown = { on: true, brightness: 60, hue: 4, saturation: 5 };
+  expect(changedGroups(groups, shown, shown)).toEqual([]);
+  expect(changedGroups(groups, { ...shown, on: false }, shown)).toEqual([
+    "power",
+  ]);
+  expect(changedGroups(groups, { ...shown, brightness: 61 }, shown)).toEqual([
+    "brightness",
+  ]);
+  expect(changedGroups(groups, { ...shown, saturation: 6 }, shown)).toEqual([
+    "color",
+  ]);
+  expect(
+    changedGroups(
+      groups,
+      { on: false, brightness: 1, hue: 1, saturation: 1 },
+      shown,
+    ),
+  ).toEqual(["power", "brightness", "color"]);
+});
+
+test("a group is not changed by a value that HomeKit has no characteristic for, or that the state lacks", () => {
+  expect(changedGroups(["color"], { color_temp: 300 }, {})).toEqual([]);
+  expect(changedGroups(["color"], {}, { color_temp: 300 })).toEqual([]);
+  expect(changedGroups(["power"], { brightness: 5 }, { on: true })).toEqual([]);
+  expect(changedGroups(["power"], { on: false }, { on: true })).toEqual([
+    "power",
+  ]);
+});
+
+test("a fraction of a unit is not a change, because HomeKit holds whole numbers", () => {
+  const shown = { on: true, hue: 100, saturation: 50 };
+  expect(
+    changedGroups(["color"], { hue: 100.4, saturation: 49.6 }, shown),
+  ).toEqual([]);
+  expect(
+    changedGroups(["color"], { hue: 100.6, saturation: 50 }, shown),
+  ).toEqual(["color"]);
 });

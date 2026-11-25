@@ -2106,6 +2106,8 @@ describe("startBridge", () => {
         expect(brightness.value).toBe(60);
 
         report({ state: "ON", brightness: 203 });
+        expect(await brightness.handleGetRequest()).toBe(60);
+        jest.advanceTimersByTime(10000);
         expect(await brightness.handleGetRequest()).toBe(80);
 
         brightness.setValue(40);
@@ -2120,7 +2122,7 @@ describe("startBridge", () => {
       }
     });
 
-    test("a report of a change is applied at once, even within 2000 ms of a write", async () => {
+    test("a report of a change in power is applied at once, even within 2000 ms of a write", async () => {
       jest.useFakeTimers();
       try {
         const { on, brightness, report, shutdown } = await startDimmer();
@@ -2134,17 +2136,17 @@ describe("startBridge", () => {
         expect(brightness.value).toBe(60);
         report({ state: "ON", brightness: 203 });
         expect(on.value).toBe(true);
-        expect(brightness.value).toBe(80);
+        expect(brightness.value).toBe(60);
         report({ state: "OFF", brightness: 203 });
         expect(on.value).toBe(false);
-        expect(brightness.value).toBe(80);
+        expect(brightness.value).toBe(60);
         await shutdown();
       } finally {
         jest.useRealTimers();
       }
     });
 
-    test("a report of a change in power alone, or in brightness alone, is applied at once", async () => {
+    test("a report that changes the power alone leaves the written brightness, and one that changes the brightness is held", async () => {
       jest.useFakeTimers();
       try {
         const { on, brightness, report, shutdown } = await startDimmer();
@@ -2156,6 +2158,10 @@ describe("startBridge", () => {
         expect(on.value).toBe(true);
         expect(brightness.value).toBe(60);
         report({ state: "ON", brightness: 127 });
+        expect(brightness.value).toBe(60);
+        jest.advanceTimersByTime(2000);
+        expect(brightness.value).toBe(60);
+        jest.advanceTimersByTime(8000);
         expect(brightness.value).toBe(50);
         await shutdown();
       } finally {
@@ -2163,7 +2169,7 @@ describe("startBridge", () => {
       }
     });
 
-    test("a write of power alone leaves a report's brightness applied, and the reverse", async () => {
+    test("a write of power alone does not withhold a report's brightness, which is held, and the reverse", async () => {
       jest.useFakeTimers();
       try {
         const { on, brightness, report, shutdown } = await startDimmer();
@@ -2172,10 +2178,11 @@ describe("startBridge", () => {
         await flush();
         report({ state: "OFF", brightness: 127 });
         expect(on.value).toBe(true);
-        expect(brightness.value).toBe(50);
+        expect(brightness.value).toBe(100);
 
         jest.advanceTimersByTime(2000);
         expect(on.value).toBe(false);
+        expect(brightness.value).toBe(100);
         brightness.setValue(80);
         await flush();
         report({ state: "OFF", brightness: 127 });
@@ -2289,9 +2296,10 @@ describe("a WLED device with white segments", () => {
     const started = await startBridge(cfg, VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
-    const service = started.bridge.bridgedAccessories
-      .find((a) => a.displayName === "Nook")!
-      .getService(Service.Lightbulb)!;
+    const accessory = started.bridge.bridgedAccessories.find(
+      (a) => a.displayName === "Nook",
+    )!;
+    const service = accessory.getService(Service.Lightbulb)!;
     const characteristic = (type: typeof Characteristic.Hue) =>
       service.getCharacteristic(type);
     const report = (sub: string, value: string) => {
@@ -2308,8 +2316,68 @@ describe("a WLED device with white segments", () => {
         { id: 2, on: true, sel: true, col: [col] },
       ],
     });
-    return { ...started, characteristic, report, sent, white };
+    return { ...started, accessory, characteristic, report, sent, white };
   }
+
+  describe("reported brightness and Adaptive Lighting", () => {
+    let output: ReturnType<typeof captureConsole>;
+    const controllers: { disableAdaptiveLighting: () => void }[] = [];
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      output = captureConsole();
+    });
+
+    afterEach(() => {
+      for (const controller of controllers.splice(0))
+        controller.disableAdaptiveLighting();
+      jest.runOnlyPendingTimers();
+      jest.useRealTimers();
+      output.restore();
+    });
+
+    const adaptive = () =>
+      output.lines().filter((line) => line.includes("Adaptive Lighting for"));
+
+    async function startAdaptive() {
+      const started = await startNook();
+      controllers.push(adaptiveLightingController(started.accessory)!);
+      return started;
+    }
+
+    test("a brightness that WLED reports once HomeKit has turned it on is shown at once, with its temperature", async () => {
+      const { accessory, characteristic, report, shutdown } =
+        await startAdaptive();
+      report("g", "0");
+      await hubStartsAdaptiveLighting(accessory);
+      await flush();
+      expect(adaptive()).toEqual([]);
+
+      characteristic(Characteristic.On).setValue(true);
+      await flush();
+      expect(characteristic(Characteristic.Brightness).value).toBe(0);
+      report("g", "255");
+      expect(characteristic(Characteristic.Brightness).value).toBe(100);
+      await flush();
+      expect(adaptive().length).toBeGreaterThan(0);
+      await shutdown();
+    });
+
+    test("a brightness that WLED changes with no write is shown at once, with its temperature", async () => {
+      const { accessory, characteristic, report, shutdown } =
+        await startAdaptive();
+      report("g", "255");
+      await hubStartsAdaptiveLighting(accessory);
+      await flush();
+      const before = adaptive().length;
+
+      report("g", "127");
+      expect(characteristic(Characteristic.Brightness).value).toBe(50);
+      await flush();
+      expect(adaptive().length).toBe(before + 1);
+      await shutdown();
+    });
+  });
 
   test("ColorTemperature spans the strips, without a characteristic warning", async () => {
     const output = captureConsole();
@@ -4570,7 +4638,7 @@ describe("Adaptive Lighting", () => {
     await shutdown();
   });
 
-  test("a light that reports another brightness when HomeKit turns it on is sent the temperature for it at once", async () => {
+  test("a light that reports another brightness when HomeKit turns it on is sent the temperature for it once it has stood", async () => {
     jest.useFakeTimers();
     const { report, sent, start, characteristic, shutdown } = await startLamp();
     report({ ...OFF, brightness: 0 });
@@ -4581,6 +4649,10 @@ describe("Adaptive Lighting", () => {
     await flush();
     expect(sent()).toEqual([{ state: "ON", color_temp: 395 }]);
     report({ ...ON, brightness: 254, color_temp: 395 });
+    jest.advanceTimersByTime(9999);
+    await flush();
+    expect(sent()).toEqual([{ state: "ON", color_temp: 395 }]);
+    jest.advanceTimersByTime(1);
     await flush();
     expect(sent()).toEqual([
       { state: "ON", color_temp: 395 },
@@ -4589,7 +4661,7 @@ describe("Adaptive Lighting", () => {
     await shutdown();
   });
 
-  test("a brightness that a report gives in answer to a HomeKit write of one is acted on at once", async () => {
+  test("a brightness that a report gives in answer to a HomeKit write of another is acted on once it has stood", async () => {
     jest.useFakeTimers();
     const { report, sent, start, characteristic, shutdown } = await startLamp();
     report(ON);
@@ -4606,6 +4678,10 @@ describe("Adaptive Lighting", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(sent().slice(1)).toEqual([{ brightness: 152 }, { color_temp: 370 }]);
     report({ ...ON, brightness: 203, color_temp: 370 });
+    jest.advanceTimersByTime(9999);
+    await flush();
+    expect(sent().slice(3)).toEqual([]);
+    jest.advanceTimersByTime(1);
     await flush();
     expect(sent().slice(3)).toEqual([{ color_temp: 360 }]);
     await shutdown();
@@ -4895,6 +4971,7 @@ describe("Adaptive Lighting", () => {
     expect(sent()).toHaveLength(2);
 
     report({ ...ON, brightness: 25, color_temp: 370 });
+    jest.advanceTimersByTime(10000);
     await flush();
     for (let minute = 0; minute < 3; minute++) {
       report({ ...ON, brightness: 25, color_temp: 370 });
@@ -5011,7 +5088,7 @@ describe("Adaptive Lighting", () => {
     await shutdown();
   });
 
-  test("a report that brightens the light is followed by the temperature once the brightness has settled", async () => {
+  test("a report that brightens the light is followed by the temperature once the brightness has stood", async () => {
     jest.useFakeTimers();
     const { report, sent, start, shutdown } = await startLamp();
     report({ ...ON, brightness: 25 });
@@ -5024,6 +5101,7 @@ describe("Adaptive Lighting", () => {
     await flush();
     expect(sent()).toEqual([{ color_temp: 395 }]);
     jest.advanceTimersByTime(1);
+    await flush();
     expect(sent()).toEqual([{ color_temp: 395 }, { color_temp: 350 }]);
     expect(logged("Adaptive Lighting for")).toEqual([
       `Adaptive Lighting for "Lamp": {"color_temp":395} published to ${TOPIC}/set as {"color_temp":395}`,
@@ -5071,7 +5149,7 @@ describe("Adaptive Lighting", () => {
     await shutdown();
   });
 
-  test("a published temperature notifies of the curve's Hue and Saturation, not the table's", async () => {
+  test("a temperature recomputed for a brightness that has stood sets the curve's Hue and Saturation without a notification", async () => {
     jest.useFakeTimers();
     const { report, sent, start, characteristic, shutdown } = await startLamp();
     report({ ...ON, brightness: 25, color_temp: 395 });
@@ -5080,7 +5158,6 @@ describe("Adaptive Lighting", () => {
     expect(sent()).toEqual([]);
     report({ ...ON, brightness: 254, color_temp: 395 });
 
-    // HAP-NodeJS notifies controllers of an update only if it changes the value.
     const notified: unknown[] = [];
     for (const type of [Characteristic.Hue, Characteristic.Saturation]) {
       characteristic(type).on("change", (change) => {
@@ -5094,8 +5171,8 @@ describe("Adaptive Lighting", () => {
     }
 
     jest.advanceTimersByTime(10000);
+    await flush();
     expect(sent()).toEqual([{ color_temp: 350 }]);
-    const before = colorTempToHueSaturation(395);
     const color = colorTempToHueSaturation(350);
     expect(characteristic(Characteristic.Hue).value).toBe(
       Math.round(color.hue),
@@ -5103,16 +5180,7 @@ describe("Adaptive Lighting", () => {
     expect(characteristic(Characteristic.Saturation).value).toBe(
       Math.round(color.saturation),
     );
-    expect(notified).toEqual(
-      [
-        ["Hue", Math.round(before.hue), Math.round(color.hue)],
-        [
-          "Saturation",
-          Math.round(before.saturation),
-          Math.round(color.saturation),
-        ],
-      ].filter(([, from, to]) => from !== to),
-    );
+    expect(notified).toEqual([]);
     await shutdown();
   });
 
@@ -5254,7 +5322,7 @@ describe("Adaptive Lighting", () => {
     await shutdown();
   });
 
-  test("a brightness that a switch sets and leaves is followed by the temperature after 10 s", async () => {
+  test("a brightness that a switch sets and leaves is shown after 10 s, with the temperature for it", async () => {
     jest.useFakeTimers();
     const { report, sent, start, characteristic, shutdown } = await startLamp();
     report({ ...ON, color_temp: 350 });
@@ -5266,17 +5334,17 @@ describe("Adaptive Lighting", () => {
     jest.advanceTimersByTime(9999);
     await flush();
     expect(sent()).toEqual([]);
-    expect(characteristic(Characteristic.Brightness).value).toBe(50);
+    expect(characteristic(Characteristic.Brightness).value).toBe(100);
     jest.advanceTimersByTime(1);
+    await flush();
+    expect(characteristic(Characteristic.Brightness).value).toBe(50);
     expect(sent()).toEqual([{ color_temp: 375 }]);
-    jest.advanceTimersByTime(60000);
-    expect(sent()).toHaveLength(1);
     await shutdown();
   });
 
-  test("each change of the brightness restarts the settle period", async () => {
+  test("a different brightness during the hold restarts it", async () => {
     jest.useFakeTimers();
-    const { report, sent, start, shutdown } = await startLamp();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
     report({ ...ON, color_temp: 350 });
     await start();
     await flush();
@@ -5285,15 +5353,19 @@ describe("Adaptive Lighting", () => {
     jest.advanceTimersByTime(6000);
     report({ ...ON, brightness: 203, color_temp: 350 });
     jest.advanceTimersByTime(9999);
+    await flush();
     expect(sent()).toEqual([]);
+    expect(characteristic(Characteristic.Brightness).value).toBe(100);
     jest.advanceTimersByTime(1);
+    await flush();
+    expect(characteristic(Characteristic.Brightness).value).toBe(80);
     expect(sent()).toEqual([{ color_temp: 360 }]);
     await shutdown();
   });
 
-  test("a report that leaves the brightness as it is does not restart the settle period", async () => {
+  test("a repeat of the held brightness does not restart the hold", async () => {
     jest.useFakeTimers();
-    const { report, sent, start, shutdown } = await startLamp();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
     report({ ...ON, color_temp: 350 });
     await start();
     await flush();
@@ -5301,13 +5373,34 @@ describe("Adaptive Lighting", () => {
     jest.advanceTimersByTime(6000);
     report({ ...ON, brightness: 127, color_temp: 350, last_seen: 1 });
     jest.advanceTimersByTime(3999);
+    await flush();
     expect(sent()).toEqual([]);
+    expect(characteristic(Characteristic.Brightness).value).toBe(100);
     jest.advanceTimersByTime(1);
+    await flush();
+    expect(characteristic(Characteristic.Brightness).value).toBe(50);
     expect(sent()).toEqual([{ color_temp: 375 }]);
     await shutdown();
   });
 
-  test("a brightness that HomeKit writes ends the settle period, and its temperature is sent", async () => {
+  test("a brightness that returns to the one shown drops the hold", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report({ ...ON, color_temp: 350 });
+    await start();
+    await flush();
+    report({ ...ON, brightness: 127, color_temp: 350 });
+    jest.advanceTimersByTime(5200);
+    report({ ...ON, color_temp: 350 });
+    expect(characteristic(Characteristic.Brightness).value).toBe(100);
+    jest.advanceTimersByTime(10000);
+    await flush();
+    expect(characteristic(Characteristic.Brightness).value).toBe(100);
+    expect(sent()).toEqual([]);
+    await shutdown();
+  });
+
+  test("a brightness that HomeKit writes drops the held one, and its temperature is sent", async () => {
     jest.useFakeTimers();
     const { report, sent, start, characteristic, shutdown } = await startLamp();
     report({ ...ON, color_temp: 350 });
@@ -5323,14 +5416,18 @@ describe("Adaptive Lighting", () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
     expect(sent()).toEqual([{ brightness: 50 }, { color_temp: 390 }]);
+    report({ ...ON, brightness: 50, color_temp: 390 });
     jest.advanceTimersByTime(10000);
+    await flush();
     expect(sent()).toHaveLength(2);
+    expect(characteristic(Characteristic.Brightness).value).toBe(20);
     await shutdown();
   });
 
-  test("turning Adaptive Lighting off ends the settle period", async () => {
+  test("a brightness held when Adaptive Lighting turns off is still shown", async () => {
     jest.useFakeTimers();
-    const { controller, report, sent, start, shutdown } = await startLamp();
+    const { controller, report, sent, start, characteristic, shutdown } =
+      await startLamp();
     report({ ...ON, color_temp: 350 });
     await start();
     await flush();
@@ -5344,17 +5441,14 @@ describe("Adaptive Lighting", () => {
       color_temp: 500,
     });
     expect(controller.isAdaptiveLightingActive()).toBe(false);
-    jest.advanceTimersByTime(1000);
-    report({ ...ON, brightness: 127, color_temp: 300 });
-    await start();
+    jest.advanceTimersByTime(9000);
     await flush();
-    expect(sent()).toEqual([{ color_temp: 375 }]);
-    jest.advanceTimersByTime(8000);
-    expect(sent()).toEqual([{ color_temp: 375 }]);
+    expect(characteristic(Characteristic.Brightness).value).toBe(50);
+    expect(sent()).toEqual([]);
     await shutdown();
   });
 
-  test("a report that leaves the light off publishes nothing while the brightness settles", async () => {
+  test("a report that leaves the light off publishes nothing while the brightness is held", async () => {
     jest.useFakeTimers();
     const { report, sent, start, characteristic, shutdown } = await startLamp();
     report({ ...OFF, color_temp: 300 });
@@ -5379,7 +5473,7 @@ describe("Adaptive Lighting", () => {
     await shutdown();
   });
 
-  test("a write of something else leaves the settle period running", async () => {
+  test("a write of something else leaves the hold running", async () => {
     jest.useFakeTimers();
     const { report, sent, start, characteristic, shutdown } = await startLamp();
     report({ ...ON, color_temp: 350 });
@@ -5391,11 +5485,12 @@ describe("Adaptive Lighting", () => {
     await flush();
     expect(sent()).toEqual([{ state: "ON" }]);
     jest.advanceTimersByTime(9000);
+    await flush();
     expect(sent()).toEqual([{ state: "ON" }, { color_temp: 375 }]);
     await shutdown();
   });
 
-  test("a settle period that ends after HomeKit turned Adaptive Lighting off publishes nothing", async () => {
+  test("a held brightness that is shown after HomeKit turned Adaptive Lighting off publishes nothing", async () => {
     jest.useFakeTimers();
     const { controller, report, sent, start, characteristic, shutdown } =
       await startLamp();
@@ -5409,20 +5504,26 @@ describe("Adaptive Lighting", () => {
     expect(controller.isAdaptiveLightingActive()).toBe(false);
     const written = sent().length;
     jest.advanceTimersByTime(10000);
+    await flush();
     expect(sent()).toHaveLength(written);
     await shutdown();
   });
 
-  test("shutdown cancels the settle period", async () => {
+  test("shutdown cancels the hold", async () => {
     jest.useFakeTimers();
-    const { report, sent, start, shutdown } = await startLamp();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
     report({ ...ON, color_temp: 350 });
     await start();
     await flush();
     report({ ...ON, brightness: 127, color_temp: 350 });
+    expect(jest.getTimerCount()).toBeGreaterThan(0);
     await shutdown();
+    const timers = jest.getTimerCount();
     jest.advanceTimersByTime(10000);
+    await flush();
     expect(sent()).toEqual([]);
+    expect(characteristic(Characteristic.Brightness).value).toBe(100);
+    expect(jest.getTimerCount()).toBeLessThanOrEqual(timers);
   });
 
   test("a Brightness of zero without On is not sent a recomputed temperature", async () => {
@@ -5882,5 +5983,429 @@ describe("Adaptive Lighting", () => {
     expect(controller.isAdaptiveLightingActive()).toBe(true);
     expect(sent()).toHaveLength(1);
     await shutdown();
+  });
+
+  describe("a Zigbee2MQTT light's reported brightness", () => {
+    const shown = async (
+      characteristic: (type: typeof Characteristic.Hue) => Characteristic,
+    ) => {
+      const read = await characteristic(
+        Characteristic.Brightness,
+      ).handleGetRequest();
+      expect(read).toBe(characteristic(Characteristic.Brightness).value);
+      return read;
+    };
+
+    test("a group that turns off and on again within 5 s shows the brightness it passes through at neither", async () => {
+      jest.useFakeTimers();
+      const { report, sent, start, characteristic, shutdown } =
+        await startLamp();
+      report({ ...ON, color_temp: 350 });
+      await start();
+      await flush();
+
+      characteristic(Characteristic.On).setValue(false);
+      await flush();
+      const steps: [number, Record<string, unknown>][] = [
+        [0, { ...ON, brightness: 126, color_temp: 350 }],
+        [400, { ...ON, state: "OFF", brightness: 126, color_temp: 350 }],
+      ];
+      for (const [after, state] of steps) {
+        jest.advanceTimersByTime(after);
+        report(state);
+        expect(await shown(characteristic)).toBe(100);
+      }
+      jest.advanceTimersByTime(2300);
+      characteristic(Characteristic.On).setValue(true);
+      await flush();
+      for (const [after, state] of [
+        [0, { ...ON, brightness: 126, color_temp: 350 }],
+        [30, { ...ON, brightness: 126, color_temp: 350, last_seen: 1 }],
+      ] as const) {
+        jest.advanceTimersByTime(after);
+        report(state);
+        expect(await shown(characteristic)).toBe(100);
+      }
+      jest.advanceTimersByTime(5070 - 400 - 2300 - 30);
+      report({ ...ON, color_temp: 350 });
+      expect(await shown(characteristic)).toBe(100);
+      expect(characteristic(Characteristic.On).value).toBe(true);
+      jest.advanceTimersByTime(20000);
+      await flush();
+      expect(await shown(characteristic)).toBe(100);
+      expect(sent()).toEqual([
+        { state: "OFF" },
+        { state: "ON", color_temp: 350 },
+      ]);
+      await shutdown();
+    });
+
+    test("a transient on a steady light shows nothing and sends no temperature", async () => {
+      jest.useFakeTimers();
+      const { report, sent, start, characteristic, shutdown } =
+        await startLamp();
+      report({ ...ON, color_temp: 350 });
+      await start();
+      await flush();
+
+      report({ ...ON, brightness: 144, color_temp: 350 });
+      expect(await shown(characteristic)).toBe(100);
+      jest.advanceTimersByTime(5200);
+      report({ ...ON, color_temp: 350 });
+      jest.advanceTimersByTime(20000);
+      await flush();
+      expect(await shown(characteristic)).toBe(100);
+      expect(sent()).toEqual([]);
+      expect(logged("Adaptive Lighting for")).toEqual([]);
+      await shutdown();
+    });
+
+    test("a held brightness is shown without Adaptive Lighting", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report(ON);
+      report({ ...ON, brightness: 127 });
+      expect(await shown(characteristic)).toBe(100);
+      jest.advanceTimersByTime(9999);
+      expect(await shown(characteristic)).toBe(100);
+      jest.advanceTimersByTime(1);
+      expect(await shown(characteristic)).toBe(50);
+      await shutdown();
+    });
+
+    test("the first report of a device is shown at once", async () => {
+      const { report, characteristic, shutdown } = await startLamp();
+      report({ ...ON, brightness: 127 });
+      expect(characteristic(Characteristic.Brightness).value).toBe(50);
+      await shutdown();
+    });
+
+    test("a report that answers a write with a brightness of its own is held", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report(ON);
+      process.nextTick(() => {
+        void characteristic(Characteristic.Brightness).handleSetRequest(
+          20,
+          {} as never,
+        );
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      report({ ...ON, brightness: 200 });
+      expect(characteristic(Characteristic.Brightness).value).toBe(20);
+      jest.advanceTimersByTime(10000);
+      expect(characteristic(Characteristic.Brightness).value).toBe(79);
+      await shutdown();
+    });
+
+    test("the report of an earlier write that arrives after a later one does not show", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report({ ...ON, brightness: 218 });
+      const brightness = characteristic(Characteristic.Brightness);
+      const write = async (value: number) => {
+        process.nextTick(() => {
+          void brightness.handleSetRequest(value, {} as never);
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+      };
+      await write(58);
+      await write(100);
+      report({ ...ON, brightness: 147 });
+      expect(await shown(characteristic)).toBe(100);
+      report({ ...ON, brightness: 254 });
+      expect(await shown(characteristic)).toBe(100);
+      jest.advanceTimersByTime(10000);
+      expect(await shown(characteristic)).toBe(100);
+      await shutdown();
+    });
+
+    test("the first report that has a brightness is shown at once", async () => {
+      const { report, characteristic, shutdown } = await startLamp();
+      report({ state: "ON" });
+      report({ ...ON, brightness: 127 });
+      expect(characteristic(Characteristic.Brightness).value).toBe(50);
+      await shutdown();
+    });
+
+    test("a report without a brightness leaves the held one running", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report(ON);
+      report({ ...ON, brightness: 127 });
+      jest.advanceTimersByTime(6000);
+      report({ state: "ON", last_seen: 1 });
+      jest.advanceTimersByTime(4000);
+      expect(characteristic(Characteristic.Brightness).value).toBe(50);
+      await shutdown();
+    });
+
+    test("a brightness that HomeKit wrote over a held one is not taken for the held one later", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report(ON);
+      report({ ...ON, brightness: 127 });
+      process.nextTick(() => {
+        void characteristic(Characteristic.Brightness).handleSetRequest(
+          20,
+          {} as never,
+        );
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      report({ ...ON, brightness: 50 });
+      expect(characteristic(Characteristic.Brightness).value).toBe(20);
+      report({ ...ON, brightness: 127 });
+      jest.advanceTimersByTime(10000);
+      expect(characteristic(Characteristic.Brightness).value).toBe(50);
+      await shutdown();
+    });
+
+    test("a HomeKit write of Brightness late in a hold keeps what it wrote when the hold would have ended", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report(ON);
+      report({ ...ON, brightness: 127 });
+      jest.advanceTimersByTime(9000);
+      process.nextTick(() => {
+        void characteristic(Characteristic.Brightness).handleSetRequest(
+          20,
+          {} as never,
+        );
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      jest.advanceTimersByTime(1500);
+      expect(characteristic(Characteristic.Brightness).value).toBe(20);
+      await shutdown();
+    });
+
+    test("a held brightness does not add characteristics that the light lacks", async () => {
+      jest.useFakeTimers();
+      const config = lampConfig();
+      config.devices = [
+        { ...config.devices[0]!, capabilities: ["on_off", "brightness"] },
+      ];
+      const { bridge, shutdown } = await startBridge(config, VERSION);
+      mockClient.connected = true;
+      mockClient.emit("connect");
+      const service = bridge.bridgedAccessories
+        .find((a) => a.displayName === "Lamp")!
+        .getService(Service.Lightbulb)!;
+      const report = (state: Record<string, unknown>) => {
+        mockClient.emit("message", TOPIC, Buffer.from(JSON.stringify(state)));
+      };
+      report(ON);
+      report({ ...ON, brightness: 127 });
+      jest.advanceTimersByTime(10000);
+      for (const type of [
+        Characteristic.Hue,
+        Characteristic.Saturation,
+        Characteristic.ColorTemperature,
+      ])
+        expect(service.testCharacteristic(type)).toBe(false);
+      expect(service.getCharacteristic(Characteristic.Brightness).value).toBe(
+        50,
+      );
+      await shutdown();
+    });
+
+    test("a report that turns on a light for a brightness that HomeKit wrote does not publish the remembered temperature", async () => {
+      jest.useFakeTimers();
+      const { report, sent, start, characteristic, shutdown } =
+        await startLamp();
+      report(OFF);
+      await start();
+      await flush();
+      process.nextTick(() => {
+        void characteristic(Characteristic.Brightness).handleSetRequest(
+          20,
+          {} as never,
+        );
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      const before = sent().length;
+      report({ ...ON, brightness: 50, color_temp: 350 });
+      await flush();
+      expect(characteristic(Characteristic.On).value).toBe(true);
+      expect(sent()).toHaveLength(before);
+      await shutdown();
+    });
+
+    test("a report with a brightness for a light that has none holds nothing", async () => {
+      jest.useFakeTimers();
+      const config = lampConfig();
+      config.devices = [{ ...config.devices[0]!, capabilities: ["on_off"] }];
+      const { shutdown } = await startBridge(config, VERSION);
+      mockClient.connected = true;
+      mockClient.emit("connect");
+      const report = (state: Record<string, unknown>) => {
+        mockClient.emit("message", TOPIC, Buffer.from(JSON.stringify(state)));
+      };
+      report(ON);
+      const timers = jest.getTimerCount();
+      report({ ...ON, brightness: 127 });
+      expect(jest.getTimerCount()).toBe(timers);
+      await shutdown();
+    });
+
+    test("a held brightness is not in the state that a read gets", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report(ON);
+      report({ ...ON, brightness: 127 });
+      expect(characteristic(Characteristic.Brightness).value).toBe(100);
+      expect(await shown(characteristic)).toBe(100);
+      jest.advanceTimersByTime(10000);
+      report({ ...ON, brightness: 127, last_seen: 1 });
+      expect(await shown(characteristic)).toBe(50);
+      await shutdown();
+    });
+  });
+
+  describe("the log of a write that no report confirmed", () => {
+    test("three writes of the brightness that the light has log nothing", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report(ON);
+      for (let write = 0; write < 3; write++) {
+        process.nextTick(() => {
+          void characteristic(Characteristic.Brightness).handleSetRequest(
+            100,
+            {} as never,
+          );
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      jest.advanceTimersByTime(2000);
+      expect(logged("No report confirmed")).toEqual([]);
+      expect(characteristic(Characteristic.Brightness).value).toBe(100);
+      await shutdown();
+    });
+
+    test("a write of On to a light that keeps reporting off is logged once, for power", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report(OFF);
+      characteristic(Characteristic.On).setValue(true);
+      await flush();
+      jest.advanceTimersByTime(2000);
+      expect(logged("No report confirmed")).toEqual([
+        'No report confirmed the power written to "Lamp" within 2000 ms; HomeKit shows the reported state',
+      ]);
+      expect(characteristic(Characteristic.On).value).toBe(false);
+      jest.advanceTimersByTime(20000);
+      expect(logged("No report confirmed")).toHaveLength(1);
+      await shutdown();
+    });
+
+    test("only the groups that differ from what HomeKit shows are named", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report(OFF);
+      process.nextTick(() => {
+        characteristic(Characteristic.On).setValue(true);
+        void characteristic(Characteristic.Brightness).handleSetRequest(
+          100,
+          {} as never,
+        );
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      jest.advanceTimersByTime(2000);
+      expect(logged("No report confirmed")).toEqual([
+        'No report confirmed the power written to "Lamp" within 2000 ms; HomeKit shows the reported state',
+      ]);
+      await shutdown();
+    });
+
+    for (const [name, type, value, capabilities] of [
+      ["Hue", Characteristic.Hue, 200, ["on_off", "color_hs"]],
+      ["Saturation", Characteristic.Saturation, 5, ["on_off", "color_hs"]],
+      [
+        "ColorTemperature",
+        Characteristic.ColorTemperature,
+        200,
+        ["on_off", "color_temp"],
+      ],
+    ] as const) {
+      test(`a write of ${name} that no report confirms names the color`, async () => {
+        jest.useFakeTimers();
+        const config = lampConfig();
+        config.devices[0]!.capabilities = [...capabilities];
+        const started = await startBridge(config, VERSION);
+        mockClient.connected = true;
+        mockClient.emit("connect");
+        const service = started.bridge.bridgedAccessories
+          .find((a) => a.displayName === "Lamp")!
+          .getService(Service.Lightbulb)!;
+        const characteristic = (t: typeof Characteristic.Hue) =>
+          service.getCharacteristic(t);
+        const shutdown = started.shutdown;
+        mockClient.emit(
+          "message",
+          TOPIC,
+          Buffer.from(
+            JSON.stringify(
+              name === "ColorTemperature"
+                ? { state: "ON", color_mode: "color_temp", color_temp: 400 }
+                : {
+                    state: "ON",
+                    color_mode: "hs",
+                    color: { hue: 100, saturation: 50 },
+                  },
+            ),
+          ),
+        );
+        process.nextTick(() => {
+          void characteristic(type).handleSetRequest(value, {} as never);
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        jest.advanceTimersByTime(2000);
+        expect(logged("No report confirmed")).toEqual([
+          'No report confirmed the color written to "Lamp" within 2000 ms; HomeKit shows the reported state',
+        ]);
+        await shutdown();
+      });
+    }
+
+    test("a hue and saturation that round to what HomeKit shows are not taken for a difference", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report({
+        state: "ON",
+        brightness: 254,
+        color_mode: "hs",
+        color: { hue: 100.4, saturation: 50.2 },
+      });
+      process.nextTick(() => {
+        void characteristic(Characteristic.Hue).handleSetRequest(
+          100,
+          {} as never,
+        );
+        void characteristic(Characteristic.Saturation).handleSetRequest(
+          50,
+          {} as never,
+        );
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      jest.advanceTimersByTime(2000);
+      expect(logged("No report confirmed")).toEqual([]);
+      expect(characteristic(Characteristic.Hue).value).toBe(100);
+      await shutdown();
+    });
+
+    test("a color temperature beyond the range is not taken for a difference", async () => {
+      jest.useFakeTimers();
+      const { report, characteristic, shutdown } = await startLamp();
+      report({ ...ON, color_temp: 574 });
+      process.nextTick(() => {
+        void characteristic(Characteristic.ColorTemperature).handleSetRequest(
+          500,
+          {} as never,
+        );
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      jest.advanceTimersByTime(2000);
+      expect(logged("No report confirmed")).toEqual([]);
+      await shutdown();
+    });
   });
 });

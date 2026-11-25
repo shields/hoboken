@@ -321,7 +321,8 @@ compared with the device's previous report, both converted to HomeKit state:
 - If every value equals the previous one, the report repeats the old state
   and its values for the group are not applied.
 - If any differs, the group is confirmed and the report's values are applied
-  at once, as is every later report.
+  at once, as is every later report, except a Zigbee2MQTT light's brightness,
+  which [is held](#reported-brightness-is-held).
 - With no previous report there is nothing to compare, so the values are
   applied and the group is confirmed.
 
@@ -331,7 +332,9 @@ is always updated, so the dashboard and metrics stay current.
 A group still unconfirmed at its deadline had no effect, so the bridge applies
 the cached device state for it to HomeKit and the group is confirmed. A write
 of On to a light that keeps reporting off shows on until 2 s after the write
-and off from then, and the log says that no report confirmed the write. One
+and off from then. The log says that no report confirmed the write only when
+this changes what HomeKit shows, and names only the groups that differ: three
+writes of the brightness that the light already has log nothing. One
 timer per device is set for the earliest deadline. The update goes through
 the path that a report does, so a color that the light shows then turns
 Adaptive Lighting off, as a report does.
@@ -345,6 +348,40 @@ light on, zero turns it off) is not a write of power: it holds back no
 report, and it and a written temperature lend their values to Adaptive
 Lighting in place of the cache until a report changes the device's power or
 color, or 2000 ms pass.
+
+### Reported brightness is held
+
+A Zigbee2MQTT group reports a brightness that it is passing through and
+corrects it about 5 s later: in a month of reports this happened 246 times,
+each lasting 4.9 to 5.3 s, on turn-on, on turn-off, and on lights that were
+otherwise steady. A group turned on 2.3 s after it was turned off reported
+brightness 126 (50%), then 126 again, then 254 (100%) 5.07 s after the first.
+A report can also answer an earlier write after a later one: a slider that
+wrote 58% and then 100% within 300 ms got the report of 58% after the second
+write.
+
+After the steps above have decided which of a report's values are applied, a
+brightness that would change the Brightness characteristic of a Zigbee2MQTT
+light is held until it has stood for 10 s (`BRIGHTNESS_SETTLE_MS`), nearly
+twice the longest correction (`decideBrightnessHold`). The rest of the report
+is applied at once. A brightness set at a switch or by a scene therefore shows
+in HomeKit 10 s late, and so does one that a light reports in place of the one
+that HomeKit wrote.
+
+- One that equals the characteristic's value is applied, and drops any held
+  one.
+- One equal to the held brightness leaves the hold and its timer as they are,
+  and any other restarts the timer with the new value.
+- The first brightness that a device reports is applied.
+
+When the timer ends the brightness reaches HomeKit as a report's values do, so
+Adaptive Lighting's controller recomputes for it. A HomeKit write that carries
+brightness drops the held one, and so does shutdown. A brightness that no
+report confirms is undone after 2000 ms without being held. A read gets the
+characteristic's value, because the device's state lacks a held brightness as
+it lacks an unconfirmed written group. WLED and other devices are not held: a
+WLED light reports brightness 0 while off and its real brightness once on, and
+does not report passing values.
 
 ## Future Work
 

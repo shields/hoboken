@@ -56,7 +56,7 @@ begins `Adaptive Lighting for`, not `HomeKit write for`.
 
 A switch or the Zigbee2MQTT app can turn a light on or change its brightness.
 Applying such a report to HomeKit makes the controller recompute the
-temperature at once.
+temperature.
 
 - **Turned on.** When a report that the bridge applies turns the On
   characteristic from off to on while Adaptive Lighting is active, the bridge
@@ -67,27 +67,21 @@ temperature at once.
   turn-off that no report confirmed. A bridge that restarts finds the
   characteristic off, so the first report of a light that is on counts as a
   turn-on.
-- **Brightness.** A report that changes the Brightness characteristic starts a
-  settle period of 10 s for the device, and each further change restarts it.
-  The hook still remembers each temperature, but accepts none, from a
-  recompute or from the controller's schedule. When the period ends and
-  Adaptive Lighting is still active, the bridge publishes the remembered
-  temperature, as Adaptive Lighting's, if the rule would. A switch that reports
-  full brightness, then 12% fourteen ms later, then full again 5.2 s later,
-  as one group did on each turn-on, so costs the light nothing, where each
-  value had been followed by its own temperature and the light changed color
-  twice.
-- A Brightness that HomeKit writes ends the period, and the temperature
-  recomputed for it is accepted as before. So is the one for a brightness
-  that a report gives while a HomeKit write of power or brightness is
-  unconfirmed, because that brightness is the write's doing: a WLED fixture
-  reports brightness 0 while off and its real brightness once on. Turning
-  Adaptive Lighting off or shutting down cancels the period. The turn-on is not held by the period, which
-  begins with the brightness report that follows.
-
-The bridge's own publish at the end of the period is like any other Adaptive
-Lighting publish: it makes the color group unconfirmed, and `makePublish`
-sets Hue and Saturation to the curve's for it.
+- **Brightness.** A Zigbee2MQTT light's reported brightness is held until it
+  has stood for 10 s (`BRIGHTNESS_SETTLE_MS`), with or without Adaptive
+  Lighting; see [Reported brightness is held](color-coalescing.md#reported-brightness-is-held).
+  The Brightness characteristic changes only then, so the controller recomputes
+  the temperature once, for a brightness that stood, and the hook accepts it
+  under the rule above. A group that a switch turns on reports full
+  brightness, then 12% fourteen ms later, then full again 5.2 s later, and
+  the light is sent no temperature for the 12%. A brightness set at a switch
+  changes the temperature 10 s late.
+- A Brightness that HomeKit writes drops the held one, and the temperature
+  recomputed for it is accepted at once. A WLED light's reported brightness is
+  not held: it reports brightness 0 while off and its real brightness once on,
+  and the temperature for that follows at once. Turning Adaptive Lighting off
+  does not release a held brightness, which HomeKit shows when it has stood,
+  and shutting down drops it.
 
 ## A color or temperature in the same request
 
