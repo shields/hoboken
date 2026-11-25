@@ -98,25 +98,63 @@ Hoboken accepts `color_temp` and `color_hs` together on a Z2M device and
 then exposes all three characteristics. A device with `color_hs` alone
 exposes Hue and Saturation only.
 
-### HomeKit UI behavior
+### What the controllers write
 
-- **Dual-mode lights** (CT + HS on the same service): Home app shows five
-  white presets plus a color picker. The white presets send Hue +
-  Saturation values (not ColorTemperature), which puts Z2M into HS mode
-  instead of CT mode.
-- **CT-only lights**: Home app shows a color temperature slider that sends
-  `ColorTemperature` directly.
-- **Siri "set lights white"**: HomeKit sends Hue=0, Saturation=0. Hue has
-  no meaning at zero saturation, so Hoboken reads zero saturation as white
-  at any hue, and when Saturation arrives without Hue.
-- **Siri "warm white"** on a light with Hue and Saturation only: HomeKit
-  sends Hue=31, Saturation=33 with On.
-- **Siri "cool white"** on a light with Hue and Saturation only: Siri
-  answers that the light did not respond, and no hue or saturation
-  arrives. Writes of Brightness=100 alone were logged around the
-  requests; which request sent them was not recorded.
-- **Home app "white" swatch** (HS color picker): HomeKit sends Hue=228,
-  Saturation=56.
+These come from two sources. The HAP write log records what arrives. And
+Apple's frameworks on macOS 27.2.1 can be called directly: a Mac Catalyst
+program can load `Home.framework` and run the Home app's own color code,
+and Siri's color names are a table in `HomeAutomationInternal.framework`.
+
+**The Home app** writes a color as Hue and Saturation only, or as
+ColorTemperature only, never with Brightness or On
+(`-[HFColorControlItem characteristicValuesForValue:]`):
+
+- A color with a temperature goes to ColorTemperature when the light has
+  that characteristic, and is otherwise converted to Hue and Saturation
+  by `HFGetColorForLightTemperature`, rounded to the characteristics'
+  steps. The Temperature tab is shown either way. Its wheel spans 2400 K
+  to 10000 K, or the range of the ColorTemperature characteristic.
+- That conversion is a closed form. With `k` in kelvins, each of red,
+  green, and blue is `a + b / (k + c)` limited to 0–1, with one set of
+  constants at or below 6500 K and another above; hue and saturation
+  follow from the usual RGB to HSB conversion. 370 mireds is hue 29.9,
+  saturation 66.5. HAP-NodeJS's
+  `ColorUtils.colorTemperatureToHueAndSaturation` is a different table,
+  which gives (27, 42) for 370 mireds.
+- The six default swatches of the color palette are, as hue and
+  saturation, (222, 20), (251, 5), (28, 23), (30, 48), (30, 67), and
+  (255, 68). The first five lie on the temperature curve, at 101, 142,
+  211, 293, and 372 mireds. The third is also tagged 366 mireds, which
+  is what a light with ColorTemperature is sent for it.
+- A light with all three characteristics is shown as a color only while
+  its ColorTemperature is the characteristic's minimum
+  (`valueForCharacteristicValues:`); at any other value it is shown as a
+  temperature.
+- Hue=228, Saturation=56 was seen once for a "white" swatch. It is not
+  in the default palettes and may have been a saved favorite.
+
+**Siri** resolves a color name to hue, saturation, and brightness and
+has homed write those. It never writes ColorTemperature to a light that
+lacks it. Seen through the Siri AI app of macOS 27.2.1 against a light
+with Hue and Saturation only:
+
+| Request                                                    | Write                               |
+| ---------------------------------------------------------- | ----------------------------------- |
+| white, neutral white, natural white, pure white, off white | Hue 0, Saturation 0, Brightness 100 |
+| bright white                                               | Hue 0, Saturation 0, Brightness 100 |
+| soft white                                                 | Hue 0, Saturation 0, Brightness 78  |
+| warm white                                                 | Hue 31, Saturation 33               |
+| cool white                                                 | Hue 208, Saturation 17              |
+| candle, candlelight                                        | Hue 30, Saturation 84               |
+| halogen                                                    | Hue 33, Saturation 12               |
+| daylight                                                   | On false                            |
+| 2700 kelvin, 4000 kelvin, 6500 kelvin                      | Brightness 100                      |
+
+Every color write also carries On true. Another device answered "cool
+white" with "didn't respond" and wrote only Brightness 100, as a kelvin
+request does here, so the names vary between Siri versions. Hue has no
+meaning at zero saturation, so Hoboken reads zero saturation as white at
+any hue, and when Saturation arrives without Hue.
 
 ### Z2M color_mode behavior
 
@@ -141,17 +179,29 @@ exposes Hue and Saturation only.
 
 ### Hoboken's approach
 
-For `color_hs` devices, when HomeKit sends a recognized "white" request,
-`homeKitToZ2m` converts it to a `color_temp` write. This causes Z2M to
-switch to CT mode so the bulb uses its WW/CW LEDs instead of mixing RGB to
-approximate white. The requests and their temperatures follow Z2M's
-`neutral` and `warm` presets:
+For `color_hs` devices, when HomeKit asks for a white, `homeKitToZ2m`
+converts the write to `color_temp`. This causes Z2M to switch to CT mode
+so the bulb uses its WW/CW LEDs instead of mixing RGB to approximate
+white. Siri's three whites get the temperatures of Z2M's `cool`,
+`neutral`, and `warm` presets, and any other hue and saturation on the
+Home app's temperature curve gets the temperature it stands for:
 
-| Request               | Hue | Sat | `color_temp`                      |
-| --------------------- | --- | --- | --------------------------------- |
-| Siri "white"          | any | 0   | `whiteColorTemp`, or 370 (2700 K) |
-| Home app white swatch | 228 | 56  | `whiteColorTemp`, or 370 (2700 K) |
-| Siri "warm white"     | 31  | 33  | 454 (2200 K)                      |
+| Request                        | Hue          | Sat | `color_temp`                      |
+| ------------------------------ | ------------ | --- | --------------------------------- |
+| Siri "white"                   | any          | 0   | `whiteColorTemp`, or 370 (2700 K) |
+| Home app white swatch          | 228          | 56  | `whiteColorTemp`, or 370 (2700 K) |
+| Siri "warm white"              | 31           | 33  | 454 (2200 K)                      |
+| Siri "cool white"              | 208          | 17  | 250 (4000 K)                      |
+| Home app temperature or swatch | on the curve |     | the curve's, from 140 to 500      |
+
+`hueSaturationToColorTemp` finds the nearest point of the curve from 100
+to 500 mireds, treating hue and saturation as polar coordinates, because
+hue is an angle and means little at low saturation. It accepts a
+distance of up to 1. Rounding a point of the curve to a whole hue and
+saturation moves it at most 0.88, and a rounded point gives back its
+temperature to within 3.2 mireds. Saturated colors are far outside:
+(30, 100) is 9.5 away. A color within 1 of the curve is always read as a
+temperature, so a deliberate (29, 91) becomes 500 mireds.
 
 The temperature is never the `color_temp` in the state cache, because
 that value follows the last color, as described above. Reusing it made
@@ -166,22 +216,29 @@ writes for those devices. A device with `whiteColorTemp` or the
 
 A write that carries `ColorTemperature` as well as Hue or Saturation
 publishes only `color_temp`, as Home Assistant does, because Z2M would
-send the bulb one command for each and the last would win.
+send the bulb one command for each and the last would win. The exception
+is a write of 140 mireds with both Hue and Saturation: that is what a
+light showing a color reports, so a controller that writes a light's
+state back, as a scene does, means the color.
 
 On the read path, `z2mToHomeKit` reports only the fields of the active
 `color_mode`, as homebridge-z2m does. In `"color_temp"` mode it reports
-the temperature, and for Hue and Saturation the values of HAP-NodeJS's
-`ColorUtils.colorTemperatureToHueAndSaturation`, which is how HomeKit
-itself shows a temperature: (27, 42) for 370 mireds, where Z2M reports
-(32, 82). In `"hs"` or `"xy"` mode it reports the color and leaves out
-`color_temp`, so `ColorTemperature` keeps its last value. A state without
-`color_mode` passes through unchanged. An update is read against the
-merged state, so one that carries only `color_mode` still switches what
-HomeKit shows.
+the temperature, and for Hue and Saturation the Home app's own color for
+it (`colorTempToHueSaturation`): (30, 67) for 370 mireds, where Z2M
+reports (32, 82). A controller that writes those two back, as a scene
+does, then gets the same temperature again. In `"hs"` or `"xy"` mode it
+reports the color and 140 mireds, the minimum, which is how the Home app
+tells that the light shows a color. A light without `color_hs` has no
+color to show and keeps its last temperature instead. A light that is
+really at 140 mireds is therefore shown as a color; the minimum cannot
+mean both. A state without `color_mode` passes through unchanged. An update is read against the merged state, so one
+that carries only `color_mode` still switches what HomeKit shows.
 
-A `ColorTemperature` write also sets Hue and Saturation from the same
-table, because HomeKit shows a light's color from those two and the state
-report that follows the write is suppressed, as described below.
+The state report that follows a write is suppressed, as described below,
+so after publishing a write the bridge sets the characteristics that the
+write implies and did not itself set (`z2mWriteToHomeKit`): Hue and
+Saturation after a ColorTemperature write, ColorTemperature after a
+color or a white. The ones the controller wrote keep its values.
 `updateAccessoryState` sets Hue and Saturation before `ColorTemperature`;
 Home Assistant's bridge notes that iOS otherwise shows the wrong color.
 
@@ -254,33 +311,11 @@ unsuppressed state update will sync the characteristic.
 
 ## Future Work
 
-### White → color_temp conversion
+### Other named whites
 
-Apple's Home app shows five white presets for HS-capable lights. These
-presets send Hue + Saturation values that approximate white tones, but
-put Z2M into HS mode instead of CT mode. On RGB+CCT bulbs, this means
-the RGB LEDs mix to approximate white instead of using the dedicated
-WW/CW LEDs, which produces inferior white quality.
-
-A future enhancement could map these specific preset values to
-`color_temp` writes. Observed preset values from the Home app:
-
-| Preset  | Hue | Sat | Z2M color_temp |
-| ------- | --- | --- | -------------- |
-| Coolest | 222 | 20  | 138            |
-| Cool    | 251 | 5   | 163            |
-| Neutral | 28  | 23  | 207            |
-| Warm    | 30  | 48  | 265            |
-| Warmest | 30  | 67  | 325            |
-
-The Home app also provides a color temperature slider as a tab in the
-color selection popup. Converting all the values from this would
-require reverse-engineering what path in color space the slider is
-traversing.
-
-Currently only zero saturation (Siri's "set lights white"), H=228/S=56
-(the Home app's white swatch), and H=31/S=33 (Siri's "warm white") are
-converted. The five preset values above are not yet handled.
+Siri's table has whites that are neither on the Home app's curve nor
+mapped here, such as halogen (33, 12) and antique white (34, 14). They
+are published as colors.
 
 ### WLED white channel
 

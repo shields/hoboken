@@ -314,40 +314,6 @@ describe("createLightAccessory", () => {
     expect(publish).toHaveBeenCalledWith("test_light", { color_temp: 250 });
   });
 
-  test("a color temperature write on a color light sets HomeKit's hue and saturation for it", async () => {
-    const device = makeDevice({
-      capabilities: ["on_off", "color_temp", "color_hs"],
-    });
-    const service = createLightAccessory(device, publish, getState).getService(
-      Service.Lightbulb,
-    )!;
-    const hue = service.getCharacteristic(Characteristic.Hue);
-    const saturation = service.getCharacteristic(Characteristic.Saturation);
-    hue.updateValue(240);
-    saturation.updateValue(100);
-
-    service.getCharacteristic(Characteristic.ColorTemperature).setValue(370);
-    await flush();
-
-    expect(publish).toHaveBeenCalledTimes(1);
-    expect(publish).toHaveBeenCalledWith("test_light", { color_temp: 370 });
-    expect(hue.value).toBe(27);
-    expect(saturation.value).toBe(42);
-  });
-
-  test("a color temperature write without color_hs adds no hue", async () => {
-    const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
-    const service = createLightAccessory(device, publish, getState).getService(
-      Service.Lightbulb,
-    )!;
-
-    service.getCharacteristic(Characteristic.ColorTemperature).setValue(370);
-    await flush();
-
-    expect(service.testCharacteristic(Characteristic.Hue)).toBe(false);
-    expect(service.testCharacteristic(Characteristic.Saturation)).toBe(false);
-  });
-
   test("onSet hue publishes top-level hue", async () => {
     const device = makeDevice({ capabilities: ["on_off", "color_hs"] });
     const accessory = createLightAccessory(device, publish, getState);

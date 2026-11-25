@@ -486,7 +486,7 @@ function computeHomeKitValues(
   let hk: ReturnType<typeof z2mToHomeKit>;
   switch (type) {
     case "z2m":
-      hk = z2mToHomeKit(state);
+      hk = z2mToHomeKit(state, state, capabilities);
       break;
     case "wled":
       hk = wledToHomeKit(state);

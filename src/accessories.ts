@@ -16,7 +16,6 @@ import {
   Accessory,
   Categories,
   Characteristic,
-  ColorUtils,
   HAPStatus,
   HapStatusError,
   Service,
@@ -125,7 +124,7 @@ export function createLightAccessory(
   }
 
   if (device.capabilities.includes("color_hs")) {
-    const hue = addSimpleCharacteristic(
+    addSimpleCharacteristic(
       service,
       Characteristic.Hue,
       "hue",
@@ -133,7 +132,7 @@ export function createLightAccessory(
       getState,
       device.topic,
     );
-    const saturation = addSimpleCharacteristic(
+    addSimpleCharacteristic(
       service,
       Characteristic.Saturation,
       "saturation",
@@ -141,21 +140,6 @@ export function createLightAccessory(
       getState,
       device.topic,
     );
-
-    if (device.capabilities.includes("color_temp")) {
-      // HomeKit shows a light's color from Hue and Saturation alone, and the
-      // report that follows a write is suppressed, so the write sets them.
-      service
-        .getCharacteristic(Characteristic.ColorTemperature)
-        .onSet((value) => {
-          setPayload({ color_temp: value });
-          const color = ColorUtils.colorTemperatureToHueAndSaturation(
-            Number(value),
-          );
-          hue.updateValue(color.hue);
-          saturation.updateValue(color.saturation);
-        });
-    }
   }
 
   return accessory;
