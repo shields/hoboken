@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Apple Home sends H=228 S=56 when selecting "white" on a color_hs light.
-export function isWhite(h: number, s: number): boolean {
-  return (h === 0 && s === 0) || (h === 228 && s === 56);
+// 2700 K in mireds.
+export const DEFAULT_WHITE_COLOR_TEMP = 370;
+
+// Siri's "white" is zero saturation, where hue has no meaning. Apple Home
+// sends H=228 S=56 when selecting "white" on a color_hs light.
+export function isWhite(h: number | undefined, s: number | undefined): boolean {
+  return s === 0 || (h === 228 && s === 56);
 }
 
 export function z2mBrightnessToHomeKit(z2m: number): number {
@@ -33,8 +37,8 @@ export function homeKitBrightnessToZ2M(hk: number): number {
 // Zigbee2MQTT devices can report values outside this range (e.g. 0 or 65535
 // when color_temp mode isn't active). Without clamping, hap-nodejs emits
 // characteristic warnings and HomeKit may reject the update entirely.
-const COLOR_TEMP_MIN = 140;
-const COLOR_TEMP_MAX = 500;
+export const COLOR_TEMP_MIN = 140;
+export const COLOR_TEMP_MAX = 500;
 
 export function clampColorTemp(mireds: number): number {
   return Math.max(COLOR_TEMP_MIN, Math.min(COLOR_TEMP_MAX, mireds));
@@ -157,6 +161,16 @@ export function z2mToHomeKit(raw: RawState): HomeKitState {
   return hk;
 }
 
+// HomeKit has no white channel, so a lit one is folded into each color channel.
+export function wledRgb(
+  r: number,
+  g: number,
+  b: number,
+  w = 0,
+): [number, number, number] {
+  return [Math.min(255, r + w), Math.min(255, g + w), Math.min(255, b + w)];
+}
+
 export function wledToHomeKit(raw: RawState): HomeKitState {
   const hk: HomeKitState = {};
   if ("on" in raw) hk.on = raw.on === true;
@@ -164,8 +178,9 @@ export function wledToHomeKit(raw: RawState): HomeKitState {
   if ("col" in raw) {
     const col = raw.col;
     if (Array.isArray(col) && col.length >= 3) {
-      const [r, g, b] = col as [number, number, number];
-      const hs = rgbToHs(r, g, b);
+      const hs = rgbToHs(
+        ...wledRgb(...(col as [number, number, number, number?])),
+      );
       hk.hue = hs.hue;
       hk.saturation = hs.saturation;
     }
@@ -176,6 +191,7 @@ export function wledToHomeKit(raw: RawState): HomeKitState {
 export function homeKitToZ2m(
   payload: Record<string, unknown>,
   cachedRaw?: RawState,
+  whiteColorTemp?: number,
 ): Record<string, unknown> {
   const z2m: Record<string, unknown> = {};
 
@@ -185,15 +201,22 @@ export function homeKitToZ2m(
   if ("color_temp" in payload) z2m.color_temp = payload.color_temp;
 
   if ("hue" in payload || "saturation" in payload) {
-    const h = (payload.hue as number | undefined) ?? 0;
-    const s = (payload.saturation as number | undefined) ?? 0;
+    // Never the cached color_temp: while a bulb shows a color, Zigbee2MQTT
+    // reports a color_temp derived from that color. A reported color_temp only
+    // shows that the bulb has white LEDs.
+    const white =
+      whiteColorTemp ??
+      (cachedRaw?.color_temp === undefined
+        ? undefined
+        : DEFAULT_WHITE_COLOR_TEMP);
     if (
-      "hue" in payload &&
-      "saturation" in payload &&
-      isWhite(h, s) &&
-      cachedRaw?.color_temp !== undefined
+      white !== undefined &&
+      isWhite(
+        payload.hue as number | undefined,
+        payload.saturation as number | undefined,
+      )
     ) {
-      z2m.color_temp = cachedRaw.color_temp;
+      z2m.color_temp = white;
     } else {
       const color: Record<string, unknown> = {};
       if ("hue" in payload) color.hue = payload.hue;
@@ -247,17 +270,19 @@ export function homeKitToWled(
   return api;
 }
 
+// WLED prints (W << 24) | (R << 16) | (G << 8) | B with at least six digits, so
+// a lit white channel adds one or two digits in front of the color.
 export function parseWledHexColor(
   hex: string,
-): [number, number, number] | undefined {
+): [number, number, number] | [number, number, number, number] | undefined {
   const cleaned = hex.startsWith("#") ? hex.slice(1) : hex;
-  if (cleaned.length < 6) return undefined;
-  const r = Number.parseInt(cleaned.slice(0, 2), 16);
-  const g = Number.parseInt(cleaned.slice(2, 4), 16);
-  const b = Number.parseInt(cleaned.slice(4, 6), 16);
-  return Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)
-    ? undefined
-    : [r, g, b];
+  if (!/^[\da-f]{6,8}$/i.test(cleaned)) return undefined;
+  const value = Number.parseInt(cleaned, 16);
+  const r = (value >>> 16) & 0xff;
+  const g = (value >>> 8) & 0xff;
+  const b = value & 0xff;
+  const w = value >>> 24;
+  return w === 0 ? [r, g, b] : [r, g, b, w];
 }
 
 export function parseWledMessage(

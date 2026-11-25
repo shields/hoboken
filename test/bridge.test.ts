@@ -1228,7 +1228,7 @@ describe("startBridge", () => {
     await shutdown();
   });
 
-  test("Z2M publish white transform with cached color_temp sends color_temp", async () => {
+  test("Z2M white sends 2700 K, not the color_temp reported for a color", async () => {
     const cfg: Config = {
       ...testConfig(),
       devices: [
@@ -1244,11 +1244,17 @@ describe("startBridge", () => {
     mockClient.connected = true;
     mockClient.emit("connect");
 
-    // Populate cache with a color_temp value
     mockClient.emit(
       "message",
       "zigbee2mqtt/color_light",
-      Buffer.from(JSON.stringify({ state: "ON", color_temp: 370 })),
+      Buffer.from(
+        JSON.stringify({
+          state: "ON",
+          color: { hue: 240, saturation: 100, x: 0.1355, y: 0.0399 },
+          color_mode: "xy",
+          color_temp: 574,
+        }),
+      ),
     );
 
     const accessory = bridge.bridgedAccessories.find(
@@ -1256,7 +1262,6 @@ describe("startBridge", () => {
     )!;
     const service = accessory.getService(Service.Lightbulb)!;
 
-    // Send white (H=0, S=0) — should use cached color_temp
     service.getCharacteristic(Characteristic.Hue).setValue(0);
     service.getCharacteristic(Characteristic.Saturation).setValue(0);
     await flush();
@@ -1265,11 +1270,93 @@ describe("startBridge", () => {
       (p) => p.topic === "zigbee2mqtt/color_light/set",
     );
     expect(setMsg).toBeDefined();
-    const parsed = JSON.parse(setMsg!.message) as Record<string, unknown>;
-    expect(parsed.color_temp).toBe(370);
-    expect(parsed.color).toBeUndefined();
+    expect(JSON.parse(setMsg!.message)).toEqual({ color_temp: 370 });
 
     await shutdown();
+  });
+
+  test("Z2M white sends each device's whiteColorTemp before any state arrives", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Cool Light",
+          type: "z2m",
+          topic: "zigbee2mqtt/cool_light",
+          capabilities: ["on_off", "color_hs"],
+          whiteColorTemp: 250,
+        },
+        {
+          name: "Warm Light",
+          type: "z2m",
+          topic: "zigbee2mqtt/warm_light",
+          capabilities: ["on_off", "color_hs"],
+          whiteColorTemp: 400,
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+
+    for (const accessory of bridge.bridgedAccessories) {
+      const service = accessory.getService(Service.Lightbulb)!;
+      service.getCharacteristic(Characteristic.Hue).setValue(0);
+      service.getCharacteristic(Characteristic.Saturation).setValue(0);
+    }
+    await flush();
+
+    const sets = mockClient.published
+      .filter((p) => p.topic.endsWith("/set"))
+      .map((p) => [p.topic, JSON.parse(p.message) as unknown]);
+    expect(sets).toEqual([
+      ["zigbee2mqtt/cool_light/set", { color_temp: 250 }],
+      ["zigbee2mqtt/warm_light/set", { color_temp: 400 }],
+    ]);
+
+    await shutdown();
+  });
+
+  test("logs each HomeKit write with the payload it publishes", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Color Light",
+          type: "z2m",
+          topic: "zigbee2mqtt/color_light",
+          capabilities: ["on_off", "color_hs"],
+          whiteColorTemp: 250,
+          scenes: [{ name: "Movie Mode", id: 3 }],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+    const output = captureConsole();
+    try {
+      const light = bridge.bridgedAccessories.find(
+        (a) => a.displayName === "Color Light",
+      )!;
+      const service = light.getService(Service.Lightbulb)!;
+      service.getCharacteristic(Characteristic.Hue).setValue(0);
+      service.getCharacteristic(Characteristic.Saturation).setValue(0);
+      await flush();
+      bridge.bridgedAccessories
+        .find((a) => a.displayName === "Movie Mode")!
+        .getService(Service.Switch)!
+        .getCharacteristic(Characteristic.On)
+        .setValue(true);
+
+      expect(output.lines().map((line) => line.replace(/^\S+ /, ""))).toEqual([
+        'HomeKit write for "Color Light": {"hue":0,"saturation":0} published to zigbee2mqtt/color_light/set as {"color_temp":250}',
+        'HomeKit write for "Color Light": {"scene_recall":3} published to zigbee2mqtt/color_light/set as {"scene_recall":3}',
+      ]);
+    } finally {
+      output.restore();
+      await shutdown();
+    }
   });
 
   test("Z2M publish white transform without cached color_temp sends color object", async () => {
@@ -1820,7 +1907,7 @@ describe("WLED device support", () => {
     await shutdown();
   });
 
-  test("HomeKit white (H=0/S=0) activates WLED white channel", async () => {
+  test("HomeKit white (H=0/S=0) sends WLED RGB white", async () => {
     const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
     mockClient.connected = true;
     mockClient.emit("connect");
@@ -2994,6 +3081,99 @@ describe("startBridge with metrics", () => {
     const { shutdown } = await startBridge(cfg, VERSION);
     // devicesConfigured is set synchronously during startBridge
     await shutdown();
+  });
+
+  test("logs a HAP write request, including a value HAP-NodeJS rejects", async () => {
+    const cfg: Config = {
+      ...testConfig(),
+      devices: [
+        {
+          name: "Color Light",
+          type: "z2m",
+          topic: "zigbee2mqtt/color_light",
+          capabilities: ["on_off", "color_hs"],
+        },
+      ],
+    };
+    const { bridge, shutdown } = await startBridge(cfg, VERSION);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+    const output = captureConsole();
+    try {
+      const light = bridge.bridgedAccessories.find(
+        (a) => a.displayName === "Color Light",
+      )!;
+      const aid = light.aid!;
+      const service = light.getService(Service.Lightbulb)!;
+      const iid = (characteristic: typeof Characteristic.Hue) =>
+        service.getCharacteristic(characteristic).iid!;
+      const connection = Object.assign(
+        new FakeHAPConnection("192.168.1.50", 12345),
+        { hasEventNotifications: () => true },
+      );
+
+      const response = await new Promise<
+        { aid: number; iid: number; status?: number }[]
+      >((resolve) => {
+        bridge._server!.emit(
+          "set-characteristics",
+          connection as never,
+          {
+            characteristics: [
+              { aid, iid: iid(Characteristic.Hue), value: 400 },
+              { aid, iid: iid(Characteristic.Saturation), value: 20 },
+              { aid, iid: iid(Characteristic.On), ev: true },
+              { aid: 999, iid: 7, value: "x\ny" },
+            ],
+          },
+          (_error, written) => {
+            resolve(written!.characteristics);
+          },
+        );
+      });
+
+      const status = (characteristic: typeof Characteristic.Hue) =>
+        response.find((write) => write.iid === iid(characteristic))?.status;
+      expect(status(Characteristic.Hue)).toBe(
+        HAPStatus.INVALID_VALUE_IN_REQUEST,
+      );
+      expect(status(Characteristic.Saturation)).toBe(HAPStatus.SUCCESS);
+      await flush();
+      expect(output.lines().map((line) => line.replace(/^\S+ /, ""))).toEqual([
+        'HAP write from 192.168.1.50: "Color Light" Hue=400, "Color Light" Saturation=20, 999.7="x\\ny"',
+        'HomeKit write for "Color Light": {"saturation":20} published to zigbee2mqtt/color_light/set as {"color":{"saturation":20}}',
+      ]);
+    } finally {
+      output.restore();
+      await shutdown();
+    }
+  });
+
+  test("does not log a HAP request that only subscribes to events", async () => {
+    const { bridge, shutdown } = await startBridge(testConfig(), VERSION);
+    const output = captureConsole();
+    try {
+      const light = bridge.bridgedAccessories[0]!;
+      const on = light
+        .getService(Service.Lightbulb)!
+        .getCharacteristic(Characteristic.On);
+      const connection = Object.assign(
+        new FakeHAPConnection("192.168.1.50", 12345),
+        { hasEventNotifications: () => true },
+      );
+      await new Promise((resolve) => {
+        bridge._server!.emit(
+          "set-characteristics",
+          connection as never,
+          { characteristics: [{ aid: light.aid!, iid: on.iid!, ev: true }] },
+          resolve,
+        );
+      });
+      expect(output.lines()).toEqual([]);
+    } finally {
+      output.restore();
+      await shutdown();
+    }
   });
 
   test("HAP connection-opened increments hapConnectionsActive", async () => {

@@ -41,6 +41,7 @@ import {
   displayMQTTURL,
   withoutErrorMessage,
   type Config,
+  type DeviceConfig,
   type MQTTCredentials,
 } from "./config.ts";
 import { HeatedBeddingMQTT } from "./heated-bedding-mqtt.ts";
@@ -357,6 +358,7 @@ export async function startBridge(
   };
 
   function makePublish(
+    device: DeviceConfig,
     convert: (
       p: Record<string, unknown>,
       raw?: RawState,
@@ -364,9 +366,10 @@ export async function startBridge(
     mqttTopic: (topic: string) => string,
   ): PublishFn {
     return (topic, payload) => {
-      rawPublish(
-        mqttTopic(topic),
-        JSON.stringify(convert(payload, stateCache.get(topic))),
+      const message = JSON.stringify(convert(payload, stateCache.get(topic)));
+      rawPublish(mqttTopic(topic), message);
+      log.log(
+        `HomeKit write for "${device.name}": ${JSON.stringify(payload)} published to ${mqttTopic(topic)} as ${message}`,
       );
       if (
         "hue" in payload ||
@@ -378,21 +381,23 @@ export async function startBridge(
     };
   }
 
+  const z2mSetTopic = (topic: string) => `${topic}/set`;
   const protocols = {
     z2m: {
-      publish: makePublish(homeKitToZ2m, (t) => `${t}/set`),
+      publish: (device: DeviceConfig) =>
+        makePublish(
+          device,
+          (p, raw) => homeKitToZ2m(p, raw, device.whiteColorTemp),
+          z2mSetTopic,
+        ),
       toHomeKit: z2mToHomeKit,
     },
     wled: {
-      publish: makePublish(homeKitToWled, (t) => `${t}/api`),
+      publish: (device: DeviceConfig) =>
+        makePublish(device, homeKitToWled, (t) => `${t}/api`),
       toHomeKit: wledToHomeKit,
     },
   };
-
-  const scenePublish = makePublish(
-    (p) => p,
-    (t) => `${t}/set`,
-  );
 
   if (metricsRegister && config.metrics) {
     const getStatus = () =>
@@ -445,6 +450,7 @@ export async function startBridge(
       `  Adding device "${device.name}" (type: ${device.type}, topic: ${device.topic}, capabilities: ${device.capabilities.join(", ")})`,
     );
     const proto = protocols[device.type];
+    const publish = proto.publish(device);
     const getState = (topic: string) => {
       const raw = stateCache.get(topic);
       if (!raw) return;
@@ -453,8 +459,8 @@ export async function startBridge(
 
     const isFan = device.capabilities.includes("fan");
     const accessory = isFan
-      ? createFanAccessory(device, proto.publish, getState, prePublishCheck)
-      : createLightAccessory(device, proto.publish, getState, prePublishCheck);
+      ? createFanAccessory(device, publish, getState, prePublishCheck)
+      : createLightAccessory(device, publish, getState, prePublishCheck);
     setAccessoryInfo(accessory, "Hoboken", device.topic, device.topic, version);
     bridge.addBridgedAccessory(accessory);
     accessoryMap.set(device.topic, {
@@ -478,6 +484,7 @@ export async function startBridge(
     }
 
     if (device.scenes) {
+      const scenePublish = makePublish(device, (p) => p, z2mSetTopic);
       for (const scene of device.scenes) {
         const sceneAccessory = createSceneAccessory(
           device,
@@ -748,6 +755,30 @@ export async function startBridge(
   if (server) {
     server.on("pair", (username) => {
       log.log(`Pair-setup finished for ${username}`);
+    });
+
+    // HAP-NodeJS refuses a value outside a characteristic's range before any
+    // onSet handler runs, so only the request shows what a controller sent.
+    server.on("set-characteristics", (connection, request) => {
+      const accessories = [bridge, ...bridge.bridgedAccessories];
+      const writes = request.characteristics
+        .filter((write) => write.value !== undefined)
+        .map(({ aid, iid, value }) => {
+          const accessory = accessories.find((a) => a.aid === aid);
+          const characteristic = accessory?.services
+            .flatMap((service) => service.characteristics)
+            .find((c) => c.iid === iid);
+          const target =
+            accessory && characteristic
+              ? `"${accessory.displayName}" ${characteristic.displayName}`
+              : `${String(aid)}.${String(iid)}`;
+          return `${target}=${JSON.stringify(value)}`;
+        });
+      if (writes.length > 0) {
+        log.log(
+          `HAP write from ${connection.remoteAddress}: ${writes.join(", ")}`,
+        );
+      }
     });
 
     server.on("connection-closed", (connection) => {

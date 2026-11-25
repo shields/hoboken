@@ -742,6 +742,58 @@ describe("validateConfig", () => {
     );
   });
 
+  test("accepts whiteColorTemp on a z2m color_hs device", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["on_off", "brightness", "color_hs"];
+    (data.devices[0]! as Record<string, unknown>).whiteColorTemp = 250;
+    expect(validateConfig(data).devices[0]!.whiteColorTemp).toBe(250);
+  });
+
+  test("leaves whiteColorTemp out when it is not configured", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["on_off", "brightness", "color_hs"];
+    expect("whiteColorTemp" in validateConfig(data).devices[0]!).toBe(false);
+  });
+
+  test.each([140, 500])("accepts whiteColorTemp %d", (mireds) => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["on_off", "color_hs"];
+    (data.devices[0]! as Record<string, unknown>).whiteColorTemp = mireds;
+    expect(validateConfig(data).devices[0]!.whiteColorTemp).toBe(mireds);
+  });
+
+  test.each([139, 501, 2700, 0, -370, 250.5, "370", null, true, NaN])(
+    "rejects whiteColorTemp %p",
+    (value) => {
+      const data = validConfig();
+      data.devices[0]!.capabilities = ["on_off", "color_hs"];
+      (data.devices[0]! as Record<string, unknown>).whiteColorTemp = value;
+      expect(() => validateConfig(data)).toThrow(
+        "devices[0].whiteColorTemp must be an integer from 140 to 500 mireds",
+      );
+    },
+  );
+
+  test("rejects whiteColorTemp without color_hs", () => {
+    const data = validConfig();
+    data.devices[0]!.capabilities = ["on_off", "brightness", "color_temp"];
+    (data.devices[0]! as Record<string, unknown>).whiteColorTemp = 370;
+    expect(() => validateConfig(data)).toThrow(
+      "devices[0]: whiteColorTemp requires color_hs",
+    );
+  });
+
+  test("rejects whiteColorTemp on WLED devices", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "wled";
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    data.devices[0]!.capabilities = ["on_off", "color_hs"];
+    (data.devices[0]! as Record<string, unknown>).whiteColorTemp = 370;
+    expect(() => validateConfig(data)).toThrow(
+      "devices[0]: whiteColorTemp is not supported for WLED devices",
+    );
+  });
+
   test("accepts color_temp without color_hs", () => {
     const data = validConfig();
     data.devices[0]!.capabilities = ["on_off", "brightness", "color_temp"];
@@ -1141,7 +1193,7 @@ describe("validateConfig", () => {
       },
       ...[0, 1].map((index) => ({
         path: `devices[${String(index)}]`,
-        fields: "name, type, topic, capabilities, and scenes",
+        fields: "name, type, topic, capabilities, whiteColorTemp, and scenes",
         required: "topic",
         build: (changes: Record<string, unknown>) => {
           const config = validConfig();

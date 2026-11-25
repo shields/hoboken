@@ -17,6 +17,7 @@ import {
   clampColorTemp,
   homeKitToWled,
   homeKitToZ2m,
+  DEFAULT_WHITE_COLOR_TEMP,
   isWhite,
   homeKitBrightnessToZ2M,
   homeKitBrightnessToWled,
@@ -26,6 +27,7 @@ import {
   parseWledMessage,
   rgbToHs,
   wledBrightnessToHomeKit,
+  wledRgb,
   wledToHomeKit,
   z2mBrightnessToHomeKit,
   z2mFanModeToHomeKit,
@@ -41,10 +43,25 @@ describe("isWhite", () => {
     expect(isWhite(228, 56)).toBe(true);
   });
 
+  test("zero saturation is white at any hue", () => {
+    expect(isWhite(228, 0)).toBe(true);
+    expect(isWhite(359, 0)).toBe(true);
+  });
+
+  test("zero saturation is white without a hue", () => {
+    expect(isWhite(undefined, 0)).toBe(true);
+  });
+
   test("other values are not white", () => {
     expect(isWhite(240, 80)).toBe(false);
     expect(isWhite(0, 56)).toBe(false);
-    expect(isWhite(228, 0)).toBe(false);
+    expect(isWhite(228, 55)).toBe(false);
+    expect(isWhite(0, 1)).toBe(false);
+  });
+
+  test("a hue without a saturation is not white", () => {
+    expect(isWhite(0, undefined)).toBe(false);
+    expect(isWhite(228, undefined)).toBe(false);
   });
 });
 
@@ -274,6 +291,20 @@ describe("HSV round-trip fidelity", () => {
   });
 });
 
+describe("wledRgb", () => {
+  test("returns the color when the white channel is dark", () => {
+    expect(wledRgb(255, 128, 0)).toEqual([255, 128, 0]);
+  });
+
+  test("adds the white channel to each color channel", () => {
+    expect(wledRgb(100, 0, 0, 50)).toEqual([150, 50, 50]);
+  });
+
+  test("stops at 255", () => {
+    expect(wledRgb(255, 200, 0, 128)).toEqual([255, 255, 128]);
+  });
+});
+
 describe("parseWledHexColor", () => {
   test("parses #RRGGBB format", () => {
     expect(parseWledHexColor("#FF0000")).toEqual([255, 0, 0]);
@@ -283,8 +314,24 @@ describe("parseWledHexColor", () => {
     expect(parseWledHexColor("00FF00")).toEqual([0, 255, 0]);
   });
 
-  test("parses #RRGGBBWW format (ignores white channel)", () => {
-    expect(parseWledHexColor("#FF8000CC")).toEqual([255, 128, 0]);
+  test("parses #WWRRGGBB with the white channel last", () => {
+    expect(parseWledHexColor("#CCFF8000")).toEqual([255, 128, 0, 204]);
+  });
+
+  test("parses white alone", () => {
+    expect(parseWledHexColor("#FF000000")).toEqual([0, 0, 0, 255]);
+  });
+
+  test("parses a white channel below 16, which has one digit", () => {
+    expect(parseWledHexColor("#A123456")).toEqual([18, 52, 86, 10]);
+  });
+
+  test("returns undefined on more than eight digits", () => {
+    expect(parseWledHexColor("#FF00000000")).toBeUndefined();
+  });
+
+  test("returns undefined on trailing non-hex characters", () => {
+    expect(parseWledHexColor("#FF0000zz")).toBeUndefined();
   });
 
   test("parses lowercase hex", () => {
@@ -319,6 +366,12 @@ describe("parseWledMessage", () => {
 
   test("parses /c hex color", () => {
     expect(parseWledMessage("c", "#FF0000")).toEqual({ col: [255, 0, 0] });
+  });
+
+  test("parses /c hex color with a white channel", () => {
+    expect(parseWledMessage("c", "#80FF0000")).toEqual({
+      col: [255, 0, 0, 128],
+    });
   });
 
   test("returns undefined for invalid /c hex", () => {
@@ -433,6 +486,20 @@ describe("wledToHomeKit", () => {
     expect(wledToHomeKit({ bri: 0 })).toEqual({ brightness: 0 });
   });
 
+  test("reads a lit white channel alone as white", () => {
+    expect(wledToHomeKit({ col: [0, 0, 0, 255] })).toEqual({
+      hue: 0,
+      saturation: 0,
+    });
+  });
+
+  test("a white channel desaturates the color", () => {
+    expect(wledToHomeKit({ col: [255, 0, 0, 128] })).toEqual({
+      hue: 0,
+      saturation: 50,
+    });
+  });
+
   test("converts col RGB array to hue and saturation", () => {
     expect(wledToHomeKit({ col: [255, 0, 0] })).toEqual({
       hue: 0,
@@ -502,11 +569,84 @@ describe("homeKitToZ2m", () => {
     });
   });
 
-  test("H=0/S=0 with cached color_temp sends color_temp", () => {
+  test("H=0/S=0 with cached color_temp sends the default white", () => {
     expect(
       homeKitToZ2m({ hue: 0, saturation: 0 }, { color_temp: 300 }),
     ).toEqual({
-      color_temp: 300,
+      color_temp: DEFAULT_WHITE_COLOR_TEMP,
+    });
+  });
+
+  test("the default white is 2700 K", () => {
+    expect(DEFAULT_WHITE_COLOR_TEMP).toBe(370);
+  });
+
+  test("white ignores the color_temp that Zigbee2MQTT derives from a color", () => {
+    const blue = {
+      color: { hue: 240, saturation: 100, x: 0.1355, y: 0.0399 },
+      color_mode: "xy",
+      color_temp: 574,
+    };
+    expect(homeKitToZ2m({ hue: 0, saturation: 0 }, blue)).toEqual({
+      color_temp: DEFAULT_WHITE_COLOR_TEMP,
+    });
+  });
+
+  test("white sends the configured color temperature", () => {
+    expect(
+      homeKitToZ2m({ hue: 0, saturation: 0 }, { color_temp: 574 }, 250),
+    ).toEqual({ color_temp: 250 });
+  });
+
+  test("a configured white needs no cached color_temp", () => {
+    expect(homeKitToZ2m({ hue: 0, saturation: 0 }, undefined, 250)).toEqual({
+      color_temp: 250,
+    });
+    expect(homeKitToZ2m({ hue: 228, saturation: 56 }, {}, 250)).toEqual({
+      color_temp: 250,
+    });
+  });
+
+  test("zero saturation at any hue is white", () => {
+    expect(
+      homeKitToZ2m({ hue: 120, saturation: 0 }, { color_temp: 300 }),
+    ).toEqual({ color_temp: DEFAULT_WHITE_COLOR_TEMP });
+  });
+
+  test("zero saturation alone is white", () => {
+    expect(homeKitToZ2m({ saturation: 0 }, { color_temp: 300 })).toEqual({
+      color_temp: DEFAULT_WHITE_COLOR_TEMP,
+    });
+  });
+
+  test("zero saturation alone without cached color_temp sends color object", () => {
+    expect(homeKitToZ2m({ saturation: 0 })).toEqual({
+      color: { saturation: 0 },
+    });
+  });
+
+  test("hue alone is a color even when it is zero", () => {
+    expect(homeKitToZ2m({ hue: 0 }, { color_temp: 300 }, 250)).toEqual({
+      color: { hue: 0 },
+    });
+  });
+
+  test("a color near white stays a color", () => {
+    expect(
+      homeKitToZ2m({ hue: 30, saturation: 5 }, { color_temp: 300 }, 250),
+    ).toEqual({ color: { hue: 30, saturation: 5 } });
+  });
+
+  test("white keeps the other fields of the write", () => {
+    expect(
+      homeKitToZ2m(
+        { on: true, brightness: 100, hue: 0, saturation: 0 },
+        { color_temp: 300 },
+      ),
+    ).toEqual({
+      state: "ON",
+      brightness: 254,
+      color_temp: DEFAULT_WHITE_COLOR_TEMP,
     });
   });
 
@@ -516,11 +656,11 @@ describe("homeKitToZ2m", () => {
     });
   });
 
-  test("H=228/S=56 with cached color_temp sends color_temp", () => {
+  test("H=228/S=56 with cached color_temp sends the default white", () => {
     expect(
       homeKitToZ2m({ hue: 228, saturation: 56 }, { color_temp: 300 }),
     ).toEqual({
-      color_temp: 300,
+      color_temp: DEFAULT_WHITE_COLOR_TEMP,
     });
   });
 

@@ -15,6 +15,7 @@
 import { readFileSync } from "node:fs";
 import { parse as parseLegacyURL } from "node:url";
 import { parseDocument } from "yaml";
+import { COLOR_TEMP_MAX, COLOR_TEMP_MIN } from "./convert.ts";
 import {
   heatedBeddingIdentity,
   heatedBeddingTopics,
@@ -63,6 +64,7 @@ export interface DeviceConfig {
   type: DeviceType;
   topic: string;
   capabilities: Capability[];
+  whiteColorTemp?: number;
   scenes?: SceneConfig[];
 }
 
@@ -131,6 +133,7 @@ const DEVICE_FIELDS: Fields<DeviceConfig> = {
   type: true,
   topic: true,
   capabilities: true,
+  whiteColorTemp: true,
   scenes: true,
 };
 const SCENE_FIELDS: Fields<SceneConfig> = { name: true, id: true };
@@ -638,6 +641,30 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
     );
   }
 
+  const { whiteColorTemp } = d;
+  if (whiteColorTemp !== undefined) {
+    if (type === "wled") {
+      throw new Error(
+        `devices[${String(index)}]: whiteColorTemp is not supported for WLED devices`,
+      );
+    }
+    if (!capabilities.includes("color_hs")) {
+      throw new Error(
+        `devices[${String(index)}]: whiteColorTemp requires color_hs`,
+      );
+    }
+    if (
+      typeof whiteColorTemp !== "number" ||
+      !Number.isInteger(whiteColorTemp) ||
+      whiteColorTemp < COLOR_TEMP_MIN ||
+      whiteColorTemp > COLOR_TEMP_MAX
+    ) {
+      throw new Error(
+        `devices[${String(index)}].whiteColorTemp must be an integer from ${String(COLOR_TEMP_MIN)} to ${String(COLOR_TEMP_MAX)} mireds`,
+      );
+    }
+  }
+
   let scenes: SceneConfig[] | undefined;
   if (d.scenes !== undefined) {
     if (!Array.isArray(d.scenes)) {
@@ -658,6 +685,7 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
     type,
     topic: d.topic,
     capabilities,
+    ...(whiteColorTemp === undefined ? {} : { whiteColorTemp }),
     ...(scenes ? { scenes } : {}),
   };
 }

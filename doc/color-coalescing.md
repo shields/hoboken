@@ -99,7 +99,9 @@ homebridge-deconz, homebridge-z2m) converts HS→CT on the write path.
   instead of CT mode.
 - **CT-only lights**: Home app shows a color temperature slider that sends
   `ColorTemperature` directly.
-- **Siri "set lights white"**: HomeKit sends Hue=0, Saturation=0.
+- **Siri "set lights white"**: HomeKit sends Hue=0, Saturation=0. Hue has
+  no meaning at zero saturation, so Hoboken reads zero saturation as white
+  at any hue, and when Saturation arrives without Hue.
 - **Home app "white" swatch** (HS color picker): HomeKit sends Hue=228,
   Saturation=56.
 
@@ -113,6 +115,16 @@ homebridge-deconz, homebridge-z2m) converts HS→CT on the write path.
 - Z2M reports `color_mode` as one of `"color_temp"`, `"hs"`, or `"xy"`.
   Both `"hs"` and `"xy"` indicate a non-CT color mode; the device's
   native color space determines which one Z2M reports.
+- In `"hs"` or `"xy"` mode the reported `color_temp` is not the bulb's
+  white setting. With `color_sync` on, which is the default, Z2M replaces
+  it with a value computed from the color: hue and saturation to RGB to
+  CIE xy, then McCamy's formula, `n = (x − 0.332) / (0.1858 − y)` and
+  `K = |437n³ + 3601n² + 6861n + 5517|`
+  (`syncColorState` in zigbee-herdsman-converters `src/lib/color.ts`).
+  The formula fits colors near white. For a saturated color the result is
+  arbitrary: blue (240, 100) gives 574 mireds, about 1740 K, and magenta
+  (300, 100) gives 50. Z2M clamps the value only when it knows the bulb's
+  range.
 
 ### Hoboken's approach
 
@@ -121,17 +133,29 @@ same device (config validation rejects this). Devices are configured as
 either CT-only or HS-only.
 
 For `color_hs` devices, when HomeKit sends a recognized "white" request —
-either Hue=0/Saturation=0 (Siri's "set lights white" command) or
+either zero saturation (Siri's "set lights white" command) or
 Hue=228/Saturation=56 (the Home app's white swatch in the HS color
-picker) — the coalescing publisher's `transformPayload` hook converts it
-to a `color_temp` write using the last known `color_temp` from the state
-cache. This causes Z2M to switch to CT mode so the bulb uses its WW/CW
-LEDs instead of mixing RGB to approximate white.
+picker) — `homeKitToZ2m` converts it to a `color_temp` write. This causes
+Z2M to switch to CT mode so the bulb uses its WW/CW LEDs instead of mixing
+RGB to approximate white.
 
-The transform only fires when the state cache contains a `color_temp`
-value, confirming that the device has CCT hardware. RGB-only devices
-never report `color_temp` in their state, so these white requests pass
-through as normal HS writes for those devices.
+The temperature is the device's `whiteColorTemp`, in mireds, or 370
+(2700 K) when the device has none. It is never the `color_temp` in the
+state cache, because that value follows the last color, as described
+above. Reusing it made "white" after blue the warmest setting the bulb
+has.
+
+A device without `whiteColorTemp` is converted only when the state cache
+contains a `color_temp` value, confirming that the device has CCT
+hardware. RGB-only devices never report `color_temp` in their state, so
+these white requests pass through as normal HS writes for those devices.
+A device with `whiteColorTemp` is converted even before its first state
+report.
+
+Each HAP write request is logged as it arrives, and each published write
+is logged with its payload, so the log shows which values a controller
+sent for a request and what became of them. A value that HAP-NodeJS
+refuses for being out of range appears only in the first line.
 
 ## Write-Back Suppression
 
@@ -221,6 +245,16 @@ color selection popup. Converting all the values from this would
 require reverse-engineering what path in color space the slider is
 traversing.
 
-Currently only the two exact white inputs are converted: H=0/S=0 (Siri's
-"set lights white") and H=228/S=56 (the Home app's white swatch). The
-five preset values above are not yet handled.
+Currently only zero saturation (Siri's "set lights white") and
+H=228/S=56 (the Home app's white swatch) are converted. The five preset
+values above are not yet handled.
+
+### WLED white channel
+
+A WLED white request publishes RGB (255, 255, 255). Whether an RGBW strip
+lights its white LEDs for that is decided by the strip's Auto White
+setting, which is not visible over MQTT: "Accurate" lights the white
+channel alone, "Brighter", "Dual", and "Max" light all four channels, and
+"None" mixes RGB. Publishing white alone, `[0, 0, 0, 255]`, would be right
+for "None" and "Dual" and would turn the strip off in the other modes and
+on an RGB strip, so it would need a per-device option.

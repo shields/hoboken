@@ -1617,6 +1617,40 @@ describe("status page (GET /)", () => {
     expect(body).toContain('class="swatch"');
   });
 
+  test("WLED col swatch adds the white channel to the color", async () => {
+    const white = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "color_hs"],
+      state: { on: true, col: [0, 0, 0, 255] },
+    });
+    expect(white).toContain("rgb(255,255,255)");
+    const pink = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "color_hs"],
+      state: { on: true, col: [255, 0, 0, 128] },
+    });
+    expect(pink).toContain("rgb(255,128,128)");
+  });
+
+  test("col annotation does not inject HTML for a non-numeric white channel", async () => {
+    const body = await renderDevice({
+      name: "LED Strip",
+      topic: "wled/strip",
+      type: "wled",
+      capabilities: ["on_off", "color_hs"],
+      state: {
+        on: true,
+        col: [0, 0, 0, '"></span><img src=x onerror=alert(1)>'],
+      },
+    });
+    expect(body).not.toContain("<img src=x onerror=alert(1)>");
+    expect(body).not.toContain('class="swatch"');
+  });
+
   test("col annotation does not inject HTML for non-numeric elements", async () => {
     const body = await renderDevice({
       name: "LED Strip",

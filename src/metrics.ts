@@ -25,6 +25,7 @@ import type { UsableHeatedBeddingState } from "./heated-bedding-source.ts";
 import {
   clampColorTemp,
   wledBrightnessToHomeKit,
+  wledRgb,
   wledToHomeKit,
   z2mBrightnessToHomeKit,
   z2mFanModeToHomeKit,
@@ -371,11 +372,16 @@ function formatHint(
     value.length >= 3 &&
     capabilities.includes("color_hs")
   ) {
-    const [r, g, b] = value as unknown[];
-    if (typeof r !== "number" || typeof g !== "number" || typeof b !== "number")
+    const [r, g, b, w = 0] = value as unknown[];
+    if (
+      typeof r !== "number" ||
+      typeof g !== "number" ||
+      typeof b !== "number" ||
+      typeof w !== "number"
+    )
       return null;
     return {
-      html: `<span class="swatch" style="background:rgb(${String(r)},${String(g)},${String(b)})"></span>`,
+      html: `<span class="swatch" style="background:rgb(${wledRgb(r, g, b, w).join(",")})"></span>`,
       placement: "key",
     };
   }

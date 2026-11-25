@@ -85,6 +85,30 @@ Each module is independently testable with dependency injection:
   published as sent and stays on the characteristic until the next read or
   Zigbee2MQTT report replaces it. `homeKitSpeedToZ2mFanMode` maps it to the
   nearest step, except that any positive value is at least `low`.
+- **White on `color_hs` lights**: a HomeKit write with zero saturation, with
+  any hue or none, or with hue 228 and saturation 56 (the Home app's white
+  swatch) is a request for white (`isWhite`). `homeKitToZ2m` publishes it as
+  `color_temp`, so that the bulb uses its white LEDs: the device's
+  `whiteColorTemp`, or `DEFAULT_WHITE_COLOR_TEMP` (370 mireds, 2700 K) when
+  the device has none and the state cache holds a `color_temp`, which shows
+  that the bulb has white LEDs. Without either, the write stays a color. The
+  cached `color_temp` is never the value published: while a bulb shows a
+  color, Zigbee2MQTT replaces it with one computed from that color by
+  McCamy's formula, which gives 574 mireds for blue. WLED gets RGB
+  (255, 255, 255); which LEDs light is the strip's Auto White setting. See
+  `doc/color-coalescing.md`.
+- **HomeKit write logs**: the `set-characteristics` listener on the HAP
+  server logs each write request as it arrives, as `HAP write from <address>`
+  with the accessory name, characteristic, and value of every write in it.
+  HAP-NodeJS refuses a value outside a characteristic's range before `onSet`
+  runs, so this line is the only record of such a value. `makePublish` then
+  logs each published write as the coalesced HomeKit payload, the MQTT topic,
+  and the message. Neither Zigbee2MQTT at its `info` level nor the broker
+  records what a controller sent.
+- **WLED color reports**: `<topic>/c` is `#RRGGBB`, or `#WWRRGGBB` with one or
+  two `W` digits when the white channel is lit (`parseWledHexColor`). The
+  cached `col` then has a fourth element, and `wledRgb` adds it to each color
+  channel for HomeKit and for the status page swatch.
 - **MQTT disconnect handling**: `onSet` throws
   `HapStatusError(SERVICE_COMMUNICATION_FAILURE)` when MQTT is disconnected.
 - **Invalid heated bedding messages**: An invalid heated bedding MQTT message
@@ -242,14 +266,14 @@ Each module is independently testable with dependency injection:
 
 ## Capability Mapping
 
-| Capability   | HomeKit Characteristic             | Conversion                |
-| ------------ | ---------------------------------- | ------------------------- |
-| `on_off`     | `Characteristic.On`                | boolean passthrough       |
-| `brightness` | `Characteristic.Brightness`        | Z2M 0–254 ↔ HK 0–100      |
-| `color_temp` | `Characteristic.ColorTemperature`  | mireds, passthrough       |
-| `color_hs`   | `Hue` + `Saturation`               | ranges match, passthrough |
-| `fan`        | `Active` (FanV2 service)           | `fan_state` ON/OFF ↔ 1/0  |
-| `fan_speed`  | `RotationSpeed` + `TargetFanState` | speed thirds, smart=AUTO  |
+| Capability   | HomeKit Characteristic             | Conversion                               |
+| ------------ | ---------------------------------- | ---------------------------------------- |
+| `on_off`     | `Characteristic.On`                | boolean passthrough                      |
+| `brightness` | `Characteristic.Brightness`        | Z2M 0–254 ↔ HK 0–100                     |
+| `color_temp` | `Characteristic.ColorTemperature`  | mireds, passthrough                      |
+| `color_hs`   | `Hue` + `Saturation`               | ranges match; white becomes `color_temp` |
+| `fan`        | `Active` (FanV2 service)           | `fan_state` ON/OFF ↔ 1/0                 |
+| `fan_speed`  | `RotationSpeed` + `TargetFanState` | speed thirds, smart=AUTO                 |
 
 ## Naming Conventions
 
@@ -339,15 +363,15 @@ make lint test
   allowlist through one helper, `rejectUnknownFields`. The objects are the top
   level (`bridge`, `mqtt`, `devices`, `heatedBedding`, `curtains`, `metrics`),
   `bridge`, `mqtt`, `metrics`, each `devices` entry (`name`, `type`, `topic`,
-  `capabilities`, `scenes`), each `scenes` entry (`name`, `id`), and each
-  `heatedBedding` and `curtains` entry. The message gives the section path and the
-  JSON-escaped key, never a value, so a misspelled `mqtt.username` cannot
-  connect anonymously and a misspelled `metrics.bind` cannot leave the status
-  page on every interface. The check runs first in each section, so a
-  misspelled required field is named rather than reported missing, except that
-  `mqtt.password` is checked before it and keeps its own message. A new config
-  key must join its section's allowlist, a `Record` over the interface's keys
-  that the compiler requires to be complete.
+  `capabilities`, `whiteColorTemp`, `scenes`), each `scenes` entry (`name`,
+  `id`), and each `heatedBedding` and `curtains` entry. The message gives the
+  section path and the JSON-escaped key, never a value, so a misspelled
+  `mqtt.username` cannot connect anonymously and a misspelled `metrics.bind`
+  cannot leave the status page on every interface. The check runs first in each
+  section, so a misspelled required field is named rather than reported
+  missing, except that `mqtt.password` is checked before it and keeps its own
+  message. A new config key must join its section's allowlist, a `Record` over
+  the interface's keys that the compiler requires to be complete.
 - MQTT password: only from `mqtt.passwordFile` (strictly decoded UTF-8; a
   leading byte order mark and one trailing line ending, LF or CRLF, removed, so
   a lone trailing CR stays); the environment is never consulted, so a stray
@@ -357,6 +381,9 @@ make lint test
 - `devices`: non-empty array unless `heatedBedding` configures at least one zone;
   a configuration with only heated bedding can omit `devices` or use an empty array
 - Each device: `name`, `topic`, `capabilities` (non-empty, valid values)
+- `whiteColorTemp`: optional integer from 140 to 500 mireds, the HAP
+  `ColorTemperature` range, so that kelvins are rejected; only on a `z2m`
+  device with `color_hs`
 - Scene IDs: positive integers
 - `heatedBedding`: optional array of `name`, `prefix`, `controller`, and exactly
   one of `zone` or `zones`; `zones` lists at least two distinct zones of that

@@ -68,14 +68,27 @@ protocol:
 
 Devices declare capabilities in `config.yaml`:
 
-| Capability   | HomeKit Characteristic             | Z2M Conversion               | WLED Conversion            |
-| ------------ | ---------------------------------- | ---------------------------- | -------------------------- |
-| `on_off`     | `On`                               | boolean, always present      | boolean                    |
-| `brightness` | `Brightness`                       | Z2M 0–254 ↔ HomeKit 0–100    | WLED 0–255 ↔ HomeKit 0–100 |
-| `color_temp` | `ColorTemperature`                 | mireds, no conversion needed | not supported              |
-| `color_hs`   | `Hue` + `Saturation`               | ranges match, no conversion  | HSV ↔ RGB conversion       |
-| `fan`        | `Active` (FanV2)                   | `fan_state` ON/OFF ↔ 1/0     | not supported              |
-| `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ speed thirds    | not supported              |
+| Capability   | HomeKit Characteristic             | Z2M Conversion                           | WLED Conversion            |
+| ------------ | ---------------------------------- | ---------------------------------------- | -------------------------- |
+| `on_off`     | `On`                               | boolean, always present                  | boolean                    |
+| `brightness` | `Brightness`                       | Z2M 0–254 ↔ HomeKit 0–100                | WLED 0–255 ↔ HomeKit 0–100 |
+| `color_temp` | `ColorTemperature`                 | mireds, no conversion needed             | not supported              |
+| `color_hs`   | `Hue` + `Saturation`               | ranges match; white becomes `color_temp` | HSV ↔ RGB conversion       |
+| `fan`        | `Active` (FanV2)                   | `fan_state` ON/OFF ↔ 1/0                 | not supported              |
+| `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ speed thirds                | not supported              |
+
+### White on color lights
+
+HomeKit has no color temperature on a `color_hs` light, so "set the lights
+to white" arrives as a color with zero saturation. For a Zigbee2MQTT light
+that reports a `color_temp`, Hoboken publishes a color temperature instead,
+so that the bulb uses its white LEDs. The temperature is the device's
+`whiteColorTemp` in mireds (1,000,000 / kelvins, from 140 to 500), or 370
+(2700 K) without one. A device with `whiteColorTemp` gets the color
+temperature even before it has reported any state.
+
+A WLED light gets RGB (255, 255, 255). For an RGBW strip, set Auto White
+to "Accurate" in WLED's LED preferences to light the white LEDs alone.
 
 ### Scenes
 
@@ -284,6 +297,7 @@ devices:
   - name: "Bedroom Light"
     topic: "zigbee2mqtt/bedroom_light"
     capabilities: [on_off, brightness, color_hs]
+    # whiteColorTemp: 250 # optional: mireds for "white"; defaults to 370 (2700 K)
 
   - name: "Ceiling Fan"
     topic: "zigbee2mqtt/ceiling_fan"
@@ -313,7 +327,7 @@ the value.
 | `bridge`                   | `name`, `mac`, `pincode`, `port`, `bind`                            |
 | `mqtt`                     | `url`, `username`, `passwordFile`                                   |
 | `metrics`                  | `port`, `bind`                                                      |
-| each `devices` entry       | `name`, `type`, `topic`, `capabilities`, `scenes`                   |
+| each `devices` entry       | `name`, `type`, `topic`, `capabilities`, `whiteColorTemp`, `scenes` |
 | each `scenes` entry        | `name`, `id`                                                        |
 | each `heatedBedding` entry | `name`, `prefix`, `controller`, `zone`, `zones`                     |
 | each `curtains` entry      | `name`, `prefix`, `controller`                                      |
