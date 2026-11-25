@@ -78,7 +78,7 @@ if (key === "color" && typeof pending.color === "object") {
 
 All other keys use shallow merge (last write wins).
 
-## HAP Spec Constraint: No Dual Color Mode
+## Color Temperature Together with Hue and Saturation
 
 HAP specification Release R13, §10.11 (Color Temperature) states:
 
@@ -87,9 +87,16 @@ HAP specification Release R13, §10.11 (Color Temperature) states:
 > in "9.5 Lightbulb". This characteristic must not be used for lamps which
 > support color.
 
-This means `ColorTemperature` and `Hue`/`Saturation` cannot coexist on
-the same Lightbulb service. No major HomeKit bridge (homebridge-hue,
-homebridge-deconz, homebridge-z2m) converts HS→CT on the write path.
+Bridges expose all three on one Lightbulb service anyway: Home Assistant's
+HomeKit bridge (`type_lights.py`), homebridge-hue, homebridge-deconz, and
+homebridge-z2m. HAP-NodeJS documents the combination in
+`AdaptiveLightingController` and does not check for it. None of them
+converts HS→CT on the write path; they rely on the controller writing
+`ColorTemperature`.
+
+Hoboken accepts `color_temp` and `color_hs` together on a Z2M device and
+then exposes all three characteristics. A device with `color_hs` alone
+exposes Hue and Saturation only.
 
 ### HomeKit UI behavior
 
@@ -102,6 +109,12 @@ homebridge-deconz, homebridge-z2m) converts HS→CT on the write path.
 - **Siri "set lights white"**: HomeKit sends Hue=0, Saturation=0. Hue has
   no meaning at zero saturation, so Hoboken reads zero saturation as white
   at any hue, and when Saturation arrives without Hue.
+- **Siri "warm white"** on a light with Hue and Saturation only: HomeKit
+  sends Hue=31, Saturation=33 with On.
+- **Siri "cool white"** on a light with Hue and Saturation only: Siri
+  answers that the light did not respond, and no hue or saturation
+  arrives. Writes of Brightness=100 alone were logged around the
+  requests; which request sent them was not recorded.
 - **Home app "white" swatch** (HS color picker): HomeKit sends Hue=228,
   Saturation=56.
 
@@ -128,29 +141,49 @@ homebridge-deconz, homebridge-z2m) converts HS→CT on the write path.
 
 ### Hoboken's approach
 
-Hoboken forbids combining `color_temp` and `color_hs` capabilities on the
-same device (config validation rejects this). Devices are configured as
-either CT-only or HS-only.
+For `color_hs` devices, when HomeKit sends a recognized "white" request,
+`homeKitToZ2m` converts it to a `color_temp` write. This causes Z2M to
+switch to CT mode so the bulb uses its WW/CW LEDs instead of mixing RGB to
+approximate white. The requests and their temperatures follow Z2M's
+`neutral` and `warm` presets:
 
-For `color_hs` devices, when HomeKit sends a recognized "white" request —
-either zero saturation (Siri's "set lights white" command) or
-Hue=228/Saturation=56 (the Home app's white swatch in the HS color
-picker) — `homeKitToZ2m` converts it to a `color_temp` write. This causes
-Z2M to switch to CT mode so the bulb uses its WW/CW LEDs instead of mixing
-RGB to approximate white.
+| Request               | Hue | Sat | `color_temp`                      |
+| --------------------- | --- | --- | --------------------------------- |
+| Siri "white"          | any | 0   | `whiteColorTemp`, or 370 (2700 K) |
+| Home app white swatch | 228 | 56  | `whiteColorTemp`, or 370 (2700 K) |
+| Siri "warm white"     | 31  | 33  | 454 (2200 K)                      |
 
-The temperature is the device's `whiteColorTemp`, in mireds, or 370
-(2700 K) when the device has none. It is never the `color_temp` in the
-state cache, because that value follows the last color, as described
-above. Reusing it made "white" after blue the warmest setting the bulb
-has.
+The temperature is never the `color_temp` in the state cache, because
+that value follows the last color, as described above. Reusing it made
+"white" after blue the warmest setting the bulb has.
 
-A device without `whiteColorTemp` is converted only when the state cache
-contains a `color_temp` value, confirming that the device has CCT
-hardware. RGB-only devices never report `color_temp` in their state, so
-these white requests pass through as normal HS writes for those devices.
-A device with `whiteColorTemp` is converted even before its first state
-report.
+A request is converted only for a device that has white LEDs: one with
+`whiteColorTemp`, one with the `color_temp` capability, or one whose state
+cache contains a `color_temp` value. RGB-only devices never report
+`color_temp` in their state, so these requests pass through as normal HS
+writes for those devices. A device with `whiteColorTemp` or the
+`color_temp` capability is converted even before its first state report.
+
+A write that carries `ColorTemperature` as well as Hue or Saturation
+publishes only `color_temp`, as Home Assistant does, because Z2M would
+send the bulb one command for each and the last would win.
+
+On the read path, `z2mToHomeKit` reports only the fields of the active
+`color_mode`, as homebridge-z2m does. In `"color_temp"` mode it reports
+the temperature, and for Hue and Saturation the values of HAP-NodeJS's
+`ColorUtils.colorTemperatureToHueAndSaturation`, which is how HomeKit
+itself shows a temperature: (27, 42) for 370 mireds, where Z2M reports
+(32, 82). In `"hs"` or `"xy"` mode it reports the color and leaves out
+`color_temp`, so `ColorTemperature` keeps its last value. A state without
+`color_mode` passes through unchanged. An update is read against the
+merged state, so one that carries only `color_mode` still switches what
+HomeKit shows.
+
+A `ColorTemperature` write also sets Hue and Saturation from the same
+table, because HomeKit shows a light's color from those two and the state
+report that follows the write is suppressed, as described below.
+`updateAccessoryState` sets Hue and Saturation before `ColorTemperature`;
+Home Assistant's bridge notes that iOS otherwise shows the wrong color.
 
 Each HAP write request is logged as it arrives, and each published write
 is logged with its payload, so the log shows which values a controller
@@ -245,9 +278,9 @@ color selection popup. Converting all the values from this would
 require reverse-engineering what path in color space the slider is
 traversing.
 
-Currently only zero saturation (Siri's "set lights white") and
-H=228/S=56 (the Home app's white swatch) are converted. The five preset
-values above are not yet handled.
+Currently only zero saturation (Siri's "set lights white"), H=228/S=56
+(the Home app's white swatch), and H=31/S=33 (Siri's "warm white") are
+converted. The five preset values above are not yet handled.
 
 ### WLED white channel
 

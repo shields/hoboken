@@ -18,6 +18,7 @@ import {
   homeKitToWled,
   homeKitToZ2m,
   DEFAULT_WHITE_COLOR_TEMP,
+  WARM_WHITE_COLOR_TEMP,
   isWhite,
   homeKitBrightnessToZ2M,
   homeKitBrightnessToWled,
@@ -409,6 +410,85 @@ describe("z2mToHomeKit", () => {
     });
   });
 
+  test("in color_temp mode, reports HomeKit's hue and saturation for the temperature", () => {
+    expect(
+      z2mToHomeKit({
+        color: { hue: 32, saturation: 82, x: 0.4599, y: 0.4106 },
+        color_mode: "color_temp",
+        color_temp: 370,
+      }),
+    ).toEqual({ color_temp: 370, hue: 27, saturation: 42 });
+  });
+
+  test("in color_temp mode, a temperature outside HomeKit's range uses the nearest", () => {
+    expect(z2mToHomeKit({ color_mode: "color_temp", color_temp: 574 })).toEqual(
+      { color_temp: 574, hue: 28, saturation: 64 },
+    );
+  });
+
+  test.each(["hs", "xy"])(
+    "in %s mode, leaves out the color_temp derived from the color",
+    (mode) => {
+      expect(
+        z2mToHomeKit({
+          color: { hue: 240, saturation: 100, x: 0.1355, y: 0.0399 },
+          color_mode: mode,
+          color_temp: 574,
+        }),
+      ).toEqual({ hue: 240, saturation: 100 });
+    },
+  );
+
+  test("in color_temp mode without a numeric color_temp, passes the color through", () => {
+    expect(
+      z2mToHomeKit({
+        color: { hue: 10, saturation: 20 },
+        color_mode: "color_temp",
+        color_temp: null,
+      }),
+    ).toEqual({ hue: 10, saturation: 20 });
+  });
+
+  describe("with the merged state", () => {
+    const white = {
+      brightness: 254,
+      color: { hue: 32, saturation: 82 },
+      color_mode: "color_temp",
+      color_temp: 370,
+    };
+
+    test("an update without color fields reports no color", () => {
+      expect(z2mToHomeKit({ brightness: 254 }, white)).toEqual({
+        brightness: 100,
+      });
+    });
+
+    test.each([
+      { color_mode: "color_temp" },
+      { color_temp: 370 },
+      { color: { hue: 32, saturation: 82 } },
+    ])("an update with only %j reports the whole color state", (partial) => {
+      expect(z2mToHomeKit(partial, white)).toEqual({
+        color_temp: 370,
+        hue: 27,
+        saturation: 42,
+      });
+    });
+
+    test("an update takes the color mode from the merged state", () => {
+      expect(
+        z2mToHomeKit(
+          { color: { hue: 240, saturation: 100 } },
+          {
+            color: { hue: 240, saturation: 100 },
+            color_mode: "hs",
+            color_temp: 574,
+          },
+        ),
+      ).toEqual({ hue: 240, saturation: 100 });
+    });
+  });
+
   test("ignores color object without hue/saturation", () => {
     expect(z2mToHomeKit({ color: { x: 0.3, y: 0.5 } })).toEqual({});
   });
@@ -594,15 +674,25 @@ describe("homeKitToZ2m", () => {
 
   test("white sends the configured color temperature", () => {
     expect(
-      homeKitToZ2m({ hue: 0, saturation: 0 }, { color_temp: 574 }, 250),
+      homeKitToZ2m(
+        { hue: 0, saturation: 0 },
+        { color_temp: 574 },
+        { whiteColorTemp: 250 },
+      ),
     ).toEqual({ color_temp: 250 });
   });
 
   test("a configured white needs no cached color_temp", () => {
-    expect(homeKitToZ2m({ hue: 0, saturation: 0 }, undefined, 250)).toEqual({
+    expect(
+      homeKitToZ2m({ hue: 0, saturation: 0 }, undefined, {
+        whiteColorTemp: 250,
+      }),
+    ).toEqual({
       color_temp: 250,
     });
-    expect(homeKitToZ2m({ hue: 228, saturation: 56 }, {}, 250)).toEqual({
+    expect(
+      homeKitToZ2m({ hue: 228, saturation: 56 }, {}, { whiteColorTemp: 250 }),
+    ).toEqual({
       color_temp: 250,
     });
   });
@@ -626,15 +716,72 @@ describe("homeKitToZ2m", () => {
   });
 
   test("hue alone is a color even when it is zero", () => {
-    expect(homeKitToZ2m({ hue: 0 }, { color_temp: 300 }, 250)).toEqual({
+    expect(
+      homeKitToZ2m({ hue: 0 }, { color_temp: 300 }, { whiteColorTemp: 250 }),
+    ).toEqual({
       color: { hue: 0 },
     });
   });
 
   test("a color near white stays a color", () => {
     expect(
-      homeKitToZ2m({ hue: 30, saturation: 5 }, { color_temp: 300 }, 250),
+      homeKitToZ2m(
+        { hue: 30, saturation: 5 },
+        { color_temp: 300 },
+        { whiteColorTemp: 250 },
+      ),
     ).toEqual({ color: { hue: 30, saturation: 5 } });
+  });
+
+  test("warm white (H=31/S=33) sends 2200 K", () => {
+    expect(WARM_WHITE_COLOR_TEMP).toBe(454);
+    expect(
+      homeKitToZ2m({ hue: 31, saturation: 33 }, { color_temp: 300 }),
+    ).toEqual({ color_temp: WARM_WHITE_COLOR_TEMP });
+  });
+
+  test("warm white ignores whiteColorTemp", () => {
+    expect(
+      homeKitToZ2m({ hue: 31, saturation: 33 }, undefined, {
+        whiteColorTemp: 250,
+      }),
+    ).toEqual({ color_temp: WARM_WHITE_COLOR_TEMP });
+  });
+
+  test("warm white without white LEDs stays a color", () => {
+    expect(homeKitToZ2m({ hue: 31, saturation: 33 })).toEqual({
+      color: { hue: 31, saturation: 33 },
+    });
+  });
+
+  test("the color_temp capability shows white LEDs before any state arrives", () => {
+    const light = { capabilities: ["on_off", "color_temp", "color_hs"] };
+    expect(homeKitToZ2m({ hue: 0, saturation: 0 }, undefined, light)).toEqual({
+      color_temp: DEFAULT_WHITE_COLOR_TEMP,
+    });
+    expect(homeKitToZ2m({ hue: 31, saturation: 33 }, undefined, light)).toEqual(
+      { color_temp: WARM_WHITE_COLOR_TEMP },
+    );
+  });
+
+  test("other capabilities do not show white LEDs", () => {
+    expect(
+      homeKitToZ2m({ hue: 0, saturation: 0 }, undefined, {
+        capabilities: ["on_off", "color_hs"],
+      }),
+    ).toEqual({ color: { hue: 0, saturation: 0 } });
+  });
+
+  test("a color temperature wins over a color in the same write", () => {
+    expect(
+      homeKitToZ2m(
+        { color_temp: 250, hue: 240, saturation: 100 },
+        { color_temp: 300 },
+      ),
+    ).toEqual({ color_temp: 250 });
+    expect(homeKitToZ2m({ color_temp: 250, hue: 0, saturation: 0 })).toEqual({
+      color_temp: 250,
+    });
   });
 
   test("white keeps the other fields of the write", () => {

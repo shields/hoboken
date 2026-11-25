@@ -387,7 +387,7 @@ export async function startBridge(
       publish: (device: DeviceConfig) =>
         makePublish(
           device,
-          (p, raw) => homeKitToZ2m(p, raw, device.whiteColorTemp),
+          (p, raw) => homeKitToZ2m(p, raw, device),
           z2mSetTopic,
         ),
       toHomeKit: z2mToHomeKit,
@@ -667,7 +667,7 @@ export async function startBridge(
     const lastPub = lastColorPublish.get(deviceTopic);
     const suppressing =
       lastPub !== undefined && Date.now() - lastPub < WRITE_BACK_SUPPRESSION_MS;
-    const hkState = protocols[entry.device.type].toHomeKit(rawPartial);
+    const hkState = protocols[entry.device.type].toHomeKit(rawPartial, merged);
     if (suppressing) {
       delete hkState.hue;
       delete hkState.saturation;

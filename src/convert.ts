@@ -12,13 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// 2700 K in mireds.
+// HAP-NodeJS's entry point fails to load under Bun without test/preload.ts,
+// which demo/screenshot.ts does not have when it renders the status page.
+import { ColorUtils } from "@homebridge/hap-nodejs/dist/lib/util/color-utils.js";
+
+// Zigbee2MQTT's "neutral" and "warm" presets: 2700 K and 2200 K in mireds.
 export const DEFAULT_WHITE_COLOR_TEMP = 370;
+export const WARM_WHITE_COLOR_TEMP = 454;
 
 // Siri's "white" is zero saturation, where hue has no meaning. Apple Home
 // sends H=228 S=56 when selecting "white" on a color_hs light.
 export function isWhite(h: number | undefined, s: number | undefined): boolean {
   return s === 0 || (h === 228 && s === 56);
+}
+
+// Siri's "warm white".
+function isWarmWhite(h: number | undefined, s: number | undefined): boolean {
+  return h === 31 && s === 33;
 }
 
 export function z2mBrightnessToHomeKit(z2m: number): number {
@@ -142,17 +152,38 @@ export interface HomeKitState {
   target_fan_state?: number;
 }
 
-export function z2mToHomeKit(raw: RawState): HomeKitState {
+// Zigbee2MQTT keeps reporting the fields of the color mode that is not active:
+// in "hs" or "xy" mode a color_temp derived from the color, and in "color_temp"
+// mode a color derived from the temperature. Only the active mode's fields
+// describe the bulb, and HomeKit shows a temperature as the hue and saturation
+// of ColorUtils.
+function z2mColorToHomeKit(state: RawState): HomeKitState {
+  const hk: HomeKitState = {};
+  const { color_mode: mode, color_temp: colorTemp } = state;
+  if (mode === "color_temp" && typeof colorTemp === "number") {
+    hk.color_temp = colorTemp;
+    Object.assign(
+      hk,
+      ColorUtils.colorTemperatureToHueAndSaturation(clampColorTemp(colorTemp)),
+    );
+    return hk;
+  }
+  if ("color_temp" in state && typeof mode !== "string")
+    hk.color_temp = colorTemp as number;
+  const color = state.color as Record<string, unknown> | null | undefined;
+  if (typeof color?.hue === "number") hk.hue = color.hue;
+  if (typeof color?.saturation === "number") hk.saturation = color.saturation;
+  return hk;
+}
+
+// `merged` is the whole cached state when `raw` is one update to it.
+export function z2mToHomeKit(raw: RawState, merged = raw): HomeKitState {
   const hk: HomeKitState = {};
   if ("state" in raw) hk.on = raw.state === "ON";
   if ("brightness" in raw)
     hk.brightness = z2mBrightnessToHomeKit(raw.brightness as number);
-  if ("color_temp" in raw) hk.color_temp = raw.color_temp as number;
-  if ("color" in raw) {
-    const color = raw.color as Record<string, unknown> | null;
-    if (typeof color?.hue === "number") hk.hue = color.hue;
-    if (typeof color?.saturation === "number") hk.saturation = color.saturation;
-  }
+  if ("color" in raw || "color_temp" in raw || "color_mode" in raw)
+    Object.assign(hk, z2mColorToHomeKit(merged));
   if ("fan_state" in raw) hk.active = raw.fan_state === "ON" ? 1 : 0;
   if ("fan_mode" in raw) {
     const fanHk = z2mFanModeToHomeKit(raw.fan_mode as string);
@@ -191,32 +222,31 @@ export function wledToHomeKit(raw: RawState): HomeKitState {
 export function homeKitToZ2m(
   payload: Record<string, unknown>,
   cachedRaw?: RawState,
-  whiteColorTemp?: number,
+  light: { whiteColorTemp?: number; capabilities?: readonly string[] } = {},
 ): Record<string, unknown> {
   const z2m: Record<string, unknown> = {};
 
   if ("on" in payload) z2m.state = payload.on ? "ON" : "OFF";
   if ("brightness" in payload)
     z2m.brightness = homeKitBrightnessToZ2M(payload.brightness as number);
-  if ("color_temp" in payload) z2m.color_temp = payload.color_temp;
-
-  if ("hue" in payload || "saturation" in payload) {
+  if ("color_temp" in payload) {
+    // Zigbee2MQTT sends a command for each of color_temp and color, so a
+    // write with both publishes only the temperature.
+    z2m.color_temp = payload.color_temp;
+  } else if ("hue" in payload || "saturation" in payload) {
+    const h = payload.hue as number | undefined;
+    const s = payload.saturation as number | undefined;
     // Never the cached color_temp: while a bulb shows a color, Zigbee2MQTT
     // reports a color_temp derived from that color. A reported color_temp only
     // shows that the bulb has white LEDs.
-    const white =
-      whiteColorTemp ??
-      (cachedRaw?.color_temp === undefined
-        ? undefined
-        : DEFAULT_WHITE_COLOR_TEMP);
-    if (
-      white !== undefined &&
-      isWhite(
-        payload.hue as number | undefined,
-        payload.saturation as number | undefined,
-      )
-    ) {
-      z2m.color_temp = white;
+    const whiteLEDs =
+      light.whiteColorTemp !== undefined ||
+      light.capabilities?.includes("color_temp") === true ||
+      cachedRaw?.color_temp !== undefined;
+    if (whiteLEDs && isWhite(h, s)) {
+      z2m.color_temp = light.whiteColorTemp ?? DEFAULT_WHITE_COLOR_TEMP;
+    } else if (whiteLEDs && isWarmWhite(h, s)) {
+      z2m.color_temp = WARM_WHITE_COLOR_TEMP;
     } else {
       const color: Record<string, unknown> = {};
       if ("hue" in payload) color.hue = payload.hue;

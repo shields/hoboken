@@ -79,13 +79,20 @@ Devices declare capabilities in `config.yaml`:
 
 ### White on color lights
 
-HomeKit has no color temperature on a `color_hs` light, so "set the lights
-to white" arrives as a color with zero saturation. For a Zigbee2MQTT light
-that reports a `color_temp`, Hoboken publishes a color temperature instead,
-so that the bulb uses its white LEDs. The temperature is the device's
+"Set the lights to white" arrives from HomeKit as a color with zero
+saturation, and "warm white" as hue 31 and saturation 33. For a Zigbee2MQTT
+light that reports a `color_temp`, Hoboken publishes a color temperature
+instead, so that the bulb uses its white LEDs. White is the device's
 `whiteColorTemp` in mireds (1,000,000 / kelvins, from 140 to 500), or 370
-(2700 K) without one. A device with `whiteColorTemp` gets the color
-temperature even before it has reported any state.
+(2700 K) without one, and warm white is 454 (2200 K). A device with
+`whiteColorTemp` or the `color_temp` capability gets the color temperature
+even before it has reported any state.
+
+A Zigbee2MQTT light can have `color_temp` and `color_hs` together. HomeKit
+then gets a color temperature as well as a color, and a request that sets
+both publishes the color temperature. The HomeKit specification does not
+allow the combination, but Home Assistant and the Homebridge plugins for
+Hue, deCONZ, and Zigbee2MQTT use it.
 
 A WLED light gets RGB (255, 255, 255). For an RGBW strip, set Auto White
 to "Accurate" in WLED's LED preferences to light the white LEDs alone.

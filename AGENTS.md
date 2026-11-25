@@ -87,16 +87,32 @@ Each module is independently testable with dependency injection:
   nearest step, except that any positive value is at least `low`.
 - **White on `color_hs` lights**: a HomeKit write with zero saturation, with
   any hue or none, or with hue 228 and saturation 56 (the Home app's white
-  swatch) is a request for white (`isWhite`). `homeKitToZ2m` publishes it as
-  `color_temp`, so that the bulb uses its white LEDs: the device's
-  `whiteColorTemp`, or `DEFAULT_WHITE_COLOR_TEMP` (370 mireds, 2700 K) when
-  the device has none and the state cache holds a `color_temp`, which shows
-  that the bulb has white LEDs. Without either, the write stays a color. The
-  cached `color_temp` is never the value published: while a bulb shows a
-  color, Zigbee2MQTT replaces it with one computed from that color by
-  McCamy's formula, which gives 574 mireds for blue. WLED gets RGB
+  swatch) is a request for white (`isWhite`), and one with hue 31 and
+  saturation 33 is Siri's "warm white". `homeKitToZ2m` publishes each as
+  `color_temp`, so that the bulb uses its white LEDs: white as the device's
+  `whiteColorTemp` or `DEFAULT_WHITE_COLOR_TEMP` (370 mireds, 2700 K), and
+  warm white as `WARM_WHITE_COLOR_TEMP` (454, 2200 K), which are
+  Zigbee2MQTT's `neutral` and `warm` presets. It does so only for a device
+  with white LEDs: one with `whiteColorTemp`, with the `color_temp`
+  capability, or with a `color_temp` in the state cache. Otherwise the write
+  stays a color. The cached `color_temp` is never the value published: while
+  a bulb shows a color, Zigbee2MQTT replaces it with one computed from that
+  color by McCamy's formula, which gives 574 mireds for blue. WLED gets RGB
   (255, 255, 255); which LEDs light is the strip's Auto White setting. See
   `doc/color-coalescing.md`.
+- **`color_temp` with `color_hs`**: a Z2M light may have both, against HAP
+  R13 §10.11 but as Home Assistant, homebridge-hue, and homebridge-z2m do. A
+  write with `ColorTemperature` and Hue or Saturation publishes only
+  `color_temp`. `z2mToHomeKit` reports only the active `color_mode`'s
+  fields: in `color_temp` mode the temperature and the hue and saturation
+  that `ColorUtils.colorTemperatureToHueAndSaturation` gives for it, in `hs`
+  or `xy` mode the color without `color_temp`, and everything when there is
+  no `color_mode`. It reads an update against the merged state. A
+  characteristic whose field the state lacks reads as its last value. A
+  `ColorTemperature` write sets Hue and Saturation from the same table.
+  `convert.ts` imports `ColorUtils` from its own file in HAP-NodeJS, because
+  the package's entry point does not load under Bun without
+  `test/preload.ts` and `demo/screenshot.ts` loads `metrics.ts` that way.
 - **HomeKit write logs**: the `set-characteristics` listener on the HAP
   server logs each write request as it arrives, as `HAP write from <address>`
   with the accessory name, characteristic, and value of every write in it.
@@ -275,6 +291,8 @@ Each module is independently testable with dependency injection:
 | `fan`        | `Active` (FanV2 service)           | `fan_state` ON/OFF ↔ 1/0                 |
 | `fan_speed`  | `RotationSpeed` + `TargetFanState` | speed thirds, smart=AUTO                 |
 
+`color_temp` and `color_hs` may be combined on a Z2M light, not on a WLED one.
+
 ## Naming Conventions
 
 - Prefer writing out "homekit" (e.g. `homeKitToZ2m`, `HomeKitState`,
@@ -380,7 +398,9 @@ make lint test
   65535 bytes) password fails startup. Messages never contain the password.
 - `devices`: non-empty array unless `heatedBedding` configures at least one zone;
   a configuration with only heated bedding can omit `devices` or use an empty array
-- Each device: `name`, `topic`, `capabilities` (non-empty, valid values)
+- Each device: `name`, `topic`, `capabilities` (non-empty, valid values);
+  a `wled` device cannot have both `color_temp` and `color_hs`, because WLED
+  has no color temperature to write or report
 - `whiteColorTemp`: optional integer from 140 to 500 mireds, the HAP
   `ColorTemperature` range, so that kelvins are rejected; only on a `z2m`
   device with `color_hs`

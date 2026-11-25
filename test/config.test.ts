@@ -682,7 +682,7 @@ describe("validateConfig", () => {
     expect(config.devices[0]!.scenes).toBeUndefined();
   });
 
-  test("rejects color_temp + color_hs combo", () => {
+  test("accepts color_temp with color_hs", () => {
     const data = validConfig();
     data.devices[0]!.capabilities = [
       "on_off",
@@ -690,9 +690,12 @@ describe("validateConfig", () => {
       "color_temp",
       "color_hs",
     ];
-    expect(() => validateConfig(data)).toThrow(
-      "color_temp and color_hs cannot be combined (HAP spec R13 §10.11)",
-    );
+    expect(validateConfig(data).devices[0]!.capabilities).toEqual([
+      "on_off",
+      "brightness",
+      "color_temp",
+      "color_hs",
+    ]);
   });
 
   test("accepts color_hs without color_temp", () => {
@@ -1435,6 +1438,16 @@ describe("validateConfig", () => {
     delete (data.devices[0]! as Record<string, unknown>).scenes;
     expect(() => validateConfig(data)).toThrow(
       "fan capabilities are not supported for WLED devices",
+    );
+  });
+
+  test("rejects WLED device with color_temp and color_hs", () => {
+    const data = validConfig();
+    (data.devices[0]! as Record<string, unknown>).type = "wled";
+    data.devices[0]!.capabilities = ["on_off", "color_temp", "color_hs"];
+    delete (data.devices[0]! as Record<string, unknown>).scenes;
+    expect(() => validateConfig(data)).toThrow(
+      "color_temp and color_hs cannot be combined for WLED devices",
     );
   });
 

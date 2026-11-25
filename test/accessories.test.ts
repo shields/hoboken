@@ -192,6 +192,23 @@ describe("createLightAccessory", () => {
     expect(value).toBe(350);
   });
 
+  test("onGet returns the last value for a field the state lacks", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
+    const accessory = createLightAccessory(device, publish, getState);
+    const ct = accessory
+      .getService(Service.Lightbulb)!
+      .getCharacteristic(Characteristic.ColorTemperature);
+
+    stateMap.set("test_light", { on: true });
+    expect(await ct.handleGetRequest()).toBe(140);
+
+    updateAccessoryState(accessory, { color_temp: 350 }, [
+      "on_off",
+      "color_temp",
+    ]);
+    expect(await ct.handleGetRequest()).toBe(350);
+  });
+
   test("onGet color_temp clamps out-of-range cached value", async () => {
     const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
     const accessory = createLightAccessory(device, publish, getState);
@@ -295,6 +312,40 @@ describe("createLightAccessory", () => {
     ct.setValue(250);
     await flush();
     expect(publish).toHaveBeenCalledWith("test_light", { color_temp: 250 });
+  });
+
+  test("a color temperature write on a color light sets HomeKit's hue and saturation for it", async () => {
+    const device = makeDevice({
+      capabilities: ["on_off", "color_temp", "color_hs"],
+    });
+    const service = createLightAccessory(device, publish, getState).getService(
+      Service.Lightbulb,
+    )!;
+    const hue = service.getCharacteristic(Characteristic.Hue);
+    const saturation = service.getCharacteristic(Characteristic.Saturation);
+    hue.updateValue(240);
+    saturation.updateValue(100);
+
+    service.getCharacteristic(Characteristic.ColorTemperature).setValue(370);
+    await flush();
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith("test_light", { color_temp: 370 });
+    expect(hue.value).toBe(27);
+    expect(saturation.value).toBe(42);
+  });
+
+  test("a color temperature write without color_hs adds no hue", async () => {
+    const device = makeDevice({ capabilities: ["on_off", "color_temp"] });
+    const service = createLightAccessory(device, publish, getState).getService(
+      Service.Lightbulb,
+    )!;
+
+    service.getCharacteristic(Characteristic.ColorTemperature).setValue(370);
+    await flush();
+
+    expect(service.testCharacteristic(Characteristic.Hue)).toBe(false);
+    expect(service.testCharacteristic(Characteristic.Saturation)).toBe(false);
   });
 
   test("onSet hue publishes top-level hue", async () => {
@@ -657,6 +708,37 @@ describe("updateAccessoryState", () => {
       .getCharacteristic(Characteristic.Saturation);
     expect(hue.value).toBe(200);
     expect(sat.value).toBe(80);
+  });
+
+  test("updates hue and saturation before the color temperature", () => {
+    const capabilities: DeviceConfig["capabilities"] = [
+      "on_off",
+      "color_temp",
+      "color_hs",
+    ];
+    const accessory = createLightAccessory(
+      makeDevice({ capabilities }),
+      publish,
+      getState,
+    );
+    const service = accessory.getService(Service.Lightbulb)!;
+    const order: string[] = [];
+    for (const characteristic of [
+      Characteristic.ColorTemperature,
+      Characteristic.Hue,
+      Characteristic.Saturation,
+    ]) {
+      const c = service.getCharacteristic(characteristic);
+      c.on("change", () => order.push(c.displayName));
+    }
+
+    updateAccessoryState(
+      accessory,
+      { color_temp: 370, hue: 27, saturation: 42 },
+      capabilities,
+    );
+
+    expect(order).toEqual(["Hue", "Saturation", "Color Temperature"]);
   });
 
   test("skips characteristics not in capabilities", () => {

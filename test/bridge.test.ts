@@ -1317,6 +1317,151 @@ describe("startBridge", () => {
     await shutdown();
   });
 
+  describe("a light with color_temp and color_hs", () => {
+    const TOPIC = "zigbee2mqtt/dual_light";
+
+    async function startDual() {
+      const cfg: Config = {
+        ...testConfig(),
+        devices: [
+          {
+            name: "Dual Light",
+            type: "z2m",
+            topic: TOPIC,
+            capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+          },
+        ],
+      };
+      const { bridge, shutdown } = await startBridge(cfg, VERSION);
+      mockClient.connected = true;
+      mockClient.emit("connect");
+      const service = bridge.bridgedAccessories
+        .find((a) => a.displayName === "Dual Light")!
+        .getService(Service.Lightbulb)!;
+      const value = (characteristic: typeof Characteristic.Hue) =>
+        service.getCharacteristic(characteristic).value;
+      const report = (state: Record<string, unknown>) => {
+        mockClient.emit("message", TOPIC, Buffer.from(JSON.stringify(state)));
+      };
+      const sets = () =>
+        mockClient.published
+          .filter((p) => p.topic === `${TOPIC}/set`)
+          .map((p) => JSON.parse(p.message) as unknown);
+      return { service, value, report, sets, shutdown };
+    }
+
+    test("in color_temp mode, shows the temperature and HomeKit's color for it", async () => {
+      const { value, report, shutdown } = await startDual();
+      report({
+        state: "ON",
+        color: { hue: 32, saturation: 82, x: 0.4599, y: 0.4106 },
+        color_mode: "color_temp",
+        color_temp: 370,
+      });
+
+      expect(value(Characteristic.ColorTemperature)).toBe(370);
+      expect(value(Characteristic.Hue)).toBe(27);
+      expect(value(Characteristic.Saturation)).toBe(42);
+
+      await shutdown();
+    });
+
+    test("in a color mode, shows the color and keeps the last temperature", async () => {
+      const { value, report, shutdown } = await startDual();
+      report({ color_mode: "color_temp", color_temp: 250 });
+      report({
+        color: { hue: 240, saturation: 100, x: 0.1355, y: 0.0399 },
+        color_mode: "xy",
+        color_temp: 574,
+      });
+
+      expect(value(Characteristic.Hue)).toBe(240);
+      expect(value(Characteristic.Saturation)).toBe(100);
+      expect(value(Characteristic.ColorTemperature)).toBe(250);
+
+      await shutdown();
+    });
+
+    test("an update that changes only the mode shows the new mode's state", async () => {
+      const { value, report, shutdown } = await startDual();
+      report({
+        color: { hue: 240, saturation: 100 },
+        color_mode: "hs",
+        color_temp: 370,
+      });
+      report({ color_mode: "color_temp" });
+
+      expect(value(Characteristic.ColorTemperature)).toBe(370);
+      expect(value(Characteristic.Hue)).toBe(27);
+      expect(value(Characteristic.Saturation)).toBe(42);
+
+      await shutdown();
+    });
+
+    test("a color temperature write publishes color_temp and shows its color", async () => {
+      const { service, value, sets, shutdown } = await startDual();
+      service.getCharacteristic(Characteristic.ColorTemperature).setValue(250);
+      await flush();
+
+      expect(sets()).toEqual([{ color_temp: 250 }]);
+      expect(value(Characteristic.Hue)).toBe(27);
+      expect(value(Characteristic.Saturation)).toBe(21);
+
+      await shutdown();
+    });
+
+    test("a write with a color temperature and a color publishes the temperature", async () => {
+      const { service, sets, shutdown } = await startDual();
+      service.getCharacteristic(Characteristic.Hue).setValue(240);
+      service.getCharacteristic(Characteristic.Saturation).setValue(100);
+      service.getCharacteristic(Characteristic.ColorTemperature).setValue(250);
+      await flush();
+
+      expect(sets()).toEqual([{ color_temp: 250 }]);
+
+      await shutdown();
+    });
+
+    test("white and warm white publish a temperature before any state arrives", async () => {
+      const { service, sets, shutdown } = await startDual();
+      service.getCharacteristic(Characteristic.Hue).setValue(0);
+      service.getCharacteristic(Characteristic.Saturation).setValue(0);
+      await flush();
+      service.getCharacteristic(Characteristic.Hue).setValue(31);
+      service.getCharacteristic(Characteristic.Saturation).setValue(33);
+      await flush();
+
+      expect(sets()).toEqual([{ color_temp: 370 }, { color_temp: 454 }]);
+
+      await shutdown();
+    });
+
+    test("reads the active mode's state", async () => {
+      const { service, report, shutdown } = await startDual();
+      const get = async (characteristic: typeof Characteristic.Hue) =>
+        await service.getCharacteristic(characteristic).handleGetRequest();
+      report({
+        color: { hue: 32, saturation: 82 },
+        color_mode: "color_temp",
+        color_temp: 370,
+      });
+      expect(await get(Characteristic.ColorTemperature)).toBe(370);
+      expect(await get(Characteristic.Hue)).toBe(27);
+      expect(await get(Characteristic.Saturation)).toBe(42);
+
+      report({
+        color: { hue: 240, saturation: 100 },
+        color_mode: "hs",
+        color_temp: 574,
+      });
+      expect(await get(Characteristic.Hue)).toBe(240);
+      expect(await get(Characteristic.Saturation)).toBe(100);
+      expect(await get(Characteristic.ColorTemperature)).toBe(370);
+
+      await shutdown();
+    });
+  });
+
   test("logs each HomeKit write with the payload it publishes", async () => {
     const cfg: Config = {
       ...testConfig(),

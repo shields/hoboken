@@ -16,6 +16,7 @@ import {
   Accessory,
   Categories,
   Characteristic,
+  ColorUtils,
   HAPStatus,
   HapStatusError,
   Service,
@@ -95,7 +96,6 @@ export function createLightAccessory(
     service,
     Characteristic.On,
     "on",
-    false,
     setPayload,
     getState,
     device.topic,
@@ -106,7 +106,6 @@ export function createLightAccessory(
       service,
       Characteristic.Brightness,
       "brightness",
-      0,
       setPayload,
       getState,
       device.topic,
@@ -118,7 +117,6 @@ export function createLightAccessory(
       service,
       Characteristic.ColorTemperature,
       "color_temp",
-      140,
       setPayload,
       getState,
       device.topic,
@@ -127,24 +125,37 @@ export function createLightAccessory(
   }
 
   if (device.capabilities.includes("color_hs")) {
-    addSimpleCharacteristic(
+    const hue = addSimpleCharacteristic(
       service,
       Characteristic.Hue,
       "hue",
-      0,
       setPayload,
       getState,
       device.topic,
     );
-    addSimpleCharacteristic(
+    const saturation = addSimpleCharacteristic(
       service,
       Characteristic.Saturation,
       "saturation",
-      0,
       setPayload,
       getState,
       device.topic,
     );
+
+    if (device.capabilities.includes("color_temp")) {
+      // HomeKit shows a light's color from Hue and Saturation alone, and the
+      // report that follows a write is suppressed, so the write sets them.
+      service
+        .getCharacteristic(Characteristic.ColorTemperature)
+        .onSet((value) => {
+          setPayload({ color_temp: value });
+          const color = ColorUtils.colorTemperatureToHueAndSaturation(
+            Number(value),
+          );
+          hue.updateValue(color.hue);
+          saturation.updateValue(color.saturation);
+        });
+    }
   }
 
   return accessory;
@@ -173,7 +184,6 @@ export function createFanAccessory(
     service,
     Characteristic.Active,
     "active",
-    0,
     setPayload,
     getState,
     device.topic,
@@ -184,7 +194,6 @@ export function createFanAccessory(
       service,
       Characteristic.RotationSpeed,
       "rotation_speed",
-      0,
       setPayload,
       getState,
       device.topic,
@@ -193,7 +202,6 @@ export function createFanAccessory(
       service,
       Characteristic.TargetFanState,
       "target_fan_state",
-      0,
       setPayload,
       getState,
       device.topic,
@@ -288,12 +296,6 @@ export function updateAccessoryState(
       .updateValue(state.brightness);
   }
 
-  if (capabilities.includes("color_temp") && state.color_temp !== undefined) {
-    service
-      .getCharacteristic(Characteristic.ColorTemperature)
-      .updateValue(clampColorTemp(state.color_temp));
-  }
-
   if (capabilities.includes("color_hs") && state.hue !== undefined) {
     service.getCharacteristic(Characteristic.Hue).updateValue(state.hue);
   }
@@ -303,13 +305,20 @@ export function updateAccessoryState(
       .getCharacteristic(Characteristic.Saturation)
       .updateValue(state.saturation);
   }
+
+  // After Hue and Saturation: Home Assistant's HomeKit bridge reports that iOS
+  // otherwise shows the wrong color.
+  if (capabilities.includes("color_temp") && state.color_temp !== undefined) {
+    service
+      .getCharacteristic(Characteristic.ColorTemperature)
+      .updateValue(clampColorTemp(state.color_temp));
+  }
 }
 
 function addSimpleCharacteristic(
   service: Service,
   characteristicClass: { UUID: string } & (new () => Characteristic),
   key: keyof HomeKitState,
-  defaultValue: boolean | number,
   setPayload: SetPayloadFn,
   getState: GetStateFn,
   topic: string,
@@ -321,7 +330,9 @@ function addSimpleCharacteristic(
     const state = getState(topic);
     if (!state)
       throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    const raw = state[key] ?? defaultValue;
+    // The state lacks a field that the device does not report or that belongs
+    // to the color mode that is not active; the last value stands.
+    const raw = state[key] ?? (c.value as boolean | number);
     return onGetTransform ? onGetTransform(raw) : raw;
   });
 

@@ -614,15 +614,6 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
 
   const capabilities = d.capabilities as Capability[];
 
-  if (
-    capabilities.includes("color_temp") &&
-    capabilities.includes("color_hs")
-  ) {
-    throw new Error(
-      `devices[${String(index)}]: color_temp and color_hs cannot be combined (HAP spec R13 §10.11); use one or the other`,
-    );
-  }
-
   if (capabilities.includes("fan_speed") && !capabilities.includes("fan")) {
     throw new Error(`devices[${String(index)}]: fan_speed requires fan`);
   }
@@ -638,6 +629,16 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
   if (type === "wled" && hasFan) {
     throw new Error(
       `devices[${String(index)}]: fan capabilities are not supported for WLED devices`,
+    );
+  }
+
+  if (
+    type === "wled" &&
+    capabilities.includes("color_temp") &&
+    capabilities.includes("color_hs")
+  ) {
+    throw new Error(
+      `devices[${String(index)}]: color_temp and color_hs cannot be combined for WLED devices`,
     );
   }
 
