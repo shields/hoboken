@@ -114,10 +114,10 @@ ones.
 
 A light with both `brightness` and `color_temp` offers Adaptive Lighting in
 the Home app, with no configuration. It needs a home hub, which runs the
-schedule. A light that is off is sent nothing, and is sent the current
-temperature when HomeKit turns it on. Setting a color or a temperature from
-HomeKit, or a color anywhere else, turns Adaptive Lighting off. It survives a
-restart if `PERSIST_PATH` is persistent.
+schedule. A light that is off is kept at the current temperature, so that it
+comes on at that temperature however it is turned on. Setting a color or a
+temperature from HomeKit, or a color anywhere else, turns Adaptive Lighting
+off. It survives a restart if `PERSIST_PATH` is persistent.
 [doc/adaptive-lighting.md](doc/adaptive-lighting.md) has the detail.
 
 ### Scenes

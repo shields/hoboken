@@ -39,20 +39,23 @@ export interface AdaptiveRequest {
   shown: number | undefined;
 }
 
-// A light that is off may ignore the temperature, report it as applied, or turn
-// on, and the temperature that the device shows is not sent again. The device's
-// own state is the only record of either: a remembered value goes stale when the
-// light turns off or changes outside HomeKit. A bulb whose range is narrower
-// than the characteristic's clamps a temperature to its own limit and never
-// shows the one asked for, so a temperature that it showed the same value for
-// twice is left alone until something changes what it shows.
+// A light that is on is sent a temperature that it does not show. A light that
+// takes a temperature while off (`whileOff`) is sent one when it is known to be
+// off as well; a light of unknown power is sent nothing. The temperature that
+// the device shows is not sent again. The device's own state is the only record
+// of that: a remembered value goes stale when the light turns off or changes
+// outside HomeKit. A bulb whose range is narrower than the characteristic's
+// clamps a temperature to its own limit and never shows the one asked for, so a
+// temperature that it showed the same value for twice is left alone until
+// something changes what it shows.
 export function shouldPublishAdaptiveTemperature(
   state: HomeKitState,
   temperature: number,
   last?: AdaptiveRequest,
+  whileOff = false,
 ): boolean {
   return (
-    state.on === true &&
+    (state.on === true || (whileOff && state.on === false)) &&
     state.color_temp !== temperature &&
     !(
       last?.temperature === temperature &&
@@ -60,6 +63,26 @@ export function shouldPublishAdaptiveTemperature(
       last.shown === state.color_temp
     )
   );
+}
+
+// A bulb that is off ignores moveToColorTemp unless the command carries the
+// "execute if off" option, and then stores the temperature and stays off.
+// Zigbee2MQTT does not reflect a raw command in its state.
+export function zigbeeOffTemperatureMessage(
+  temperature: number,
+): Record<string, unknown> {
+  return {
+    command: {
+      cluster: "lightingColorCtrl",
+      command: "moveToColorTemp",
+      payload: {
+        colortemp: temperature,
+        transtime: 0,
+        optionsMask: 1,
+        optionsOverride: 1,
+      },
+    },
+  };
 }
 
 // Zigbee2MQTT and WLED turn a light on for a brightness above zero, so a write

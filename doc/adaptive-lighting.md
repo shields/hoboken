@@ -14,9 +14,29 @@ change made outside HomeKit. The bridge supplies the rest.
 
 The `adaptiveTemperature` hook from `startBridge` remembers each temperature
 and accepts it for publishing only while MQTT is connected and the light is on
-at another temperature (`shouldPublishAdaptiveTemperature`). A light that is
-off gets nothing, because a Hue bulb ignores `color_temp` while off and some
-bulbs turn on for it.
+at another temperature (`shouldPublishAdaptiveTemperature`). A WLED light is
+also accepted while it is known to be off: the message has no `on` and no
+`bri`, so WLED stores the color and the light stays off.
+
+A Zigbee2MQTT light, a single bulb or a group, that is known to be off is sent
+a raw cluster command instead, to its normal set topic, because a Hue bulb
+ignores `color_temp` while off and some bulbs turn on for it:
+`moveToColorTemp` with `optionsMask` and `optionsOverride` 1 ("execute if
+off"), which stores the temperature and leaves the light off
+(`zigbeeOffTemperatureMessage`). Zigbee2MQTT does not reflect the command in
+its state, so no report follows, nothing is recorded as an unconfirmed write,
+and the cached temperature stays as it was. The bridge remembers the
+temperature sent, per device, and does not send it again while the light stays
+off and untouched. A report that shows the light on, and any other publish for
+the device, forget it, so a light that goes off again is sent the temperature
+at the next update. A light of unknown power is sent nothing, and so is one
+when MQTT is disconnected. No report confirms that a given bulb, or a group's
+cast, honors the flag. The command carries the temperature as asked, because
+Zigbee2MQTT clamps `color_temp` to a bulb's range but not a raw command, and a
+bulb may clamp or refuse one beyond its range.
+
+The turn-on sends below remain: they cover a bulb that ignores the flag or a
+lost group cast, and they bring Zigbee2MQTT's state in step.
 
 The comparison is with the cached device state, not a record of what was last
 published, which goes stale across a turn-off or an outside change. The power

@@ -26,8 +26,10 @@ import {
   turnsLightOn,
   withAdaptiveTemperature,
   writtenState,
+  zigbeeOffTemperatureMessage,
 } from "../src/adaptive-lighting.ts";
 import type { Capability, DeviceConfig } from "../src/config.ts";
+import type { HomeKitState } from "../src/convert.ts";
 import {
   assignInstanceIds,
   hubStartsAdaptiveLighting,
@@ -58,6 +60,31 @@ describe("adaptive lighting decisions", () => {
       shouldPublishAdaptiveTemperature({ on: true, color_temp: 340 }, 350),
     ).toBe(true);
     expect(shouldPublishAdaptiveTemperature({ on: true }, 350)).toBe(true);
+  });
+
+  test("a light that takes a temperature while off is sent one when it is known to be off", () => {
+    const publish = (state: HomeKitState) =>
+      shouldPublishAdaptiveTemperature(state, 350, undefined, true);
+    expect(publish({})).toBe(false);
+    expect(publish({ on: false })).toBe(true);
+    expect(publish({ on: false, color_temp: 350 })).toBe(false);
+    expect(publish({ on: true, color_temp: 340 })).toBe(true);
+    expect(publish({ on: true, color_temp: 350 })).toBe(false);
+  });
+
+  test("the Zigbee message that stores a temperature while off is a raw command that executes if off", () => {
+    expect(zigbeeOffTemperatureMessage(350)).toEqual({
+      command: {
+        cluster: "lightingColorCtrl",
+        command: "moveToColorTemp",
+        payload: {
+          colortemp: 350,
+          transtime: 0,
+          optionsMask: 1,
+          optionsOverride: 1,
+        },
+      },
+    });
   });
 
   test("a write gives a light the power and temperature in it", () => {

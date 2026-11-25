@@ -64,6 +64,7 @@ import {
   type AdaptiveRequest,
   showsColor,
   shouldPublishAdaptiveTemperature,
+  zigbeeOffTemperatureMessage,
   withAdaptiveTemperature,
 } from "./adaptive-lighting.ts";
 import {
@@ -241,6 +242,7 @@ export async function startBridge(
   const stateCache = new Map<string, RawState>();
   const adaptiveTemperatures = new Map<string, number>();
   const adaptiveRequests = new Map<string, AdaptiveRequest>();
+  const offTemperatures = new Map<string, number>();
   const unconfirmedWrites = new Map<string, Unconfirmed>();
   const confirmationTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const heldBrightness = new Map<
@@ -577,6 +579,7 @@ export async function startBridge(
             }
           : {},
       );
+      offTemperatures.delete(topic);
       const converted = convert(payload, cachedRaw);
       const message = JSON.stringify(converted);
       rawPublish(mqttTopic(topic), message);
@@ -729,7 +732,14 @@ export async function startBridge(
       if (reported?.color_temp === temperature)
         adaptiveRequests.delete(device.topic);
       const last = adaptiveRequests.get(device.topic);
-      if (!shouldPublishAdaptiveTemperature(state, temperature, last))
+      if (
+        !shouldPublishAdaptiveTemperature(
+          state,
+          temperature,
+          last,
+          device.type === "wled",
+        )
+      )
         return false;
       adaptiveRequests.set(device.topic, {
         temperature,
@@ -737,9 +747,27 @@ export async function startBridge(
       });
       return true;
     };
+    const publishTemperatureWhileOff = (temperature: number) => {
+      if (
+        device.type !== "z2m" ||
+        mqttClient?.connected !== true ||
+        offTemperatures.get(device.topic) === temperature ||
+        { ...getState(device.topic), ...recentlyWritten(device.topic) }.on !==
+          false
+      )
+        return;
+      const message = JSON.stringify(zigbeeOffTemperatureMessage(temperature));
+      rawPublish(z2mSetTopic(device.topic), message);
+      offTemperatures.set(device.topic, temperature);
+      log.log(
+        `Adaptive Lighting for "${device.name}" while off: ${JSON.stringify({ color_temp: temperature })} published to ${z2mSetTopic(device.topic)} as ${message}`,
+      );
+    };
     const adaptiveTemperature = (temperature: number) => {
       adaptiveTemperatures.set(device.topic, temperature);
-      return acceptsAdaptiveTemperature(temperature);
+      const accepted = acceptsAdaptiveTemperature(temperature);
+      publishTemperatureWhileOff(temperature);
+      return accepted;
     };
 
     const isFan = device.capabilities.includes("fan");
@@ -973,6 +1001,7 @@ export async function startBridge(
       previous,
     );
     setUnconfirmed(deviceTopic, pending);
+    if (applied.on === true) offTemperatures.delete(deviceTopic);
     const awaited = writtenGroups(before);
     applyToHomeKit(
       entry,
