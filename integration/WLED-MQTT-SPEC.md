@@ -7,9 +7,13 @@ that never sees the original source.
 
 ## Scope
 
-Only RGB devices (no white channel) are covered. Features like effects, presets,
-playlists, nightlight, segments beyond the first, UDP sync, and HTTP API
-passthrough over MQTT are out of scope.
+RGB and RGBW devices with one or more segments are covered, limited to each
+segment's `on`, `sel` and primary color (§3c, §6). Every segment is assumed to
+have RGB and white capability. Effects, presets, playlists, nightlight, segment
+geometry (`start`, `stop`, creating or deleting segments), the main-segment
+setting (`mainseg`), Kelvin and random (`"r"`) colors, UDP sync, and HTTP API
+passthrough over MQTT are out of scope. Source references are to WLED v16.0.1,
+`wled00/`.
 
 ---
 
@@ -47,11 +51,11 @@ Immediately after subscribing, the device publishes its full current state (see
 
 The device maintains three pieces of state relevant to MQTT:
 
-| Variable  | Type    | Range    | Default         | Description                     |
-| --------- | ------- | -------- | --------------- | ------------------------------- |
-| `bri`     | integer | 0–255    | 128             | Current brightness              |
-| `briLast` | integer | 1–255    | 128             | Brightness before last turn-off |
-| `col`     | byte[3] | 0–255 ea | `[255, 160, 0]` | Primary color (RGB)             |
+| Variable  | Type    | Range    | Default            | Description                                  |
+| --------- | ------- | -------- | ------------------ | -------------------------------------------- |
+| `bri`     | integer | 0–255    | 128                | Current brightness                           |
+| `briLast` | integer | 1–255    | 128                | Brightness before last turn-off              |
+| `col`     | byte[4] | 0–255 ea | `[255, 160, 0, 0]` | Primary color (R, G, B, W), per segment (§6) |
 
 ### Power semantics
 
@@ -112,8 +116,20 @@ Bits 7–0:   B (blue)
 For 6-digit hex values (e.g., `#FF8000` → `0x00FF8000`), W is always 0 and the
 color is pure RGB.
 
-After parsing, the primary color is updated and state is applied (which triggers
-outbound messages).
+After parsing (`mqtt.cpp`, `colorFromDecOrHexString` in `colors.cpp`), the
+four bytes, white included, become the global primary color, and
+`colorUpdated` → `applyValuesToSelectedSegs` (`led.cpp`) copies them to the
+primary color of every selected segment (§6). Unselected segments are not
+touched. `stateUpdated` then reads the global primary color back from the first
+selected segment, or the main segment when none is selected (§6), so with no
+selected segment the color is discarded and `{topic}/c` shows the main
+segment's unchanged color. An empty payload leaves the color alone.
+
+Real WLED publishes only when `bri` or `stateChanged` changed, and
+`Segment::setColor` sets `stateChanged` only when the color differs, so a
+`/col` message that does not change the first color slot of any selected
+segment publishes nothing. The simulator publishes after every `/col` payload
+that parses as a number, as in §5.7.
 
 ### 3c. API topic (`{topic}/api`)
 
@@ -142,20 +158,47 @@ Fields are processed in this order within `deserializeState`:
    Sending `{"bri": 0, "on": true}` sets bri=0, then `on: true` toggles it
    back on (restoring `briLast`).
 
-3. **`seg`** (array of segment objects): Each segment object can contain a
-   `col` field.
+3. **`seg`** (`deserializeState` and `deserializeSegment` in `json.cpp`): an
+   object or an array of segment objects. Each element can contain `on`, `sel`
+   and `col`; other fields are out of scope.
 
-   **`seg[0].col`** (array of color values): Sets colors on the first segment.
-   Each element in the `col` array corresponds to a color slot (index 0 =
-   primary, 1 = secondary, 2 = tertiary). Each color value can be:
+   **Which segments an element addresses.** Each element's target is
+   `elem["id"] | it`, so a numeric `id` selects that segment.
+   - `seg` is an **array**: `it` is the element's index in the array, whether
+     or not earlier elements had an `id` or were objects. An element that is
+     not an object changes nothing but still uses up its index.
+   - `seg` is an **object**: with a numeric `id` of 0 or more, that segment
+     only. Without one (absent, non-numeric or negative), the object is applied
+     in turn to every segment that is selected at that moment.
+   - A target at or beyond the segment count is ignored (`deserializeSegment`
+     creates a segment only for an element with a positive `stop`, which is out
+     of scope).
 
-   - **Array of integers**: `[R, G, B]` or `[R, G, B, W]`. Values 0–255.
-     Example: `[255, 0, 0]` for red.
+   **`on`** (`getBoolVal`, `json.cpp`): a boolean sets the segment's power; a
+   string beginning with `t` toggles it; anything else leaves it alone. This
+   is the segment's own power and does not change `bri`.
 
-   - **Hex string**: `"RRGGBB"` or `"RRGGBBWW"`. Parsed by `colorFromHexString`,
-     which reads the channels left-to-right (`RRGGBB`/`RRGGBBWW` order). The
-     whole string is parsed as a hex integer and decomposed:
-     - 6 chars: `RR` = chars 0–1, `GG` = chars 2–3, `BB` = chars 4–5
+   **`sel`**: the segment's selection, read with the same `getBoolVal` rules as
+   `on`.
+
+   **`col`** (array of color values): each element is a color slot (index 0 =
+   primary, 1 = secondary, 2 = tertiary). Only slot 0 is modelled. A `col`
+   that is not an array is ignored. Slot 0 can be:
+
+   - **Array of integers**: up to four channels `[R, G, B, W]`, copied by
+     `copyArray` into a zero-initialised array. A missing channel is therefore
+     0, so `[R, G, B]` sets W to 0 and does not keep the old white. Fewer than
+     three elements is valid (`[R]` sets G, B and W to 0). An empty array
+     leaves the color alone. An element that is not a number reads as 0.
+     Each channel is truncated to a byte (`RGBW32`).
+
+   - **Hex string**: `"RRGGBB"` or `"RRGGBBWW"`. Parsed by `colorFromHexString`
+     (`colors.cpp`), which reads the channels left-to-right. The string must be
+     exactly 6 or 8 bytes, otherwise it is ignored. It is read with `strtoul`,
+     so non-hex characters end the number early and a string such as
+     `"ZZZZZZ"` is valid and reads as 0.
+     - 6 chars: `RR` = chars 0–1, `GG` = chars 2–3, `BB` = chars 4–5, and W is
+       set to 0
      - 8 chars: `RR` = chars 0–1, `GG` = chars 2–3, `BB` = chars 4–5,
        `WW` = chars 6–7
 
@@ -163,17 +206,34 @@ Fields are processed in this order within `deserializeState`:
      there the white byte is the high byte (`WWRRGGBB`), whereas here it is the
      low byte (`RRGGBBWW`). For 6-digit values both produce identical RGB.
 
-   - **Object**: `{"r": R, "g": G, "b": B}` (each field optional, defaults to
-     current value). `"w"` field also accepted.
+   - **Object**: `{"r": R, "g": G, "b": B, "w": W}`. Each field is optional
+     and keeps the segment's current value when it is absent or not an
+     integer, white included.
 
-   Example: `{"seg":[{"col":[[0, 255, 0]]}]}` sets primary color to green.
+   A number (Kelvin; 0 is black) and `"r"` (random) are real WLED colors that
+   the simulator ignores. Examples: `{"seg":[{"col":[[0, 255, 0]]}]}` sets the
+   first segment's primary color to green with white 0;
+   `{"seg":{"col":[[0, 0, 0, 255]]}}` sets every selected segment to pure
+   white.
 
-4. After all fields are processed, `stateUpdated()` is called unconditionally.
-   However, outbound messages are only triggered if state actually changed
+   An element can set `on`, `sel` and `col` together. They are applied in that
+   order (`on`, then `sel`, then `col`); they do not affect each other.
+
+4. After all fields are processed, `stateUpdated()` is called
+   (`if (stateChanged) stateUpdated(callMode)` at the end of `deserializeState`).
+   Outbound messages are only triggered if state actually changed
    (`bri != briOld || stateChanged`). If no recognized fields were present
    (e.g., an empty `{}`), brightness is unchanged and the internal
    `stateChanged` flag remains false, so **no outbound messages are
    published**.
+
+   For `seg`, `deserializeSegment` sets `stateChanged` when `differs()`
+   (`json.cpp`) finds the segment's options (which include `on`) or colors
+   different from before, and ignores a change of `sel` alone. So a segment
+   whose `on` or primary color (white included) changes publishes, even when it
+   is not the first selected segment; setting a field to the value it already
+   has publishes nothing; and a message that only changes `sel` publishes
+   nothing (the next publish reflects the new selection).
 
 ---
 
@@ -194,8 +254,14 @@ following messages. The retain flag depends on a per-device configuration settin
 
 - **Payload**: `#` followed by an uppercase hex representation of the color.
 - **Format string**: `#%06X` applied to `(W << 24) | (R << 16) | (G << 8) | B`
-  - When W = 0 (RGB-only device): produces 6 hex digits → `#RRGGBB`
-  - When W > 0: produces 7–8 hex digits → `#WWRRGGBB`
+  (`publishMqtt`, `mqtt.cpp`)
+  - When W = 0: produces 6 hex digits → `#RRGGBB`
+  - When W > 0: produces 7–8 hex digits → `#WWRRGGBB`; W of 1–15 gives 7
+    digits, as `%X` pads only to the minimum width
+- **Source segment**: the global primary color read back by `stateUpdated`
+  (`setValuesFromFirstSelectedSeg`, `led.cpp`): the primary color of the first
+  selected segment (`getFirstSelectedSegId`, `FX_fcn.cpp`), or of the main
+  segment when none is selected (§6)
 - **QoS**: 0
 - **Retain**: configurable
 - **Examples**: `#FFA000` (default orange), `#FF0000` (red), `#00FF00` (green)
@@ -237,8 +303,8 @@ acceptable simplification.
 
 4. **Segment colors vs global colors**: The JSON API operates on segments. After
    segment changes, global `colPri`/`colSec` are read back from the first
-   selected segment. For a single-segment device, segment 0 primary color =
-   global primary color.
+   selected segment (§6). For a single-segment device, segment 0 primary color
+   = global primary color.
 
 5. **Topic prefix stripping**: The device strips its device topic prefix (or
    group topic prefix) from incoming messages before checking the suffix. Unknown
@@ -264,3 +330,34 @@ acceptable simplification.
 9. **Partial MQTT packets**: The device buffers partial packets and only
    processes the message when all parts have been received. The simulator can
    ignore this (in-process broker delivers complete messages).
+
+---
+
+## 6. Segments
+
+The simulator takes the number of segments as a constructor argument (default
+1). Each segment has three modelled properties:
+
+| Property | Type    | Default                            | Description                     |
+| -------- | ------- | ---------------------------------- | ------------------------------- |
+| `on`     | boolean | `true`                             | Segment power (`SEG_OPTION_ON`) |
+| `sel`    | boolean | `true` for segment 0, else `false` | Segment selected                |
+| `col`    | byte[4] | `[255, 160, 0, 0]`                 | Primary color R, G, B, W        |
+
+- **Defaults**: the `Segment` constructor (`FX.h`) sets
+  `options(SELECTED | SEGMENT_ON)`, so every segment WLED creates starts
+  selected and on, and a single segment is therefore selected. For a device
+  with several segments the simulator selects only segment 0, which models a
+  device whose other segments have been deselected; a client selects the
+  others with `sel`.
+- **First selected segment**: `getFirstSelectedSegId` (`FX_fcn.cpp`) returns
+  the lowest-numbered active segment that is selected, else the main segment.
+  `setValuesFromFirstSelectedSeg` (`led.cpp`) reads the global primary color
+  from it on every `stateUpdated`, and `publishMqtt` publishes that color.
+  `{topic}/g` is global and unaffected by segments.
+- **Main segment**: `getMainSegmentId` is segment 0 until `mainseg` changes it,
+  and the simulator never changes it. Every simulated segment is active.
+- **Segment `on` and `bri`**: `on` is independent of the global `bri` and of
+  `{topic}/g`. A segment turned off still reports its color.
+- **`/col`** applies the color to every selected segment (§3b);
+  **`/api` `seg`** addresses segments by id or index (§3c).

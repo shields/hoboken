@@ -20,21 +20,55 @@ export interface WledState {
   col: [number, number, number];
 }
 
+export type WledColor = [number, number, number, number];
+
+export interface WledSegment {
+  on: boolean;
+  sel: boolean;
+  col: WledColor;
+}
+
 // Brightness is a 0–255 quantity (WLED-MQTT-SPEC.md §2); clamp parsed inbound
 // values into range rather than letting out-of-range input corrupt the state.
 function clampBri(n: number): number {
   return Math.min(255, Math.max(0, n));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function channel(value: unknown): number {
+  return typeof value === "number" ? Math.trunc(value) & 0xff : 0;
+}
+
+function boolOrToggle(value: unknown, current: boolean): boolean {
+  if (typeof value === "string" && value.startsWith("t")) return !current;
+  return typeof value === "boolean" ? value : current;
+}
+
 export class WledSimulator {
   private bri = 128;
   private briLast = 128;
-  private col: [number, number, number] = [255, 160, 0];
+  private segs: WledSegment[];
+  private main: WledSegment;
   private client: MqttClient;
   private prefix: string;
 
-  constructor(brokerUrl: string, topic: string) {
+  constructor(brokerUrl: string, topic: string, segmentCount = 1) {
     this.prefix = topic;
+    const newSegment = (sel: boolean): WledSegment => ({
+      on: true,
+      sel,
+      col: [255, 160, 0, 0],
+    });
+    this.main = newSegment(true);
+    this.segs = [
+      this.main,
+      ...Array.from({ length: Math.max(segmentCount - 1, 0) }, () =>
+        newSegment(false),
+      ),
+    ];
     this.client = connect(brokerUrl, {
       will: {
         topic: `${topic}/status`,
@@ -66,7 +100,12 @@ export class WledSimulator {
   }
 
   get state(): WledState {
-    return { bri: this.bri, briLast: this.briLast, col: [...this.col] };
+    const [r, g, b] = this.primary().col;
+    return { bri: this.bri, briLast: this.briLast, col: [r, g, b] };
+  }
+
+  get segments(): WledSegment[] {
+    return this.segs.map((seg) => ({ ...seg, col: [...seg.col] }));
   }
 
   setBrightness(n: number): void {
@@ -78,7 +117,10 @@ export class WledSimulator {
   }
 
   setColor(rgb: [number, number, number]): void {
-    this.col = [...rgb];
+    const targets = this.segs.filter((seg) => seg.sel);
+    for (const seg of targets.length > 0 ? targets : [this.main]) {
+      seg.col = [rgb[0], rgb[1], rgb[2], 0];
+    }
     this.publishState();
   }
 
@@ -129,11 +171,15 @@ export class WledSimulator {
         : Number.parseInt(payload, 10);
     if (Number.isNaN(num)) return;
 
-    // Decompose uint32 into WRGB: bits 23-16=R, 15-8=G, 7-0=B
-    const r = (num >>> 16) & 0xff;
-    const g = (num >>> 8) & 0xff;
-    const b = num & 0xff;
-    this.col = [r, g, b];
+    const col: WledColor = [
+      (num >>> 16) & 0xff,
+      (num >>> 8) & 0xff,
+      num & 0xff,
+      (num >>> 24) & 0xff,
+    ];
+    for (const seg of this.segs) {
+      if (seg.sel) seg.col = [...col];
+    }
     this.publishState();
   }
 
@@ -184,15 +230,8 @@ export class WledSimulator {
       }
     }
 
-    // Process seg[0].col (primary color slot)
-    if (Array.isArray(data.seg)) {
-      const seg0 = data.seg[0] as Record<string, unknown> | undefined;
-      if (seg0 && Array.isArray(seg0.col)) {
-        const colSlot0 = (seg0.col as unknown[])[0];
-        if (this.parseSegColor(colSlot0)) {
-          stateChanged = true;
-        }
-      }
+    if (this.applySeg(data.seg)) {
+      stateChanged = true;
     }
 
     // Only publish if state actually changed (spec section 5.7).
@@ -203,52 +242,87 @@ export class WledSimulator {
     }
   }
 
-  // Parse one seg[].col slot. Per WLED-MQTT-SPEC.md §3c a slot may be an
-  // [R,G,B] (or [R,G,B,W]) array, an "RRGGBB"/"RRGGBBWW" hex string, or an
-  // {r,g,b} object (each channel optional, defaulting to its current value).
-  // Returns whether a recognized color was applied.
-  private parseSegColor(entry: unknown): boolean {
-    if (Array.isArray(entry)) {
-      if (entry.length < 3) return false;
-      const [r, g, b] = entry as unknown[];
-      if (
-        typeof r !== "number" ||
-        typeof g !== "number" ||
-        typeof b !== "number"
-      ) {
-        return false;
+  // Mirrors deserializeState's "seg" handling: an object without a numeric
+  // id applies to every selected segment, an array element without a numeric
+  // id addresses its own index. Returns whether anything other than selection
+  // changed (WLED's stateChanged).
+  private applySeg(seg: unknown): boolean {
+    const before = JSON.stringify(
+      this.segs.map(({ on, col }) => ({ on, col })),
+    );
+    if (Array.isArray(seg)) {
+      for (const [index, elem] of (seg as unknown[]).entries()) {
+        if (!isRecord(elem)) continue;
+        const id = typeof elem.id === "number" ? elem.id : index;
+        this.applySegElement(elem, id);
       }
-      this.col = [r, g, b];
-      return true;
+    } else if (isRecord(seg)) {
+      if (typeof seg.id === "number" && seg.id >= 0) {
+        this.applySegElement(seg, seg.id);
+      } else {
+        for (let i = 0; i < this.segs.length; i++) {
+          if (this.segs[i]?.sel) this.applySegElement(seg, i);
+        }
+      }
+    }
+    return (
+      before !== JSON.stringify(this.segs.map(({ on, col }) => ({ on, col })))
+    );
+  }
+
+  private applySegElement(elem: Record<string, unknown>, id: number): void {
+    const seg = this.segs[id];
+    if (!seg) return;
+    seg.on = boolOrToggle(elem.on, seg.on);
+    seg.sel = boolOrToggle(elem.sel, seg.sel);
+    if (Array.isArray(elem.col)) {
+      seg.col = this.parseSegColor(elem.col[0], seg.col) ?? seg.col;
+    }
+  }
+
+  // Mirrors the first color slot of deserializeSegment: an array of up to four
+  // channels (missing ones are 0, so [R,G,B] zeroes white), an "RRGGBB" or
+  // "RRGGBBWW" string, or an object whose omitted channels keep their value.
+  // Returns undefined for a slot WLED leaves alone.
+  private parseSegColor(
+    entry: unknown,
+    current: WledColor,
+  ): WledColor | undefined {
+    if (Array.isArray(entry)) {
+      if (entry.length === 0) return undefined;
+      const rgbw: WledColor = [0, 0, 0, 0];
+      for (let i = 0; i < 4; i++) rgbw[i] = channel(entry[i]);
+      return rgbw;
     }
     if (typeof entry === "string") {
-      // colorFromHexString uses standard RRGGBB[WW] byte order: take the first
-      // three bytes as R, G, B and ignore any trailing white byte.
-      if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(entry)) return false;
-      this.col = [
-        Number.parseInt(entry.slice(0, 2), 16),
-        Number.parseInt(entry.slice(2, 4), 16),
-        Number.parseInt(entry.slice(4, 6), 16),
-      ];
-      return true;
+      if (entry.length !== 6 && entry.length !== 8) return undefined;
+      const c = Number.parseInt(entry, 16) || 0;
+      return entry.length === 6
+        ? [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff, 0]
+        : [(c >>> 24) & 0xff, (c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
     }
-    if (typeof entry === "object" && entry !== null) {
-      const o = entry as Record<string, unknown>;
-      this.col = [
-        typeof o.r === "number" ? o.r : this.col[0],
-        typeof o.g === "number" ? o.g : this.col[1],
-        typeof o.b === "number" ? o.b : this.col[2],
-      ];
-      return true;
+    if (isRecord(entry)) {
+      const keys = ["r", "g", "b", "w"] as const;
+      const rgbw: WledColor = [...current];
+      for (const [i, key] of keys.entries()) {
+        const v = entry[key];
+        if (typeof v === "number" && Number.isInteger(v)) rgbw[i] = v & 0xff;
+      }
+      return rgbw;
     }
-    return false;
+    return undefined;
+  }
+
+  private primary(): WledSegment {
+    return this.segs.find((seg) => seg.sel) ?? this.main;
   }
 
   private publishState(): void {
     this.client.publish(`${this.prefix}/g`, String(this.bri));
+    const [r, g, b, w] = this.primary().col;
     const hex =
       "#" +
-      ((this.col[0] << 16) | (this.col[1] << 8) | this.col[2])
+      (((w << 24) | (r << 16) | (g << 8) | b) >>> 0)
         .toString(16)
         .toUpperCase()
         .padStart(6, "0");
