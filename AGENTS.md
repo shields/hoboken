@@ -63,7 +63,9 @@ make demo               # Serve the status page with sample data
 - New files carry the Apache 2.0 header, copied from an existing file: `//` for
   TypeScript, `#` for shell, after any shebang. The data files in
   `tools/apple-home` are output from Apple's frameworks, so they have no
-  header; the TSV files begin with provenance lines instead.
+  header. A TSV file there is the table alone, because GitHub renders one
+  only if every line has the same columns; the README beside them gives
+  their provenance.
 
 ## Testing
 

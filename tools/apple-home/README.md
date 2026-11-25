@@ -23,12 +23,12 @@ ignore it.
 cd tools/apple-home
 bin=$TMPDIR/apple-home
 ./build.sh "$bin"
-"$bin/siri-hue-table" | diff - <(grep -v '^##' siri-hue-table.tsv)
+"$bin/siri-hue-table" | diff - siri-hue-table.tsv
 "$bin/home-palettes" 2>/dev/null | diff - home-palettes.txt
 for probe in writes readback limits wheels; do
   "$bin/home-color-$probe" 2>/dev/null | diff - "home-color-$probe.txt"
 done
-"$bin/home-temperature-curve" | diff - <(grep -v '^##' home-temperature-curve.tsv)
+"$bin/home-temperature-curve" | grep -v '^#' | diff - home-temperature-curve.tsv
 ```
 
 The Home app's frameworks exist on macOS only as Mac Catalyst copies under
@@ -51,6 +51,12 @@ The `home-color-*.m` programs share `home-color-item.h`, which gives Apple's
 logic runs without a home.
 
 ### siri-hue-table
+
+Siri's named colors: the `HueSemantic` enum from SiriOntology, as built by
+HomeAutomationInternal.framework. The columns are the index in the array, the
+`HueSemantic` key, the name, the hue in degrees, and the saturation and
+brightness in percent. The framework stores doubles, which print rounded to
+one decimal place.
 
 No entry is a color temperature, and `warm white` and `cool white` are not
 names in the table.
@@ -89,11 +95,17 @@ say what they look for.
 
 ### home-temperature-curve
 
-The output begins with two `# check` lines: the largest difference between
-Apple's function and the closed form, over mireds in steps of 0.25 and over
-kelvins in steps of 50. Expect about `7e-08` in a color channel and `1.3e-05`
-in the hue and saturation plane, which is float32 rounding. The rows that
-follow are whole mireds from 50 to 600.
+Apple's color for a color temperature:
+`-[HFTemperatureColor hf_RGBColorRepresentation]` in Home.framework. The rows
+are whole mireds from 50 to 600, and the columns are mireds, kelvins, red,
+green, and blue from 0 to 1, the hue in degrees, and the saturation in
+percent. Brightness is 1 wherever a channel is.
+
+The program's output begins with two `# check` lines, which the file leaves
+out: the largest difference between Apple's function and the closed form, over
+mireds in steps of 0.25 and over kelvins in steps of 50. Expect about `7e-08`
+in a color channel and `1.3e-05` in the hue and saturation plane, which is
+float32 rounding.
 
 The closed form's constants were read from the framework by disassembling
 `_HFGetColorForLightTemperature`.
