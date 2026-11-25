@@ -51,7 +51,12 @@ const entry = (factor: number, temperature: number, offset: number) =>
 // the brightness (10 to 100), then 300 mireds and 250 mireds an hour apart.
 export function hubStartsAdaptiveLighting(
   accessory: Accessory,
-  { startMs = Date.now(), intervalMs = 60000, spanMs = 3_600_000 } = {},
+  {
+    startMs = Date.now(),
+    intervalMs = 60000,
+    spanMs = 3_600_000,
+    notifyMs = 1000,
+  } = {},
 ): Promise<unknown> {
   const service = accessory.getService(Service.Lightbulb)!;
   const temperature = service.getCharacteristic(
@@ -80,7 +85,7 @@ export function hubStartsAdaptiveLighting(
     6,
     writeUInt16(intervalMs),
     8,
-    writeUInt32(1000),
+    writeUInt32(notifyMs),
   );
   return service
     .getCharacteristic(Characteristic.CharacteristicValueTransitionControl)

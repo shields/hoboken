@@ -244,8 +244,8 @@ really at 140 mireds is therefore shown as a color; the minimum cannot
 mean both. A state without `color_mode` passes through unchanged. An update is read against the merged state, so one
 that carries only `color_mode` still switches what HomeKit shows.
 
-The state report that follows a write is suppressed, as described below,
-so after publishing a write the bridge sets the characteristics that the
+The reports that repeat the state from before a write are not applied, as
+described below, so after publishing a write the bridge sets the characteristics that the
 write implies and did not itself set (`z2mWriteToHomeKit`): Hue and
 Saturation after a ColorTemperature write, ColorTemperature after a
 color or a white. The ones the controller wrote keep its values.
@@ -257,12 +257,18 @@ is logged with its payload, so the log shows which values a controller
 sent for a request and what became of them. A value that HAP-NodeJS
 refuses for being out of range appears only in the first line.
 
-## Write-Back Suppression
+## Write Confirmation
 
 ### The bounce problem
 
-After a HomeKit color change, Z2M sends back multiple MQTT state updates
-as the Zigbee radio processes the command:
+Zigbee2MQTT answers a write with reports that repeat the state from before
+it, with a new `last_seen`, and then the new state. From 17 hours of
+production logs: for a single bulb the first report that differs comes a
+median 58 ms after the publish (at most 100 ms in 79 writes), after none to
+two repeats. For a Zigbee2MQTT group it comes after 0.4 to 1.5 s, about 1.5 s
+every time for one group of sconces, and repeats of the old state arrive in
+between, some more than 500 ms after the write. A report can also be
+partial, as in this write of a color:
 
 ```
 t=0ms    HomeKit SET hue=255, sat=68
@@ -272,8 +278,13 @@ t=500ms  Z2M responds: { color: { hue: 255, saturation: 43 } }  ← partial
 t=750ms  Z2M responds: { color: { hue: 255, saturation: 68 } }  ← settled
 ```
 
-Without suppression, the stale response at t=240ms pushes `hue: 30` back
-to HomeKit, causing a visible snap to the wrong color before settling.
+Applied as they come, the repeats undo the written value in HomeKit until the
+new state arrives, and a Brightness that goes back and forth makes Adaptive
+Lighting publish a temperature for each value (see
+[adaptive-lighting.md](adaptive-lighting.md)). A light with Adaptive Lighting
+turned on at 60% from off had Brightness set back to 100 by the repeats and
+to 60 by the new state, and the controller published 201, 260, 201, 260
+mireds within 170 ms.
 
 ### Survey of write-back handling
 
@@ -291,33 +302,49 @@ Sources:
 - homebridge-deconz: [`lib/DeconzService/LightsResource.js`](https://github.com/ebaauw/homebridge-deconz/blob/master/lib/DeconzService/LightsResource.js) — identical pattern
 - homebridge-mqttthing: [`lib/handlers.js`](https://github.com/arachnetech/homebridge-mqttthing/blob/master/lib/handlers.js) — `debounceRecvms` config
 
+Their fixed 500 ms windows end before a group's first changed report, and they
+hold back a changed report as well as a repeat.
+
 ### Hoboken's approach
 
-After publishing a color-related MQTT message (`color` or `color_temp` in
-the payload), record a per-device timestamp. When a state update arrives
-from Z2M within 500ms of that timestamp, strip color-related keys
-(`color`, `color_temp`, `color_mode`) before pushing to HomeKit. The
-state cache is always updated regardless of suppression, so the dashboard
-and metrics stay current.
+A write is unconfirmed until a report shows what the device did with it.
+There are three groups, each confirmed on its own: power (`on`), brightness,
+and color (hue, saturation, and `color_temp` together). Publishing a payload
+with a group's key, including a temperature that Adaptive Lighting publishes,
+makes that group unconfirmed for the device with a deadline 2000 ms later
+(`CONFIRMATION_MS`); a later write of the group restarts the deadline, and a
+write of another group leaves it alone.
 
-This follows the homebridge-hue/homebridge-deconz pattern (the only
-implementations that actually solve this problem), with two differences:
+When a report arrives, each unconfirmed group that it has values for is
+compared with the device's previous report, both converted to HomeKit state:
 
-1. **Timestamp instead of boolean flag**: A timestamp allows checking the
-   elapsed time precisely, rather than relying on a `setTimeout` callback
-   to clear a flag. The behavior is equivalent.
+- If every value equals the previous one, the report repeats the old state
+  and its values for the group are not applied.
+- If any differs, the group is confirmed and the report's values are applied
+  at once, as is every later report.
+- With no previous report there is nothing to compare, so the values are
+  applied and the group is confirmed.
 
-2. **Per-topic granularity**: The suppression window is tracked per device
-   topic, so a write to one device doesn't suppress updates from another.
+A group that the report has no values for keeps its status. The state cache
+is always updated, so the dashboard and metrics stay current.
 
-Like homebridge-hue, `on`/`off` state and `brightness` updates are never
-suppressed — they are independent of the color bounce problem and
-critical for responsiveness.
+A group still unconfirmed at its deadline had no effect, so the bridge applies
+the cached device state for it to HomeKit and the group is confirmed. A write
+of On to a light that keeps reporting off shows on until 2 s after the write
+and off from then, and the log says that no report confirmed the write. One
+timer per device is set for the earliest deadline. The update goes through
+the path that a report does, so a color that the light shows then turns
+Adaptive Lighting off, as a report does.
 
-After the suppression window, the characteristic already holds the value
-from the HomeKit SET. Z2M's final settled state is in the cache. If the
-device settled at a slightly different value than requested, the next
-unsuppressed state update will sync the characteristic.
+Until then a read from HomeKit gets what was written, not the cached state:
+the device's state lacks the values of an unconfirmed group, and a
+characteristic whose value the state lacks reads as its last value.
+
+A power that a Brightness write implies (a brightness above zero turns a
+light on, zero turns it off) is not a write of power: it holds back no
+report, and it and a written temperature lend their values to Adaptive
+Lighting in place of the cache until a report changes the device's power or
+color, or 2000 ms pass.
 
 ## Future Work
 

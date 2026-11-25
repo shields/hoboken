@@ -377,9 +377,7 @@ describe("WLED integration", { timeout: 30000 }, () => {
     test("color round-trip read-back", async () => {
       // HomeKit reads come from the state cache, and only inbound MQTT
       // updates change it, so the baseline's hue 240 gives way to the written
-      // 120 only once WLED's echo of the write reaches the bridge. The bridge's
-      // 500ms write-back suppression withholds the echo from the pushed
-      // HomeKit update, not from the cache.
+      // 120 only once WLED's echo of the write reaches the bridge.
       await writeGreen();
       await waitForValues({ [hueKey]: 120, [satKey]: 100 });
     });
@@ -477,8 +475,6 @@ describe("WLED integration", { timeout: 30000 }, () => {
         [nookSatKey]: 100,
       });
       await waitForValues({ [nookTempKey]: 182 });
-      // The device's color report within 500 ms of a write is suppressed.
-      await new Promise<void>((resolve) => setTimeout(resolve, 600));
       broker!.publish(
         {
           cmd: "publish",

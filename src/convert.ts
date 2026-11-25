@@ -308,7 +308,8 @@ function z2mColorToHomeKit(
 }
 
 // What HomeKit should show after a write, for the characteristics that the
-// write did not set: the report that follows a write is suppressed.
+// write did not set: the reports that repeat the state from before a write
+// are not applied.
 export function z2mWriteToHomeKit(
   message: Record<string, unknown>,
 ): HomeKitState {
@@ -489,7 +490,8 @@ export function wledToHomeKit(
 }
 
 // The color state that a write to a device with white segments leaves, for
-// the cache and for HomeKit: the report that follows a write is suppressed.
+// the cache and for HomeKit: the reports that repeat the state from before a
+// write are not applied.
 export function wledWrite(
   message: Record<string, unknown>,
   light: WledLight,

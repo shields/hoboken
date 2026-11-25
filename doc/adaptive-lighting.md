@@ -21,21 +21,23 @@ bulbs turn on for it.
 The comparison is with the cached device state, not a record of what was last
 published, which goes stale across a turn-off or an outside change. The power
 and temperature just written (`writtenState`) stand in for the cache, which the
-device has not yet had time to correct, each for 500 ms after the write that set
-it.
+device has not yet had time to correct, until a report changes the device's
+power (for the power) or its color group (for the temperature), or 2000 ms
+pass. They are the overlay of the unconfirmed writes of
+[write confirmation](color-coalescing.md#write-confirmation), so their lifetime
+is the one that decides which reports are applied.
 
 A write that turns the light on and sets no color or temperature carries the
 remembered temperature while Adaptive Lighting is active
 (`withAdaptiveTemperature`). A write turns on a light that is not on (the cache
-overlaid with the write-back window; unknown counts as off) when it has
+overlaid with the unconfirmed writes; unknown counts as off) when it has
 `on: true`, or has no `on` and a brightness above zero, because Zigbee2MQTT and
 WLED turn a light on for a brightness. A write to a light that is already on
 gets none, because the light has it and a change of Brightness brings a new
 one. In `writtenState` a brightness above zero without `on` counts as power on, so
 that the temperature recomputed for the new Brightness is accepted, and a
 brightness of zero as power off, so that none is sent to a light that is going
-off. A light turned on outside HomeKit waits for the next
-update.
+off.
 
 A bulb whose range is narrower than 140 to 500 mireds clamps a temperature to
 its limit, so the cache never shows the one asked for. The bridge keeps, per
@@ -49,6 +51,43 @@ temperature that HomeKit writes starts over too.
 
 The log line for a publish that carries only Adaptive Lighting's temperature
 begins `Adaptive Lighting for`, not `HomeKit write for`.
+
+## A light changed outside HomeKit
+
+A switch or the Zigbee2MQTT app can turn a light on or change its brightness.
+Applying such a report to HomeKit makes the controller recompute the
+temperature at once.
+
+- **Turned on.** When a report that the bridge applies turns the On
+  characteristic from off to on while Adaptive Lighting is active, the bridge
+  publishes the remembered temperature at once, as Adaptive Lighting's, if the
+  rule above would publish it: nothing is sent when the light already shows
+  that temperature. A report that confirms a turn-on that HomeKit wrote finds
+  the characteristic on already and sends nothing, and neither does undoing a
+  turn-off that no report confirmed. A bridge that restarts finds the
+  characteristic off, so the first report of a light that is on counts as a
+  turn-on.
+- **Brightness.** A report that changes the Brightness characteristic starts a
+  settle period of 10 s for the device, and each further change restarts it.
+  The hook still remembers each temperature, but accepts none, from a
+  recompute or from the controller's schedule. When the period ends and
+  Adaptive Lighting is still active, the bridge publishes the remembered
+  temperature, as Adaptive Lighting's, if the rule would. A switch that reports
+  full brightness, then 12% fourteen ms later, then full again 5.2 s later,
+  as one group did on each turn-on, so costs the light nothing, where each
+  value had been followed by its own temperature and the light changed color
+  twice.
+- A Brightness that HomeKit writes ends the period, and the temperature
+  recomputed for it is accepted as before. So is the one for a brightness
+  that a report gives while a HomeKit write of power or brightness is
+  unconfirmed, because that brightness is the write's doing: a WLED fixture
+  reports brightness 0 while off and its real brightness once on. Turning
+  Adaptive Lighting off or shutting down cancels the period. The turn-on is not held by the period, which
+  begins with the brightness report that follows.
+
+The bridge's own publish at the end of the period is like any other Adaptive
+Lighting publish: it makes the color group unconfirmed, and `makePublish`
+sets Hue and Saturation to the curve's for it.
 
 ## A color or temperature in the same request
 
@@ -67,12 +106,13 @@ A test of this must start its writes inside `process.nextTick`.
 HAP-NodeJS turns Adaptive Lighting off when a controller writes Hue,
 Saturation, or ColorTemperature, which includes Siri's "white".
 
-`handleStateUpdate` turns it off when a report outside the suppression window
-shows a color (`showsColor`), so that a color set in the Hue app or in WLED is
-not overwritten a minute later. A color is a `color_temp` at the minimum
-without the hue and saturation that the Home app's curve gives the minimum,
-which a white there has. The schedule clamps to the minimum at midday on a
-light with a narrow range.
+A report that reaches HomeKit turns it off when it shows a color
+(`showsColor`), so that a color set in the Hue app or in WLED is not
+overwritten a minute later. A report that repeats the color that the light
+showed before a write is not applied, so it does not turn it off. A color is a
+`color_temp` at the minimum without the hue and saturation that the Home app's
+curve gives the minimum, which a white there has. The schedule clamps to the
+minimum at midday on a light with a narrow range.
 
 A WLED light with white strips reports the white at its end without a lit w
 channel as a color at the minimum, which only the bridge's memory of writing it

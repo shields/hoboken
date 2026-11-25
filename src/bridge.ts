@@ -65,8 +65,19 @@ import {
   showsColor,
   shouldPublishAdaptiveTemperature,
   withAdaptiveTemperature,
-  writtenState,
 } from "./adaptive-lighting.ts";
+import {
+  CONFIRMATION_MS,
+  expireWrites,
+  groupValues,
+  nextDeadline,
+  overlayOf,
+  recordWrite,
+  settleReport,
+  type Unconfirmed,
+  withoutWritten,
+  writtenGroups,
+} from "./write-confirmation.ts";
 import {
   adaptiveLightingController,
   createFanAccessory,
@@ -96,7 +107,10 @@ import type {
   StatusData,
 } from "./metrics.ts";
 
-const WRITE_BACK_SUPPRESSION_MS = 500;
+// How long a brightness that a report changed must stand before Adaptive
+// Lighting acts on it, so that a switch's brightness that flickers on the way
+// to its setting costs the light no color.
+const BRIGHTNESS_SETTLE_MS = 10000;
 const GET_RETRY_INITIAL_MS = 2000;
 const GET_RETRY_MAX_MS = 1_024_000;
 const GET_JITTER_FRACTION = 0.25;
@@ -223,30 +237,13 @@ export async function startBridge(
   checkCredentials(config.mqtt, credentials);
   assertMQTTURL(config.mqtt.url);
   const stateCache = new Map<string, RawState>();
-  const lastColorPublish = new Map<string, number>();
   const adaptiveTemperatures = new Map<string, number>();
   const adaptiveRequests = new Map<string, AdaptiveRequest>();
-  const recentWrites = new Map<
-    string,
-    {
-      on?: { value: boolean; at: number };
-      color_temp?: { value: number; at: number };
-    }
-  >();
-  const recentlyWritten = (topic: string): HomeKitState => {
-    const now = Date.now();
-    const writes = recentWrites.get(topic);
-    return {
-      ...(writes?.on &&
-        now - writes.on.at < WRITE_BACK_SUPPRESSION_MS && {
-          on: writes.on.value,
-        }),
-      ...(writes?.color_temp &&
-        now - writes.color_temp.at < WRITE_BACK_SUPPRESSION_MS && {
-          color_temp: writes.color_temp.value,
-        }),
-    };
-  };
+  const unconfirmedWrites = new Map<string, Unconfirmed>();
+  const confirmationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const settleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const recentlyWritten = (topic: string): HomeKitState =>
+    overlayOf(unconfirmedWrites.get(topic) ?? {});
   const pendingGetTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let stableTimer: ReturnType<typeof setTimeout> | undefined;
   let heatedBedding: HeatedBeddingMQTT | undefined;
@@ -392,6 +389,111 @@ export async function startBridge(
     metrics?.mqttMessagesPublished.inc();
   };
 
+  function setUnconfirmed(topic: string, pending: Unconfirmed): void {
+    unconfirmedWrites.set(topic, pending);
+    clearTimeout(confirmationTimers.get(topic));
+    const deadline = nextDeadline(pending);
+    if (deadline === undefined) return;
+    const timer = setTimeout(() => {
+      giveUpOnWrites(topic);
+    }, deadline - Date.now());
+    timer.unref();
+    confirmationTimers.set(topic, timer);
+  }
+
+  // A write that no report has shown by its deadline had no effect, so HomeKit
+  // takes the device's state back.
+  function giveUpOnWrites(topic: string): void {
+    const { expired, pending } = expireWrites(
+      unconfirmedWrites.get(topic) ?? {},
+      Date.now(),
+    );
+    setUnconfirmed(topic, pending);
+    const entry = accessoryMap.get(topic);
+    const raw = stateCache.get(topic);
+    if (!entry || !raw) return;
+    if (expired.length > 0) {
+      log.log(
+        `No report confirmed the ${expired.join(", ")} written to "${entry.device.name}" within ${String(CONFIRMATION_MS)} ms; HomeKit shows the reported state`,
+      );
+    }
+    applyToHomeKit(
+      entry,
+      groupValues(
+        protocols[entry.device.type].toHomeKit(raw, raw, entry.device),
+        expired,
+      ),
+      false,
+    );
+  }
+
+  function endBrightnessSettle(topic: string): void {
+    clearTimeout(settleTimers.get(topic));
+    settleTimers.delete(topic);
+  }
+
+  function startBrightnessSettle(entry: AccessoryEntry): void {
+    const topic = entry.device.topic;
+    endBrightnessSettle(topic);
+    const timer = setTimeout(() => {
+      settleTimers.delete(topic);
+      publishRememberedTemperature(entry);
+    }, BRIGHTNESS_SETTLE_MS);
+    timer.unref();
+    settleTimers.set(topic, timer);
+  }
+
+  function publishRememberedTemperature(entry: AccessoryEntry): void {
+    const topic = entry.device.topic;
+    const temperature = adaptiveTemperatures.get(topic);
+    if (
+      temperature === undefined ||
+      adaptiveLightingController(
+        entry.accessory,
+      )?.isAdaptiveLightingActive() !== true ||
+      !entry.acceptsAdaptiveTemperature(temperature)
+    )
+      return;
+    entry.publish(topic, { color_temp: temperature }, "adaptive-lighting");
+  }
+
+  // `outside` is whether the state is a report of something that HomeKit did
+  // not write: a brightness that a HomeKit write brought needs no time to
+  // settle, and a write that is undone turns no light on.
+  function applyToHomeKit(
+    entry: AccessoryEntry,
+    hkState: HomeKitState,
+    outside: boolean,
+  ): void {
+    if (showsColor(hkState, entry.device))
+      disableAdaptiveLighting(entry, "the light shows a color");
+    const adaptive =
+      adaptiveLightingController(
+        entry.accessory,
+      )?.isAdaptiveLightingActive() === true;
+    const service = adaptive
+      ? entry.accessory.getService(Service.Lightbulb)
+      : undefined;
+    const on = service?.getCharacteristic(Characteristic.On);
+    const wasOn = on?.value;
+    // Adaptive Lighting recomputes for a Brightness the moment it changes.
+    if (
+      outside &&
+      service &&
+      hkState.brightness !== undefined &&
+      hkState.brightness !==
+        service.getCharacteristic(Characteristic.Brightness).value
+    )
+      startBrightnessSettle(entry);
+    if (Object.keys(hkState).length > 0) {
+      entry.updateState(entry.accessory, hkState, entry.device.capabilities);
+    }
+    // A turn-on that HomeKit wrote has the characteristic on already; a light
+    // turned on elsewhere is not at the temperature it was left at.
+    if (outside && on && wasOn !== true && on.value === true)
+      publishRememberedTemperature(entry);
+  }
+
   function makePublish(
     device: DeviceConfig,
     convert: (
@@ -432,25 +534,19 @@ export async function startBridge(
       log.log(
         `${origin}: ${JSON.stringify(written)}${payload === written ? "" : " with the temperature of Adaptive Lighting"} published to ${mqttTopic(topic)} as ${message}`,
       );
+      // What the light showed for a temperature that Adaptive Lighting asked
+      // for says nothing once HomeKit has set its color or temperature.
       if (
-        "hue" in payload ||
-        "saturation" in payload ||
-        "color_temp" in payload
-      ) {
-        lastColorPublish.set(topic, Date.now());
-        // What the light showed for a temperature that Adaptive Lighting asked
-        // for says nothing once HomeKit has set its color or temperature.
-        if (source !== "adaptive-lighting") adaptiveRequests.delete(topic);
-      }
-      const wrote = writtenState(payload);
-      const at = Date.now();
-      recentWrites.set(topic, {
-        ...recentWrites.get(topic),
-        ...(wrote.on !== undefined && { on: { value: wrote.on, at } }),
-        ...(wrote.color_temp !== undefined && {
-          color_temp: { value: wrote.color_temp, at },
-        }),
-      });
+        source !== "adaptive-lighting" &&
+        ("hue" in payload || "saturation" in payload || "color_temp" in payload)
+      )
+        adaptiveRequests.delete(topic);
+      // The Brightness that HomeKit writes is the one to adapt to, at once.
+      if ("brightness" in payload) endBrightnessSettle(topic);
+      setUnconfirmed(
+        topic,
+        recordWrite(unconfirmedWrites.get(topic) ?? {}, payload, Date.now()),
+      );
       if (!follow || !entry) return;
       const { homeKit, raw } = follow(converted);
       const cached = stateCache.get(topic);
@@ -535,6 +631,8 @@ export async function startBridge(
     accessory: Accessory;
     device: Config["devices"][number];
     updateState: typeof updateAccessoryState;
+    publish: PublishFn;
+    acceptsAdaptiveTemperature: (temperature: number) => boolean;
   }
   const accessoryMap = new Map<string, AccessoryEntry>();
 
@@ -544,6 +642,7 @@ export async function startBridge(
   ): void {
     const adaptive = adaptiveLightingController(entry.accessory);
     if (adaptive?.isAdaptiveLightingActive() !== true) return;
+    endBrightnessSettle(entry.device.topic);
     log.log(`Adaptive Lighting off for "${entry.device.name}": ${reason}`);
     adaptive.disableAdaptiveLighting();
   }
@@ -562,11 +661,13 @@ export async function startBridge(
     const getState = (topic: string) => {
       const raw = stateCache.get(topic);
       if (!raw) return;
-      return proto.toHomeKit(raw, raw, device);
+      return withoutWritten(
+        proto.toHomeKit(raw, raw, device),
+        unconfirmedWrites.get(topic) ?? {},
+      );
     };
 
-    const adaptiveTemperature = (temperature: number) => {
-      adaptiveTemperatures.set(device.topic, temperature);
+    const acceptsAdaptiveTemperature = (temperature: number) => {
       if (mqttClient?.connected !== true) return false;
       const reported = getState(device.topic);
       const state = { ...reported, ...recentlyWritten(device.topic) };
@@ -582,6 +683,13 @@ export async function startBridge(
         shown: last?.temperature === temperature ? state.color_temp : undefined,
       });
       return true;
+    };
+    const adaptiveTemperature = (temperature: number) => {
+      adaptiveTemperatures.set(device.topic, temperature);
+      return (
+        !settleTimers.has(device.topic) &&
+        acceptsAdaptiveTemperature(temperature)
+      );
     };
 
     const isFan = device.capabilities.includes("fan");
@@ -600,6 +708,8 @@ export async function startBridge(
       accessory,
       device,
       updateState: isFan ? updateFanAccessoryState : updateAccessoryState,
+      publish,
+      acceptsAdaptiveTemperature,
     };
     accessoryMap.set(device.topic, entry);
     switch (device.type) {
@@ -793,7 +903,8 @@ export async function startBridge(
     log.log(
       `State update for "${entry.device.name}": ${JSON.stringify(rawPartial)}`,
     );
-    const merged = { ...stateCache.get(deviceTopic), ...rawPartial };
+    const previousRaw = stateCache.get(deviceTopic);
+    const merged = { ...previousRaw, ...rawPartial };
     stateCache.set(deviceTopic, merged);
     updateMetrics();
     const pendingTimer = pendingGetTimers.get(deviceTopic);
@@ -802,24 +913,20 @@ export async function startBridge(
       pendingGetTimers.delete(deviceTopic);
     }
 
-    const lastPub = lastColorPublish.get(deviceTopic);
-    const suppressing =
-      lastPub !== undefined && Date.now() - lastPub < WRITE_BACK_SUPPRESSION_MS;
-    const hkState = protocols[entry.device.type].toHomeKit(
-      rawPartial,
-      merged,
-      entry.device,
+    const protocol = protocols[entry.device.type];
+    const before = unconfirmedWrites.get(deviceTopic) ?? {};
+    const { applied, pending } = settleReport(
+      before,
+      protocol.toHomeKit(rawPartial, merged, entry.device),
+      previousRaw && protocol.toHomeKit(previousRaw, previousRaw, entry.device),
     );
-    if (suppressing) {
-      delete hkState.hue;
-      delete hkState.saturation;
-      delete hkState.color_temp;
-    }
-    if (showsColor(hkState, entry.device))
-      disableAdaptiveLighting(entry, "the light shows a color");
-    if (Object.keys(hkState).length > 0) {
-      entry.updateState(entry.accessory, hkState, entry.device.capabilities);
-    }
+    setUnconfirmed(deviceTopic, pending);
+    const awaited = writtenGroups(before);
+    applyToHomeKit(
+      entry,
+      applied,
+      !awaited.includes("power") && !awaited.includes("brightness"),
+    );
   }
 
   mqttClient?.on("message", (topic, payload) => {
@@ -980,6 +1087,13 @@ export async function startBridge(
     ...(metricsPort === undefined ? {} : { metricsPort }),
     shutdown: async () => {
       cancelAllRetries();
+      for (const timer of [
+        ...confirmationTimers.values(),
+        ...settleTimers.values(),
+      ])
+        clearTimeout(timer);
+      confirmationTimers.clear();
+      settleTimers.clear();
       let tucsonFailure: { error: unknown } | undefined;
       try {
         const stopped = await Promise.allSettled([
