@@ -25,6 +25,7 @@ import {
   Characteristic,
   type HAPConnection,
   HAPStatus,
+  HapStatusError,
   Service,
 } from "@homebridge/hap-nodejs";
 import type { DeviceConfig } from "../src/config.ts";
@@ -455,10 +456,41 @@ describe("write coalescing", () => {
     expect(publish).toHaveBeenCalledWith("light_2", { on: false });
   });
 
+  test("flush lets an error other than a dropped connection through", () => {
+    const throwingPublish: PublishFn = () => {
+      throw new TypeError("not a connection error");
+    };
+    const device = makeDevice({ capabilities: ["on_off"] });
+    const accessory = createLightAccessory(device, throwingPublish, getState);
+    const scheduled: (() => void)[] = [];
+    const nextTick = jest
+      .spyOn(process, "nextTick")
+      .mockImplementation(
+        (callback: (...args: unknown[]) => void, ...args: unknown[]) => {
+          scheduled.push(() => {
+            callback(...args);
+          });
+        },
+      );
+    try {
+      accessory
+        .getService(Service.Lightbulb)!
+        .getCharacteristic(Characteristic.On)
+        .setValue(true);
+    } finally {
+      nextTick.mockRestore();
+    }
+
+    expect(() => {
+      for (const callback of scheduled) callback();
+    }).toThrow("not a connection error");
+  });
+
   test("flush swallows publish errors without crashing", async () => {
     let shouldThrow = false;
     const throwingPublish: PublishFn = () => {
-      if (shouldThrow) throw new Error("disconnected");
+      if (shouldThrow)
+        throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     };
     const device = makeDevice({ capabilities: ["on_off"] });
     const accessory = createLightAccessory(device, throwingPublish, getState);

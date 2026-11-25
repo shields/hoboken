@@ -24,6 +24,7 @@ import {
 import type { UsableHeatedBeddingState } from "./heated-bedding-source.ts";
 import {
   clampColorTemp,
+  type WledLight,
   wledBrightnessToHomeKit,
   wledRgb,
   wledToHomeKit,
@@ -134,6 +135,7 @@ export interface DeviceStatus {
   type: DeviceType;
   capabilities: Capability[];
   scenes?: { name: string; id: number }[];
+  light?: WledLight;
   state: Record<string, unknown> | null;
 }
 
@@ -318,6 +320,7 @@ function formatHint(
   key: string,
   value: unknown,
   capabilities: Capability[],
+  device?: Pick<DeviceStatus, "state" | "light">,
 ): Hint | null {
   if (
     key === "brightness" &&
@@ -380,8 +383,17 @@ function formatHint(
       typeof w !== "number"
     )
       return null;
+    // The channels of a device with white strips are not red, green, and
+    // blue, so its swatch is the color that HomeKit is given.
+    const hk =
+      device?.light?.whiteChannels && device.state
+        ? wledToHomeKit(device.state, device.state, device.light)
+        : undefined;
     return {
-      html: `<span class="swatch" style="background:rgb(${wledRgb(r, g, b, w).join(",")})"></span>`,
+      html:
+        hk?.hue === undefined || hk.saturation === undefined
+          ? `<span class="swatch" style="background:rgb(${wledRgb(r, g, b, w).join(",")})"></span>`
+          : `<span class="swatch" style="background:hsl(${String(hk.hue)},${String(hk.saturation)}%,50%)"></span>`,
       placement: "key",
     };
   }
@@ -482,6 +494,7 @@ function computeHomeKitValues(
   state: Record<string, unknown>,
   capabilities: Capability[],
   type: DeviceType,
+  light?: WledLight,
 ): HomeKitRow[] {
   let hk: ReturnType<typeof z2mToHomeKit>;
   switch (type) {
@@ -489,7 +502,7 @@ function computeHomeKitValues(
       hk = z2mToHomeKit(state, state, capabilities);
       break;
     case "wled":
-      hk = wledToHomeKit(state);
+      hk = wledToHomeKit(state, state, light);
       break;
   }
   const rows: HomeKitRow[] = [];
@@ -578,11 +591,12 @@ function renderHomeKitSection(
   capabilities: Capability[],
   vtPrefix: string,
   type: DeviceType,
+  light?: WledLight,
 ): string {
   if (state === null) {
     return `<div class="label">HomeKit</div>\n<span class="na">No state received</span>`;
   }
-  const rows = computeHomeKitValues(state, capabilities, type);
+  const rows = computeHomeKitValues(state, capabilities, type, light);
   const rowsHtml = rows
     .map((r) => {
       const vtName = `${vtPrefix}-hk-${r.name}`;
@@ -647,6 +661,7 @@ function renderStatusContent(data: StatusData): string {
       device.capabilities,
       vtPrefix,
       device.type,
+      device.light,
     );
 
     let mqttStateHtml: string;
@@ -656,7 +671,7 @@ function renderStatusContent(data: StatusData): string {
       const rows = Object.entries(device.state)
         .map(([k, v]) => {
           const display = formatValue(v);
-          const hint = formatHint(k, v, device.capabilities);
+          const hint = formatHint(k, v, device.capabilities, device);
           const keyHint = hint?.placement === "key" ? hint.html : "";
           const valueHint = hint?.placement === "value" ? hint.html : "";
           const vtName = `${vtPrefix}-${k.replaceAll(/[^a-zA-Z0-9]/g, "-")}`;

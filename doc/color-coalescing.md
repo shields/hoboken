@@ -326,3 +326,52 @@ channel alone, "Brighter", "Dual", and "Max" light all four channels, and
 "None" mixes RGB. Publishing white alone, `[0, 0, 0, 255]`, would be right
 for "None" and "Dual" and would turn the strip off in the other modes and
 on an RGB strip, so it would need a per-device option.
+
+## WLED White Segments
+
+WLED knows nothing about the color temperature of a white LED. On an RGBW
+output it sees four channels, and its own CCT support assumes a nominal
+range rather than the strips fitted. A fixture can still be built for
+tunable white: an RGB strip on one segment for color, and on other
+segments a four-channel driver whose channels each feed a white strip,
+some warm and some cool. With Auto White off, each channel's value is
+that strip's level.
+
+A device describes this with `colorSegments`, `whiteSegments`, and
+`whiteChannels`, the color temperature in kelvins of the strip on each of
+`r`, `g`, `b`, and `w`, which must be two temperatures in all. It may
+then have `color_temp`, and its `ColorTemperature` spans the two strips
+in whole mireds: 182 to 416 for 5500 K and 2400 K. That range must lie
+within 140 to 500, HomeKit's, because the rest of the bridge limits
+`ColorTemperature` to it.
+
+- **A temperature** lights the white segments and darkens the color
+  segments. Along the range the two strips cross-fade in mireds, the unit
+  in which two whites mix about linearly, with both full on at the
+  midpoint: from the warm end the cool strips rise to full at the middle,
+  and from there the warm strips fall to nothing. So the light is twice
+  as bright in the middle as at either end, and each end is one strip
+  alone. A request outside the range gets the nearer end.
+- **A color** lights the color segments and darkens the white segments.
+- **A white by name**, or a hue and saturation on the Home app's curve,
+  is a temperature as for Zigbee2MQTT, and `whiteColorTemp` applies.
+- **Gamma**: WLED raises a channel's value to its color gamma before
+  output, so 128 is about a fifth of full with the usual 2.2. `gamma`
+  tells the bridge that setting, and it sends `level ** (1 / gamma)`.
+  Without it the values themselves cross-fade linearly.
+
+Each write addresses segments by `id` and also sets `sel`, because WLED
+reports the primary color of the first selected segment on `<topic>/c`
+and nothing about the others. A reported color with a lit white channel
+is a white, and its temperature follows from the two strips' levels. A
+white with only the cool strips lit has no white channel (5500 K is
+`[255, 0, 255, 0]` when cool is on `r` and `b`) and cannot be told from
+magenta on the color strip, so the bridge keeps the white that it last
+wrote, as `white` in the cached state, and reads that same color reported
+back as the white. Any other color without a white channel is a color, so
+cool strips alone set in WLED itself read as magenta.
+
+Segments in neither list are left alone. A selected one with a lower id than
+the listed segments that are lit is the first selected segment, so its color
+is the one WLED reports and the bridge reads; it has to be deselected in
+WLED.

@@ -24,6 +24,7 @@ import {
 import type { Capability, DeviceConfig, SceneConfig } from "./config.ts";
 import {
   clampColorTemp,
+  colorTempRange,
   FAN_SPEED_STEP,
   type HomeKitState,
 } from "./convert.ts";
@@ -50,10 +51,11 @@ function createCoalescingPublish(
     scheduled = false;
     try {
       publish(topic, payload);
-    } catch {
+    } catch (error) {
       // Connection may have dropped between the synchronous prePublishCheck
       // and this nextTick flush. The error was already thrown to HAP-NodeJS
       // synchronously; swallow the async duplicate to avoid crashing.
+      if (!(error instanceof HapStatusError)) throw error;
     }
   };
 
@@ -112,7 +114,8 @@ export function createLightAccessory(
   }
 
   if (device.capabilities.includes("color_temp")) {
-    addSimpleCharacteristic(
+    const [minValue, maxValue] = colorTempRange(device);
+    const colorTemperature = addSimpleCharacteristic(
       service,
       Characteristic.ColorTemperature,
       "color_temp",
@@ -121,6 +124,9 @@ export function createLightAccessory(
       device.topic,
       (v) => clampColorTemp(Number(v)),
     );
+    // HAP-NodeJS warns when a new range excludes the value that is there.
+    colorTemperature.updateValue(minValue);
+    colorTemperature.setProps({ minValue, maxValue });
   }
 
   if (device.capabilities.includes("color_hs")) {

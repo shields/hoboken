@@ -786,15 +786,187 @@ describe("validateConfig", () => {
     );
   });
 
-  test("rejects whiteColorTemp on WLED devices", () => {
+  test("rejects whiteColorTemp on a WLED device without whiteChannels", () => {
     const data = validConfig();
     (data.devices[0]! as Record<string, unknown>).type = "wled";
     delete (data.devices[0]! as Record<string, unknown>).scenes;
     data.devices[0]!.capabilities = ["on_off", "color_hs"];
     (data.devices[0]! as Record<string, unknown>).whiteColorTemp = 370;
     expect(() => validateConfig(data)).toThrow(
-      "devices[0]: whiteColorTemp is not supported for WLED devices",
+      "devices[0]: whiteColorTemp on a WLED device requires whiteChannels",
     );
+  });
+
+  describe("WLED white segments", () => {
+    const WHITE = {
+      colorSegments: [0],
+      whiteSegments: [1, 2],
+      whiteChannels: { r: 5500, g: 2400, b: 5500, w: 2400 },
+    };
+
+    function wled(extra: Record<string, unknown>) {
+      const data = validConfig();
+      const device = data.devices[0]! as Record<string, unknown>;
+      delete device.scenes;
+      Object.assign(device, {
+        type: "wled",
+        capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+        ...extra,
+      });
+      return data;
+    }
+
+    test("accepts segments, channels, gamma, and whiteColorTemp", () => {
+      const device = validateConfig(
+        wled({ ...WHITE, gamma: 2.2, whiteColorTemp: 300 }),
+      ).devices[0]!;
+      expect(device).toMatchObject({
+        ...WHITE,
+        gamma: 2.2,
+        whiteColorTemp: 300,
+      });
+    });
+
+    test("leaves gamma out when it is not configured", () => {
+      expect("gamma" in validateConfig(wled(WHITE)).devices[0]!).toBe(false);
+    });
+
+    test("a device without them has none of the fields", () => {
+      const device = validateConfig(validConfig()).devices[0]!;
+      for (const field of ["colorSegments", "whiteSegments", "whiteChannels"])
+        expect(field in device).toBe(false);
+    });
+
+    test("color_temp on a WLED device requires them", () => {
+      expect(() => validateConfig(wled({}))).toThrow(
+        "devices[0]: color_temp on a WLED device requires whiteChannels",
+      );
+    });
+
+    test.each(["colorSegments", "whiteSegments", "whiteChannels", "gamma"])(
+      "rejects %s on a z2m device",
+      (field) => {
+        const data = validConfig();
+        (data.devices[0]! as Record<string, unknown>)[field] =
+          field === "gamma" ? 2.2 : WHITE[field];
+        expect(() => validateConfig(data)).toThrow(
+          `devices[0]: ${field} is only supported for WLED devices`,
+        );
+      },
+    );
+
+    test.each([
+      { colorSegments: [0] },
+      { whiteSegments: [1], whiteChannels: WHITE.whiteChannels },
+      { colorSegments: [0], whiteSegments: [1] },
+      { gamma: 2.2 },
+    ])("rejects an incomplete set: %j", (fields) => {
+      expect(() =>
+        validateConfig(
+          wled({ capabilities: ["on_off", "color_hs"], ...fields }),
+        ),
+      ).toThrow(
+        "devices[0]: colorSegments, whiteSegments, and whiteChannels must be configured together",
+      );
+    });
+
+    test.each([
+      [[]],
+      [[1, 1]],
+      [[-1]],
+      [[32]],
+      [[0.5]],
+      [["1"]],
+      ["1"],
+      [null],
+    ])("rejects whiteSegments %j", (whiteSegments) => {
+      expect(() => validateConfig(wled({ ...WHITE, whiteSegments }))).toThrow(
+        "devices[0].whiteSegments must be a non-empty array of distinct segment ids from 0 to 31",
+      );
+    });
+
+    test("rejects invalid colorSegments", () => {
+      expect(() =>
+        validateConfig(wled({ ...WHITE, colorSegments: [] })),
+      ).toThrow(
+        "devices[0].colorSegments must be a non-empty array of distinct segment ids from 0 to 31",
+      );
+    });
+
+    test("rejects a segment in both lists", () => {
+      expect(() =>
+        validateConfig(wled({ ...WHITE, colorSegments: [0, 2] })),
+      ).toThrow(
+        "devices[0]: a segment cannot be in both colorSegments and whiteSegments",
+      );
+    });
+
+    test.each([[5500], [null], [[5500, 2400, 5500, 2400]]])(
+      "rejects whiteChannels %j that is not an object of channels",
+      (whiteChannels) => {
+        expect(() => validateConfig(wled({ ...WHITE, whiteChannels }))).toThrow(
+          /devices\[0\]\.whiteChannels/,
+        );
+      },
+    );
+
+    test("rejects an unknown channel without its value", () => {
+      expect(() =>
+        validateConfig(
+          wled({ ...WHITE, whiteChannels: { ...WHITE.whiteChannels, a: 9 } }),
+        ),
+      ).toThrow(
+        'devices[0].whiteChannels: unknown field "a"; supported fields are r, g, b, and w',
+      );
+    });
+
+    test.each([
+      { r: 5500, g: 2400, b: 5500 },
+      { r: 5500, g: 5500, b: 5500, w: 5500 },
+      { r: 5500, g: 2400, b: 4000, w: 2400 },
+      { r: 5500, g: 2400, b: 5500, w: 999 },
+      { r: 5500, g: 2400, b: 5500, w: 20001 },
+      { r: 5500, g: 2400, b: 5500, w: "2400" },
+      { r: 5500, g: 2400, b: 5500, w: NaN },
+    ])("rejects whiteChannels %j", (whiteChannels) => {
+      expect(() => validateConfig(wled({ ...WHITE, whiteChannels }))).toThrow(
+        "devices[0].whiteChannels must give r, g, b, and w each one of two color temperatures from 1000 to 20000 kelvins",
+      );
+    });
+
+    test.each([
+      { r: 8000, g: 2400, b: 8000, w: 2400 },
+      { r: 5500, g: 1800, b: 5500, w: 1800 },
+      { r: 4000, g: 4001, b: 4000, w: 4001 },
+      { r: 2400, g: 2401, b: 2400, w: 2401 },
+    ])(
+      "rejects whiteChannels %j beyond or too narrow for HomeKit's range",
+      (whiteChannels) => {
+        expect(() => validateConfig(wled({ ...WHITE, whiteChannels }))).toThrow(
+          "devices[0].whiteChannels must span at least one whole mired within 140 to 500 mireds, the range of ColorTemperature",
+        );
+      },
+    );
+
+    test("accepts whiteChannels at the ends of HomeKit's range", () => {
+      const whiteChannels = { r: 7142, g: 2000, b: 7142, w: 2000 };
+      expect(
+        validateConfig(wled({ ...WHITE, whiteChannels })).devices[0]!
+          .whiteChannels,
+      ).toEqual(whiteChannels);
+    });
+
+    test.each([0.9, 3.1, "2.2", null, NaN])("rejects gamma %p", (gamma) => {
+      expect(() => validateConfig(wled({ ...WHITE, gamma }))).toThrow(
+        "devices[0].gamma must be a number from 1 to 3",
+      );
+    });
+
+    test.each([1, 3])("accepts gamma %d", (gamma) => {
+      expect(validateConfig(wled({ ...WHITE, gamma })).devices[0]!.gamma).toBe(
+        gamma,
+      );
+    });
   });
 
   test("accepts color_temp without color_hs", () => {
@@ -1196,7 +1368,8 @@ describe("validateConfig", () => {
       },
       ...[0, 1].map((index) => ({
         path: `devices[${String(index)}]`,
-        fields: "name, type, topic, capabilities, whiteColorTemp, and scenes",
+        fields:
+          "name, type, topic, capabilities, whiteColorTemp, colorSegments, whiteSegments, whiteChannels, gamma, and scenes",
         required: "topic",
         build: (changes: Record<string, unknown>) => {
           const config = validConfig();
@@ -1441,13 +1614,13 @@ describe("validateConfig", () => {
     );
   });
 
-  test("rejects WLED device with color_temp and color_hs", () => {
+  test("rejects color_temp on a WLED device without whiteChannels", () => {
     const data = validConfig();
     (data.devices[0]! as Record<string, unknown>).type = "wled";
-    data.devices[0]!.capabilities = ["on_off", "color_temp", "color_hs"];
+    data.devices[0]!.capabilities = ["on_off", "color_temp"];
     delete (data.devices[0]! as Record<string, unknown>).scenes;
     expect(() => validateConfig(data)).toThrow(
-      "color_temp and color_hs cannot be combined for WLED devices",
+      "devices[0]: color_temp on a WLED device requires whiteChannels",
     );
   });
 

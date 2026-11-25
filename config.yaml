@@ -31,3 +31,13 @@ devices:
   #   type: wled
   #   topic: "wled/living-room"
   #   capabilities: [on_off, brightness, color_hs]
+  #
+  # WLED fixture with warm and cool white strips on segments of their own:
+  # - name: "Nook"
+  #   type: wled
+  #   topic: "wled/nook"
+  #   capabilities: [on_off, brightness, color_temp, color_hs]
+  #   colorSegments: [0]
+  #   whiteSegments: [1, 2]
+  #   whiteChannels: { r: 5500, g: 2400, b: 5500, w: 2400 } # kelvins
+  #   gamma: 2.2 # optional: WLED's color gamma setting

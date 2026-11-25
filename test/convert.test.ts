@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   clampColorTemp,
+  colorTempRange,
   homeKitToWled,
   homeKitToZ2m,
   COOL_WHITE_COLOR_TEMP,
@@ -33,6 +34,7 @@ import {
   rgbToHs,
   wledBrightnessToHomeKit,
   wledRgb,
+  wledWrite,
   wledToHomeKit,
   z2mBrightnessToHomeKit,
   z2mFanModeToHomeKit,
@@ -455,6 +457,246 @@ describe("parseWledHexColor", () => {
 
   test("returns undefined on non-hex characters", () => {
     expect(parseWledHexColor("xyzxyz")).toBeUndefined();
+  });
+});
+
+describe("a WLED device with white segments", () => {
+  const LINEAR = {
+    colorSegments: [0],
+    whiteSegments: [1, 2],
+    whiteChannels: { r: 5500, g: 2400, b: 5500, w: 2400 },
+  };
+  const NOOK = { ...LINEAR, gamma: 2.2 };
+  const dark = { id: 0, on: false, sel: false };
+  const white = (col: number[]) => [
+    dark,
+    { id: 1, on: true, sel: true, col: [col] },
+    { id: 2, on: true, sel: true, col: [col] },
+  ];
+  const color = (col: number[]) => [
+    { id: 1, on: false, sel: false },
+    { id: 2, on: false, sel: false },
+    { id: 0, on: true, sel: true, col: [col] },
+  ];
+
+  test("its ColorTemperature range is what the strips span, in whole mireds", () => {
+    expect(colorTempRange(NOOK)).toEqual([182, 416]);
+  });
+
+  test("a device without white segments has HomeKit's range", () => {
+    expect(colorTempRange({})).toEqual([140, 500]);
+  });
+
+  test.each([
+    [416, [0, 255, 0, 255]],
+    [370, [167, 255, 167, 255]],
+    [299, [255, 255, 255, 255]],
+    [250, [255, 199, 255, 199]],
+    [182, [255, 0, 255, 0]],
+  ])(
+    "%d mireds lights the white segments with %j and darkens the color segment",
+    (mireds, col) => {
+      expect(homeKitToWled({ color_temp: mireds }, undefined, NOOK)).toEqual({
+        seg: white(col),
+      });
+    },
+  );
+
+  test("without gamma the blend is linear in the channel values", () => {
+    expect(homeKitToWled({ color_temp: 370 }, undefined, LINEAR)).toEqual({
+      seg: white([100, 255, 100, 255]),
+    });
+  });
+
+  test("a temperature beyond the strips is the nearer strip alone", () => {
+    expect(homeKitToWled({ color_temp: 500 }, undefined, NOOK)).toEqual({
+      seg: white([0, 255, 0, 255]),
+    });
+    expect(homeKitToWled({ color_temp: 140 }, undefined, NOOK)).toEqual({
+      seg: white([255, 0, 255, 0]),
+    });
+  });
+
+  test.each([
+    ["white", 0, 0, [167, 255, 167, 255]],
+    ["warm white", 31, 33, [0, 255, 0, 255]],
+    ["cool white", 208, 17, [255, 199, 255, 199]],
+    ["a Home app temperature swatch", 30, 48, [255, 249, 255, 249]],
+  ])("%s lights the white segments", (_, hue, saturation, col) => {
+    expect(homeKitToWled({ hue, saturation }, undefined, NOOK)).toEqual({
+      seg: white(col),
+    });
+  });
+
+  test("white uses whiteColorTemp", () => {
+    expect(
+      homeKitToWled({ hue: 0, saturation: 0 }, undefined, {
+        ...NOOK,
+        whiteColorTemp: 299,
+      }),
+    ).toEqual({ seg: white([255, 255, 255, 255]) });
+  });
+
+  test("a color lights the color segment and darkens the white segments", () => {
+    expect(
+      homeKitToWled({ hue: 240, saturation: 100 }, undefined, NOOK),
+    ).toEqual({ seg: color([0, 0, 255]) });
+  });
+
+  test("on and brightness go with the segments", () => {
+    expect(
+      homeKitToWled(
+        { on: true, brightness: 100, hue: 0, saturation: 0 },
+        undefined,
+        NOOK,
+      ),
+    ).toEqual({ on: true, bri: 255, seg: white([167, 255, 167, 255]) });
+    expect(homeKitToWled({ on: false }, undefined, NOOK)).toEqual({
+      on: false,
+    });
+  });
+
+  test("a temperature wins over a color in the same write", () => {
+    expect(
+      homeKitToWled(
+        { color_temp: 299, hue: 240, saturation: 100 },
+        undefined,
+        NOOK,
+      ),
+    ).toEqual({ seg: white([255, 255, 255, 255]) });
+  });
+
+  test("the minimum temperature with a hue and saturation is the color", () => {
+    expect(
+      homeKitToWled(
+        { color_temp: 182, hue: 240, saturation: 100 },
+        undefined,
+        NOOK,
+      ),
+    ).toEqual({ seg: color([0, 0, 255]) });
+  });
+
+  test("a saturation alone takes the hue from the reported color", () => {
+    expect(
+      homeKitToWled({ saturation: 100 }, { col: [0, 0, 255] }, NOOK),
+    ).toEqual({ seg: color([0, 0, 255]) });
+  });
+
+  test("a device without white segments ignores a color temperature", () => {
+    expect(homeKitToWled({ color_temp: 370 })).toEqual({});
+  });
+
+  test("reads a white segment's color as a temperature and the Home app's color for it", () => {
+    expect(
+      wledToHomeKit({ col: [167, 255, 167, 255] }, undefined, NOOK),
+    ).toEqual({ color_temp: 370, hue: 30, saturation: 67 });
+  });
+
+  test("gives every temperature of the range back from its channel values", () => {
+    for (const light of [NOOK, LINEAR]) {
+      for (let mireds = 182; mireds <= 416; mireds++) {
+        const col = (
+          homeKitToWled({ color_temp: mireds }, undefined, light).seg as {
+            col?: number[][];
+          }[]
+        ).at(-1)!.col![0]!;
+        expect(
+          Math.abs(
+            wledToHomeKit({ col }, undefined, light).color_temp! - mireds,
+          ),
+        ).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  test("reads the color segment's color with the minimum temperature", () => {
+    expect(wledToHomeKit({ col: [0, 0, 255] }, undefined, NOOK)).toEqual({
+      color_temp: 182,
+      hue: 240,
+      saturation: 100,
+    });
+  });
+
+  test("cool strips alone are a temperature only when that white was written", () => {
+    const col = [255, 0, 255, 0];
+    expect(wledToHomeKit({ col }, { col, white: col }, NOOK)).toEqual({
+      color_temp: 182,
+      hue: 24,
+      saturation: 12,
+    });
+    expect(wledToHomeKit({ col }, { col, white: false }, NOOK)).toEqual({
+      color_temp: 182,
+      hue: 300,
+      saturation: 100,
+    });
+    expect(wledToHomeKit({ col }, undefined, NOOK)).toMatchObject({
+      hue: 300,
+    });
+    expect(
+      wledToHomeKit({ col }, { col, white: [0, 255, 0, 255] }, NOOK),
+    ).toMatchObject({ hue: 300 });
+  });
+
+  test("a color written after a white is not read as a temperature", () => {
+    const col = [0, 0, 255];
+    expect(
+      wledToHomeKit({ col }, { col, white: [255, 0, 255, 0] }, NOOK),
+    ).toMatchObject({
+      hue: 240,
+      saturation: 100,
+    });
+  });
+
+  test("dark white segments read as no temperature", () => {
+    const col = [0, 0, 0, 0];
+    expect(wledToHomeKit({ col }, { col, white: col }, NOOK)).toEqual({
+      color_temp: 182,
+      hue: 0,
+      saturation: 0,
+    });
+  });
+
+  test("an update without a color reports none", () => {
+    expect(
+      wledToHomeKit({ bri: 128 }, { bri: 128, col: [0, 0, 255] }, NOOK),
+    ).toEqual({ brightness: 50 });
+  });
+
+  test("an update is read against the merged state", () => {
+    const col = [255, 0, 255, 0];
+    expect(
+      wledToHomeKit({ col }, { on: true, col, white: col }, NOOK),
+    ).toMatchObject({ color_temp: 182 });
+  });
+
+  test("ignores a malformed color", () => {
+    expect(wledToHomeKit({ col: [1, 2] }, undefined, NOOK)).toEqual({});
+    expect(wledToHomeKit({ col: "red" }, undefined, NOOK)).toEqual({});
+  });
+
+  describe("wledWrite", () => {
+    test("a white write leaves the white segments' color", () => {
+      expect(
+        wledWrite(homeKitToWled({ color_temp: 299 }, undefined, NOOK), NOOK),
+      ).toEqual({ col: [255, 255, 255, 255], white: [255, 255, 255, 255] });
+    });
+
+    test("a color write leaves the color segment's color", () => {
+      expect(
+        wledWrite(
+          homeKitToWled({ hue: 240, saturation: 100 }, undefined, NOOK),
+          NOOK,
+        ),
+      ).toEqual({ col: [0, 0, 255], white: false });
+    });
+
+    test("a write without segments leaves the color as it was", () => {
+      expect(wledWrite({ on: true, bri: 255 }, NOOK)).toBeUndefined();
+    });
+
+    test("a device without white segments has no such state", () => {
+      expect(wledWrite({ seg: [{ col: [[255, 0, 0]] }] }, {})).toBeUndefined();
+    });
   });
 });
 

@@ -72,7 +72,7 @@ Devices declare capabilities in `config.yaml`:
 | ------------ | ---------------------------------- | ---------------------------------------- | -------------------------- |
 | `on_off`     | `On`                               | boolean, always present                  | boolean                    |
 | `brightness` | `Brightness`                       | Z2M 0–254 ↔ HomeKit 0–100                | WLED 0–255 ↔ HomeKit 0–100 |
-| `color_temp` | `ColorTemperature`                 | mireds, no conversion needed             | not supported              |
+| `color_temp` | `ColorTemperature`                 | mireds, no conversion needed             | white segments only        |
 | `color_hs`   | `Hue` + `Saturation`               | ranges match; white becomes `color_temp` | HSV ↔ RGB conversion       |
 | `fan`        | `Active` (FanV2)                   | `fan_state` ON/OFF ↔ 1/0                 | not supported              |
 | `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ speed thirds                | not supported              |
@@ -93,12 +93,44 @@ has reported any state.
 
 A Zigbee2MQTT light can have `color_temp` and `color_hs` together. HomeKit
 then gets a color temperature as well as a color, and a request that sets
-both publishes the color temperature. The HomeKit specification does not
-allow the combination, but Home Assistant and the Homebridge plugins for
-Hue, deCONZ, and Zigbee2MQTT use it.
+both publishes the color temperature, except for the minimum of 140
+mireds with both Hue and Saturation, which is what a light showing a color
+reports and a scene writes back, and is published as the color. The HomeKit
+specification does not allow the combination, but Home Assistant and the
+Homebridge plugins for Hue, deCONZ, and Zigbee2MQTT use it.
 
 A WLED light gets RGB (255, 255, 255). For an RGBW strip, set Auto White
 to "Accurate" in WLED's LED preferences to light the white LEDs alone.
+
+### WLED white segments
+
+A WLED fixture can have its white on segments of its own: an RGB strip on
+one segment, and on others a four-channel driver whose channels feed warm
+and cool white strips. Describe it with `colorSegments`, `whiteSegments`,
+and `whiteChannels`, the color temperature in kelvins of the strip on each
+channel, and it can have `color_temp`:
+
+```yaml
+- name: "Nook"
+  type: wled
+  topic: "wled/nook"
+  capabilities: [on_off, brightness, color_temp, color_hs]
+  colorSegments: [0]
+  whiteSegments: [1, 2]
+  whiteChannels: { r: 5500, g: 2400, b: 5500, w: 2400 }
+  gamma: 2.2 # optional: WLED's color gamma setting
+```
+
+A color temperature or a white lights the white segments and turns the
+color segments off; a color does the reverse. The two kinds of strip
+cross-fade across the range, with both full on at the midpoint, so the
+light is brightest there. The range HomeKit offers is the one the strips
+span, which must lie within 140 to 500 mireds (about 2000 to 7142 K).
+Other segments are left alone, but WLED reports the color of the
+lowest-numbered selected segment, so a selected segment that is in neither
+list and has a lower id than the listed ones hides the fixture's color from
+the bridge; deselect it in WLED. Auto White must be "None" on the white
+outputs.
 
 ### Scenes
 
@@ -331,16 +363,17 @@ on every interface. The error gives the section and the key, such as
 `metrics: unknown field "bnd"; supported fields are port and bind`, but never
 the value.
 
-| Object                     | Keys                                                                |
-| -------------------------- | ------------------------------------------------------------------- |
-| top level                  | `bridge`, `mqtt`, `devices`, `heatedBedding`, `curtains`, `metrics` |
-| `bridge`                   | `name`, `mac`, `pincode`, `port`, `bind`                            |
-| `mqtt`                     | `url`, `username`, `passwordFile`                                   |
-| `metrics`                  | `port`, `bind`                                                      |
-| each `devices` entry       | `name`, `type`, `topic`, `capabilities`, `whiteColorTemp`, `scenes` |
-| each `scenes` entry        | `name`, `id`                                                        |
-| each `heatedBedding` entry | `name`, `prefix`, `controller`, `zone`, `zones`                     |
-| each `curtains` entry      | `name`, `prefix`, `controller`                                      |
+| Object                     | Keys                                                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| top level                  | `bridge`, `mqtt`, `devices`, `heatedBedding`, `curtains`, `metrics`                                                             |
+| `bridge`                   | `name`, `mac`, `pincode`, `port`, `bind`                                                                                        |
+| `mqtt`                     | `url`, `username`, `passwordFile`                                                                                               |
+| `metrics`                  | `port`, `bind`                                                                                                                  |
+| each `devices` entry       | `name`, `type`, `topic`, `capabilities`, `whiteColorTemp`, `colorSegments`, `whiteSegments`, `whiteChannels`, `gamma`, `scenes` |
+| `whiteChannels`            | `r`, `g`, `b`, `w`                                                                                                              |
+| each `scenes` entry        | `name`, `id`                                                                                                                    |
+| each `heatedBedding` entry | `name`, `prefix`, `controller`, `zone`, `zones`                                                                                 |
+| each `curtains` entry      | `name`, `prefix`, `controller`                                                                                                  |
 
 ### Bind Interface
 

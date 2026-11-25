@@ -32,6 +32,7 @@ const ON_UUID = "00000025-0000-1000-8000-0026BB765291";
 const BRIGHTNESS_UUID = "00000008-0000-1000-8000-0026BB765291";
 const HUE_UUID = "00000013-0000-1000-8000-0026BB765291";
 const SATURATION_UUID = "0000002F-0000-1000-8000-0026BB765291";
+const COLOR_TEMPERATURE_UUID = "000000CE-0000-1000-8000-0026BB765291";
 
 // --- Helpers ---
 
@@ -48,17 +49,20 @@ interface AccessoryList {
   }[];
 }
 
-function findChar(accs: AccessoryList, typeUuid: string): string {
-  for (const acc of accs.accessories) {
-    for (const svc of acc.services) {
-      for (const ch of svc.characteristics) {
-        if (ch.type.toUpperCase() === typeUuid) {
-          return `${String(acc.aid)}.${String(ch.iid)}`;
-        }
-      }
-    }
-  }
-  throw new Error(`Characteristic ${typeUuid} not found`);
+// `nth` picks among the accessories that have the characteristic, in the order
+// of the configured devices.
+function findChar(accs: AccessoryList, typeUuid: string, nth = 0): string {
+  const keys = accs.accessories.flatMap((acc) =>
+    acc.services.flatMap((svc) =>
+      svc.characteristics
+        .filter((ch) => ch.type.toUpperCase() === typeUuid)
+        .map((ch) => `${String(acc.aid)}.${String(ch.iid)}`),
+    ),
+  );
+  const key = keys[nth];
+  if (key === undefined)
+    throw new Error(`Characteristic ${typeUuid} not found`);
+  return key;
 }
 
 async function getCharValues(
@@ -129,6 +133,7 @@ const BASELINE_SATURATION = 100;
 
 describe("WLED integration", { timeout: 30000 }, () => {
   let simulator: WledSimulator | undefined;
+  let nook: WledSimulator | undefined;
   let handle: Awaited<ReturnType<typeof startBridge>> | undefined;
   let client: InstanceType<typeof HttpClient> | undefined;
   let broker: Aedes | undefined;
@@ -139,6 +144,9 @@ describe("WLED integration", { timeout: 30000 }, () => {
   let briKey: string;
   let hueKey: string;
   let satKey: string;
+  let nookHueKey: string;
+  let nookSatKey: string;
+  let nookTempKey: string;
 
   async function waitForValues(
     expected: Record<string, unknown>,
@@ -211,6 +219,20 @@ describe("WLED integration", { timeout: 30000 }, () => {
     );
     await simReadyPromise;
 
+    const nookReadyPromise = waitFor<AedesPublishPacket>(
+      broker,
+      "publish",
+      (p) => p.topic === "wled/nook/g",
+      5000,
+      "topic wled/nook/g",
+    );
+    nook = new WledSimulator(
+      `mqtt://127.0.0.1:${String(aedesPort)}`,
+      "wled/nook",
+      3,
+    );
+    await nookReadyPromise;
+
     tmpDir = mkdtempSync(path.join(tmpdir(), "hoboken-integ-"));
     HAPStorage.setCustomStoragePath(tmpDir);
 
@@ -229,15 +251,25 @@ describe("WLED integration", { timeout: 30000 }, () => {
           topic: "wled/test1",
           capabilities: ["on_off", "brightness", "color_hs"],
         },
+        {
+          name: "Test Nook",
+          type: "wled",
+          topic: "wled/nook",
+          capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+          colorSegments: [0],
+          whiteSegments: [1, 2],
+          whiteChannels: { r: 5500, g: 2400, b: 5500, w: 2400 },
+          gamma: 2.2,
+        },
       ],
     };
 
     const bridgeSubPromise = waitFor<Subscription[]>(
       broker,
       "subscribe",
-      (subs) => subs.some((s) => s.topic === "wled/test1/g"),
+      (subs) => subs.some((s) => s.topic === "wled/nook/g"),
       5000,
-      "subscribe wled/test1/g",
+      "subscribe wled/nook/g",
     );
     handle = await startBridge(config, "integration");
     await bridgeSubPromise;
@@ -250,6 +282,9 @@ describe("WLED integration", { timeout: 30000 }, () => {
     briKey = findChar(accs, BRIGHTNESS_UUID);
     hueKey = findChar(accs, HUE_UUID);
     satKey = findChar(accs, SATURATION_UUID);
+    nookHueKey = findChar(accs, HUE_UUID, 1);
+    nookSatKey = findChar(accs, SATURATION_UUID, 1);
+    nookTempKey = findChar(accs, COLOR_TEMPERATURE_UUID);
   });
 
   after(async () => {
@@ -257,6 +292,7 @@ describe("WLED integration", { timeout: 30000 }, () => {
       client?.close(),
       handle?.shutdown(),
       simulator?.close(),
+      nook?.close(),
     ]);
     if (broker) {
       await new Promise<void>((resolve) => {
@@ -368,6 +404,107 @@ describe("WLED integration", { timeout: 30000 }, () => {
       await waitForValues({ [onKey]: 0 });
       simulator!.setBrightness(200);
       await waitForValues({ [onKey]: 1, [briKey]: 78 });
+    });
+  });
+
+  describe("white segments", () => {
+    const lit = (col: number[]) => ({ on: true, sel: true, col });
+
+    async function waitForSegments(expected: unknown[]): Promise<void> {
+      await poll(
+        () => {
+          try {
+            assert.deepEqual(nook!.segments, expected);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        50,
+        3000,
+      );
+    }
+
+    test("HK→WLED color temperature blends the white strips", async () => {
+      await client!.setCharacteristics({ [nookTempKey]: 299 });
+      await waitForSegments([
+        { on: false, sel: false, col: [255, 160, 0, 0] },
+        lit([255, 255, 255, 255]),
+        lit([255, 255, 255, 255]),
+      ]);
+      await waitForValues({
+        [nookTempKey]: 299,
+        [nookHueKey]: 30,
+        [nookSatKey]: 50,
+      });
+    });
+
+    test("HK→WLED white lights the white segments at 2700 K", async () => {
+      await client!.setCharacteristics({ [nookHueKey]: 0, [nookSatKey]: 0 });
+      await poll(() => nook!.segments[1]?.col[0] === 167, 50, 3000);
+      assert.deepEqual(nook!.segments.slice(1), [
+        lit([167, 255, 167, 255]),
+        lit([167, 255, 167, 255]),
+      ]);
+      await waitForValues({ [nookTempKey]: 370 });
+    });
+
+    test("HK→WLED color lights the color segment alone", async () => {
+      await client!.setCharacteristics({
+        [nookHueKey]: 120,
+        [nookSatKey]: 100,
+      });
+      await poll(() => nook!.segments[0]?.on === true, 50, 3000);
+      assert.deepEqual(
+        nook!.segments.map(({ on, sel }) => ({ on, sel })),
+        [
+          { on: true, sel: true },
+          { on: false, sel: false },
+          { on: false, sel: false },
+        ],
+      );
+      assert.deepEqual(nook!.segments[0]?.col, [0, 255, 0, 0]);
+      await waitForValues({
+        [nookHueKey]: 120,
+        [nookSatKey]: 100,
+        [nookTempKey]: 182,
+      });
+    });
+
+    test("WLED→HK a white set on the device reads as its temperature", async () => {
+      await client!.setCharacteristics({
+        [nookHueKey]: 120,
+        [nookSatKey]: 100,
+      });
+      await waitForValues({ [nookTempKey]: 182 });
+      // The device's color report within 500 ms of a write is suppressed.
+      await new Promise<void>((resolve) => setTimeout(resolve, 600));
+      broker!.publish(
+        {
+          cmd: "publish",
+          topic: "wled/nook/api",
+          payload: Buffer.from(
+            JSON.stringify({
+              seg: [
+                { id: 0, on: false, sel: false },
+                { id: 1, on: true, sel: true, col: [[0, 255, 0, 255]] },
+                { id: 2, on: true, sel: true, col: [[0, 255, 0, 255]] },
+              ],
+            }),
+          ),
+          qos: 0,
+          retain: false,
+          dup: false,
+        },
+        () => {
+          /* published */
+        },
+      );
+      await waitForValues({
+        [nookTempKey]: 416,
+        [nookHueKey]: 30,
+        [nookSatKey]: 76,
+      });
     });
   });
 

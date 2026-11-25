@@ -134,12 +134,33 @@ Each module is independently testable with dependency injection:
   logs each published write as the coalesced HomeKit payload, the MQTT topic,
   and the message. Neither Zigbee2MQTT at its `info` level nor the broker
   records what a controller sent.
+- **WLED white segments**: a WLED device with `colorSegments`,
+  `whiteSegments`, and `whiteChannels` gets white from strips of two color
+  temperatures on the channels of its white segments (`whiteStrips`). A
+  temperature lights the white segments and darkens the color segments, and
+  a color does the reverse; each write addresses segments by `id` and sets
+  `sel`, because WLED reports only the first selected segment's color.
+  `whiteChannelValues` cross-fades the two strips in mireds with both full
+  on at the midpoint and undoes WLED's `gamma`; `colorTempRange` is what the
+  strips span, in whole mireds, and is the `ColorTemperature` range of the
+  characteristic and the minimum that marks a color. A white by name or on
+  the Home app's curve follows `requestedColorTemp` as for Zigbee2MQTT. A
+  reported color with a lit white channel is a white. One with only the cool
+  strips lit cannot be told from a color, so `makePublish` keeps the white
+  it last wrote as `white` in the cached state, from `wledWrite`, and
+  `wledColorToHomeKit` reads that same color reported back as the white. See
+  `doc/color-coalescing.md`.
 - **WLED color reports**: `<topic>/c` is `#RRGGBB`, or `#WWRRGGBB` with one or
   two `W` digits when the white channel is lit (`parseWledHexColor`). The
   cached `col` then has a fourth element, and `wledRgb` adds it to each color
-  channel for HomeKit and for the status page swatch.
+  channel for HomeKit and for the status page swatch. A device with white
+  segments has other channels than red, green, and blue, and its swatch is
+  the hue and saturation that HomeKit is given.
 - **MQTT disconnect handling**: `onSet` throws
   `HapStatusError(SERVICE_COMMUNICATION_FAILURE)` when MQTT is disconnected.
+  The coalesced flush on the next tick swallows only that error, for a
+  connection that dropped in between; any other error from publishing is
+  thrown.
 - **Invalid heated bedding messages**: An invalid heated bedding MQTT message
   tears down the whole heated bedding connection, which reconnects with backoff,
   instead of invalidating only the affected zone. Partially invalid state isn't
@@ -394,8 +415,10 @@ make lint test
   allowlist through one helper, `rejectUnknownFields`. The objects are the top
   level (`bridge`, `mqtt`, `devices`, `heatedBedding`, `curtains`, `metrics`),
   `bridge`, `mqtt`, `metrics`, each `devices` entry (`name`, `type`, `topic`,
-  `capabilities`, `whiteColorTemp`, `scenes`), each `scenes` entry (`name`,
-  `id`), and each `heatedBedding` and `curtains` entry. The message gives the
+  `capabilities`, `whiteColorTemp`, `colorSegments`, `whiteSegments`,
+  `whiteChannels`, `gamma`, `scenes`), `whiteChannels` (`r`, `g`, `b`, `w`),
+  each `scenes` entry (`name`, `id`), and each `heatedBedding` and `curtains`
+  entry. The message gives the
   section path and the JSON-escaped key, never a value, so a misspelled
   `mqtt.username` cannot connect anonymously and a misspelled `metrics.bind`
   cannot leave the status page on every interface. The check runs first in each
@@ -412,11 +435,20 @@ make lint test
 - `devices`: non-empty array unless `heatedBedding` configures at least one zone;
   a configuration with only heated bedding can omit `devices` or use an empty array
 - Each device: `name`, `topic`, `capabilities` (non-empty, valid values);
-  a `wled` device cannot have both `color_temp` and `color_hs`, because WLED
-  has no color temperature to write or report
+  a `wled` device cannot have `color_temp` without `whiteChannels`, because
+  WLED alone has no color temperature to write or report
 - `whiteColorTemp`: optional integer from 140 to 500 mireds, the HAP
-  `ColorTemperature` range, so that kelvins are rejected; only on a `z2m`
-  device with `color_hs`
+  `ColorTemperature` range, so that kelvins are rejected; only on a device
+  with `color_hs`, and on a `wled` device only with `whiteChannels`
+- `colorSegments`, `whiteSegments`, `whiteChannels`: only on a `wled` device
+  and only all three together. Each list is non-empty, of distinct segment
+  ids from 0 to 31, and no id is in both. `whiteChannels` gives `r`, `g`,
+  `b`, and `w` each a color temperature from 1000 to 20000 kelvins, two
+  different temperatures in all, whose `colorTempRange` is at least one whole
+  mired wide and within 140 to 500, because the rest of the bridge limits
+  `ColorTemperature` to that range (about 2000 to 7142 kelvins). `gamma`,
+  from 1 to 3, is optional with them. `color_temp` on a `wled` device
+  requires them
 - Scene IDs: positive integers
 - `heatedBedding`: optional array of `name`, `prefix`, `controller`, and exactly
   one of `zone` or `zones`; `zones` lists at least two distinct zones of that

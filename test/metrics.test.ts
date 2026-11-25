@@ -1617,6 +1617,38 @@ describe("status page (GET /)", () => {
     expect(body).toContain('class="swatch"');
   });
 
+  test("the col swatch of a device with white strips is the color HomeKit is given", async () => {
+    const light = {
+      colorSegments: [0],
+      whiteSegments: [1, 2],
+      whiteChannels: { r: 5500, g: 2400, b: 5500, w: 2400 },
+    };
+    const device = {
+      name: "Nook",
+      topic: "wled/nook",
+      type: "wled" as const,
+      capabilities: [
+        "on_off" as const,
+        "color_temp" as const,
+        "color_hs" as const,
+      ],
+      light,
+    };
+    const cool = [255, 0, 255, 0];
+    const white = await renderDevice({
+      ...device,
+      state: { on: true, col: cool, white: cool },
+    });
+    expect(white).toContain("background:hsl(24,12%,50%)");
+    expect(white).not.toContain("rgb(255,0,255)");
+
+    const magenta = await renderDevice({
+      ...device,
+      state: { on: true, col: cool, white: false },
+    });
+    expect(magenta).toContain("background:hsl(300,100%,50%)");
+  });
+
   test("WLED col swatch adds the white channel to the color", async () => {
     const white = await renderDevice({
       name: "LED Strip",

@@ -1931,6 +1931,203 @@ function wledConfig(): Config {
   };
 }
 
+describe("a WLED device with white segments", () => {
+  const TOPIC = "wled/nook";
+
+  async function startNook(metrics = false) {
+    const cfg: Config = {
+      ...wledConfig(),
+      devices: [
+        {
+          name: "Nook",
+          type: "wled",
+          topic: TOPIC,
+          capabilities: ["on_off", "brightness", "color_temp", "color_hs"],
+          colorSegments: [0],
+          whiteSegments: [1, 2],
+          whiteChannels: { r: 5500, g: 2400, b: 5500, w: 2400 },
+          gamma: 2.2,
+        },
+      ],
+      ...(metrics ? { metrics: { port: 0, bind: "127.0.0.1" } } : {}),
+    };
+    const started = await startBridge(cfg, VERSION);
+    mockClient.connected = true;
+    mockClient.emit("connect");
+    const service = started.bridge.bridgedAccessories
+      .find((a) => a.displayName === "Nook")!
+      .getService(Service.Lightbulb)!;
+    const characteristic = (type: typeof Characteristic.Hue) =>
+      service.getCharacteristic(type);
+    const report = (sub: string, value: string) => {
+      mockClient.emit("message", `${TOPIC}/${sub}`, Buffer.from(value));
+    };
+    const sent = () =>
+      mockClient.published
+        .filter((p) => p.topic === `${TOPIC}/api`)
+        .map((p) => JSON.parse(p.message) as unknown);
+    const white = (col: number[]) => ({
+      seg: [
+        { id: 0, on: false, sel: false },
+        { id: 1, on: true, sel: true, col: [col] },
+        { id: 2, on: true, sel: true, col: [col] },
+      ],
+    });
+    return { ...started, characteristic, report, sent, white };
+  }
+
+  test("ColorTemperature spans the strips, without a characteristic warning", async () => {
+    const output = captureConsole();
+    try {
+      const { characteristic, shutdown } = await startNook();
+      const temperature = characteristic(Characteristic.ColorTemperature);
+      expect(temperature.props).toMatchObject({ minValue: 182, maxValue: 416 });
+      expect(temperature.value).toBe(182);
+      await shutdown();
+      expect(output.lines().join("\n")).not.toMatch(
+        /Characteristic warning|illegal value/,
+      );
+    } finally {
+      output.restore();
+    }
+  });
+
+  test("a color temperature write blends the strips and shows its color", async () => {
+    const { characteristic, sent, white, shutdown } = await startNook();
+    characteristic(Characteristic.ColorTemperature).setValue(299);
+    await flush();
+
+    expect(sent()).toEqual([white([255, 255, 255, 255])]);
+    expect(characteristic(Characteristic.Hue).value).toBe(30);
+    expect(characteristic(Characteristic.Saturation).value).toBe(50);
+
+    await shutdown();
+  });
+
+  test("Siri's white lights the white segments at 2700 K", async () => {
+    const { characteristic, sent, white, shutdown } = await startNook();
+    characteristic(Characteristic.Hue).setValue(0);
+    characteristic(Characteristic.Saturation).setValue(0);
+    await flush();
+
+    expect(sent()).toEqual([white([167, 255, 167, 255])]);
+    expect(characteristic(Characteristic.ColorTemperature).value).toBe(370);
+
+    await shutdown();
+  });
+
+  test("a color lights the color segment and shows the minimum temperature", async () => {
+    const { characteristic, sent, shutdown } = await startNook();
+    characteristic(Characteristic.ColorTemperature).setValue(299);
+    await flush();
+    characteristic(Characteristic.Hue).setValue(240);
+    characteristic(Characteristic.Saturation).setValue(100);
+    await flush();
+
+    expect(sent()[1]).toEqual({
+      seg: [
+        { id: 1, on: false, sel: false },
+        { id: 2, on: false, sel: false },
+        { id: 0, on: true, sel: true, col: [[0, 0, 255]] },
+      ],
+    });
+    expect(characteristic(Characteristic.ColorTemperature).value).toBe(182);
+
+    await shutdown();
+  });
+
+  test("reads a reported white as its temperature", async () => {
+    const { characteristic, report, shutdown } = await startNook();
+    report("g", "128");
+    report("c", "#FFA7FFA7");
+
+    expect(characteristic(Characteristic.ColorTemperature).value).toBe(370);
+    expect(characteristic(Characteristic.Hue).value).toBe(30);
+    expect(characteristic(Characteristic.Saturation).value).toBe(67);
+    expect(
+      await characteristic(Characteristic.ColorTemperature).handleGetRequest(),
+    ).toBe(370);
+
+    await shutdown();
+  });
+
+  test("reads a reported color as a color at the minimum temperature", async () => {
+    const { characteristic, report, shutdown } = await startNook();
+    report("c", "#0000FF");
+
+    expect(characteristic(Characteristic.Hue).value).toBe(240);
+    expect(characteristic(Characteristic.Saturation).value).toBe(100);
+    expect(characteristic(Characteristic.ColorTemperature).value).toBe(182);
+
+    await shutdown();
+  });
+
+  test("remembers a white write, so that cool strips alone read as a temperature", async () => {
+    jest.useFakeTimers();
+    try {
+      const { characteristic, report, shutdown } = await startNook();
+      report("g", "128");
+      report("c", "#0000FF");
+      characteristic(Characteristic.ColorTemperature).setValue(182);
+      await flush();
+      jest.advanceTimersByTime(1000);
+      report("c", "#FF00FF");
+
+      expect(characteristic(Characteristic.ColorTemperature).value).toBe(182);
+      expect(characteristic(Characteristic.Hue).value).toBe(24);
+      expect(characteristic(Characteristic.Saturation).value).toBe(12);
+
+      characteristic(Characteristic.Hue).setValue(300);
+      characteristic(Characteristic.Saturation).setValue(100);
+      await flush();
+      jest.advanceTimersByTime(1000);
+      report("c", "#FF00FF");
+
+      expect(characteristic(Characteristic.Hue).value).toBe(300);
+      expect(characteristic(Characteristic.Saturation).value).toBe(100);
+
+      await shutdown();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("a color set in WLED after a white write is not read as that white", async () => {
+    jest.useFakeTimers();
+    try {
+      const { characteristic, report, shutdown } = await startNook();
+      report("g", "128");
+      report("c", "#0000FF");
+      characteristic(Characteristic.ColorTemperature).setValue(416);
+      await flush();
+      jest.advanceTimersByTime(1000);
+      report("c", "#FF00FF");
+
+      expect(characteristic(Characteristic.Hue).value).toBe(300);
+      expect(characteristic(Characteristic.Saturation).value).toBe(100);
+      expect(characteristic(Characteristic.ColorTemperature).value).toBe(182);
+
+      await shutdown();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("the status page shows the temperature that HomeKit sees", async () => {
+    const { report, metricsPort, shutdown } = await startNook(true);
+    try {
+      report("c", "#FFA7FFA7");
+      const body = await (
+        await fetch(`http://127.0.0.1:${String(metricsPort)}/`)
+      ).text();
+      expect(body).toContain("370");
+      expect(body).toContain("2703 K");
+    } finally {
+      await shutdown();
+    }
+  });
+});
+
 describe("WLED device support", () => {
   test("subscribes to WLED sub-topics on MQTT connect", async () => {
     const { shutdown } = await startBridge(wledConfig(), VERSION);

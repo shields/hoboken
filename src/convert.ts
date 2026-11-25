@@ -319,21 +319,139 @@ export function wledRgb(
   return [Math.min(255, r + w), Math.min(255, g + w), Math.min(255, b + w)];
 }
 
-export function wledToHomeKit(raw: RawState): HomeKitState {
+// The parts of a WLED device's configuration that conversion depends on.
+export interface WledLight {
+  whiteColorTemp?: number;
+  colorSegments?: readonly number[];
+  whiteSegments?: readonly number[];
+  whiteChannels?: { r: number; g: number; b: number; w: number };
+  gamma?: number;
+}
+
+// A WLED device whose white comes from strips of two color temperatures on
+// the channels of its white segments. `warm` and `cool` are in whole mireds,
+// the ends of the ColorTemperature range, so that each end is one strip alone.
+interface WhiteStrips {
+  colorSegments: readonly number[];
+  whiteSegments: readonly number[];
+  kelvins: [number, number, number, number];
+  warm: number;
+  cool: number;
+  gamma: number;
+}
+
+function whiteStrips(light: WledLight): WhiteStrips | undefined {
+  const { whiteChannels: c, colorSegments, whiteSegments } = light;
+  if (!c || !colorSegments || !whiteSegments) return undefined;
+  const kelvins: WhiteStrips["kelvins"] = [c.r, c.g, c.b, c.w];
+  return {
+    colorSegments,
+    whiteSegments,
+    kelvins,
+    warm: Math.floor(1e6 / Math.min(...kelvins)),
+    cool: Math.ceil(1e6 / Math.max(...kelvins)),
+    gamma: light.gamma ?? 1,
+  };
+}
+
+// The range of ColorTemperature, in whole mireds: what the device's white
+// strips span, or HomeKit's own range.
+export function colorTempRange(light: WledLight): [number, number] {
+  const strips = whiteStrips(light);
+  return strips ? [strips.cool, strips.warm] : [COLOR_TEMP_MIN, COLOR_TEMP_MAX];
+}
+
+// Both strips are full on at the midpoint, and one fades toward each end, so
+// the light is brightest in the middle. WLED raises a channel's value to
+// `gamma` before output, which the exponent here undoes.
+function whiteChannelValues(
+  mireds: number,
+  strips: WhiteStrips,
+): [number, number, number, number] {
+  const t = Math.min(
+    1,
+    Math.max(0, (strips.warm - mireds) / (strips.warm - strips.cool)),
+  );
+  const warmest = Math.min(...strips.kelvins);
+  return strips.kelvins.map((kelvins) =>
+    Math.round(
+      255 *
+        Math.min(1, 2 * (kelvins === warmest ? 1 - t : t)) **
+          (1 / strips.gamma),
+    ),
+  ) as [number, number, number, number];
+}
+
+function whiteValuesToColorTemp(
+  col: readonly number[],
+  strips: WhiteStrips,
+): number | undefined {
+  const level = (kelvins: number) =>
+    ((col[strips.kelvins.indexOf(kelvins)] ?? 0) / 255) ** strips.gamma;
+  const warm = level(Math.min(...strips.kelvins));
+  const cool = level(Math.max(...strips.kelvins));
+  const max = Math.max(warm, cool);
+  if (max === 0) return undefined;
+  const t = cool >= warm ? 1 - warm / max / 2 : cool / max / 2;
+  return strips.warm - t * (strips.warm - strips.cool);
+}
+
+// WLED reports one color, that of the first selected segment, and a white
+// segment with only its cool strips lit has no white channel to tell it from
+// a color. `white`, the white that the bridge last wrote, settles that case:
+// the same color reported back is that white.
+function wledColorToHomeKit(state: RawState, light: WledLight): HomeKitState {
+  const col = state.col;
+  if (!Array.isArray(col) || col.length < 3) return {};
+  const [r, g, b, w = 0] = col as [number, number, number, number?];
+  const strips = whiteStrips(light);
+  if (!strips) return rgbToHs(...wledRgb(r, g, b, w));
+  const values = [r, g, b, w];
+  const written =
+    Array.isArray(state.white) &&
+    values.every((value, i) => value === (state.white as unknown[])[i]);
+  const mireds =
+    w > 0 || written ? whiteValuesToColorTemp(values, strips) : undefined;
+  if (mireds === undefined) {
+    return {
+      ...rgbToHs(...wledRgb(r, g, b, w)),
+      color_temp: colorTempRange(light)[0],
+    };
+  }
+  const color = colorTempToHueSaturation(Math.round(mireds));
+  return {
+    color_temp: Math.round(mireds),
+    hue: Math.round(color.hue),
+    saturation: Math.round(color.saturation),
+  };
+}
+
+// `merged` is the whole cached state when `raw` is one update to it.
+export function wledToHomeKit(
+  raw: RawState,
+  merged = raw,
+  light: WledLight = {},
+): HomeKitState {
   const hk: HomeKitState = {};
   if ("on" in raw) hk.on = raw.on === true;
   if ("bri" in raw) hk.brightness = wledBrightnessToHomeKit(raw.bri as number);
-  if ("col" in raw) {
-    const col = raw.col;
-    if (Array.isArray(col) && col.length >= 3) {
-      const hs = rgbToHs(
-        ...wledRgb(...(col as [number, number, number, number?])),
-      );
-      hk.hue = hs.hue;
-      hk.saturation = hs.saturation;
-    }
-  }
+  if ("col" in raw) Object.assign(hk, wledColorToHomeKit(merged, light));
   return hk;
+}
+
+// The color state that a write to a device with white segments leaves, for
+// the cache and for HomeKit: the report that follows a write is suppressed.
+export function wledWrite(
+  message: Record<string, unknown>,
+  light: WledLight,
+): RawState | undefined {
+  const strips = whiteStrips(light);
+  if (!strips || !Array.isArray(message.seg)) return undefined;
+  const lit = (
+    message.seg as { id: number; on: boolean; col?: number[][] }[]
+  ).find((segment) => segment.on);
+  const col = lit?.col?.[0];
+  return lit && { col, white: strips.whiteSegments.includes(lit.id) && col };
 }
 
 export function homeKitToZ2m(
@@ -402,6 +520,7 @@ export function homeKitToZ2m(
 export function homeKitToWled(
   payload: Record<string, unknown>,
   cachedRaw?: RawState,
+  light: WledLight = {},
 ): Record<string, unknown> {
   const api: Record<string, unknown> = {};
 
@@ -409,16 +528,50 @@ export function homeKitToWled(
   if ("brightness" in payload)
     api.bri = homeKitBrightnessToWled(payload.brightness as number);
 
-  if ("hue" in payload || "saturation" in payload) {
+  const strips = whiteStrips(light);
+  // As for Zigbee2MQTT: a temperature wins over a color in the same write,
+  // unless it is the minimum, which a light that shows a color reports.
+  const colorWithMinimum =
+    payload.color_temp === colorTempRange(light)[0] &&
+    "hue" in payload &&
+    "saturation" in payload;
+  let mireds =
+    strips && "color_temp" in payload && !colorWithMinimum
+      ? (payload.color_temp as number)
+      : undefined;
+  let rgb: [number, number, number] | undefined;
+
+  if (mireds === undefined && ("hue" in payload || "saturation" in payload)) {
     // Fill the missing HS component from cached raw state. This round-trips
     // through RGB→HSV→RGB, which is lossy due to integer rounding at each step.
-    const cachedHK = cachedRaw ? wledToHomeKit(cachedRaw) : {};
+    const cachedHK = cachedRaw ? wledColorToHomeKit(cachedRaw, light) : {};
     const h = (payload.hue as number | undefined) ?? cachedHK.hue ?? 0;
     const s =
       (payload.saturation as number | undefined) ?? cachedHK.saturation ?? 0;
 
-    const [r, g, b] = isWhite(h, s) ? [255, 255, 255] : hsToRgb(h, s);
-    api.seg = [{ col: [[r, g, b]] }];
+    if (strips) mireds = requestedColorTemp(h, s, light.whiteColorTemp);
+    rgb = isWhite(h, s) ? [255, 255, 255] : hsToRgb(h, s);
+  }
+
+  // Selecting the lit segments makes theirs the color that WLED reports.
+  const segments = (
+    lit: readonly number[],
+    col: number[],
+    dark: readonly number[],
+  ) => [
+    ...dark.map((id) => ({ id, on: false, sel: false })),
+    ...lit.map((id) => ({ id, on: true, sel: true, col: [col] })),
+  ];
+  if (strips && mireds !== undefined) {
+    api.seg = segments(
+      strips.whiteSegments,
+      whiteChannelValues(mireds, strips),
+      strips.colorSegments,
+    );
+  } else if (strips && rgb) {
+    api.seg = segments(strips.colorSegments, rgb, strips.whiteSegments);
+  } else if (rgb) {
+    api.seg = [{ col: [rgb] }];
   }
 
   return api;

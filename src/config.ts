@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { parse as parseLegacyURL } from "node:url";
 import { parseDocument } from "yaml";
-import { COLOR_TEMP_MAX, COLOR_TEMP_MIN } from "./convert.ts";
+import { COLOR_TEMP_MAX, COLOR_TEMP_MIN, colorTempRange } from "./convert.ts";
 import {
   heatedBeddingIdentity,
   heatedBeddingTopics,
@@ -59,12 +59,25 @@ export interface SceneConfig {
   id: number;
 }
 
+// The color temperature, in kelvins, of the white strip on each channel of a
+// WLED device's white segments.
+export interface WhiteChannels {
+  r: number;
+  g: number;
+  b: number;
+  w: number;
+}
+
 export interface DeviceConfig {
   name: string;
   type: DeviceType;
   topic: string;
   capabilities: Capability[];
   whiteColorTemp?: number;
+  colorSegments?: number[];
+  whiteSegments?: number[];
+  whiteChannels?: WhiteChannels;
+  gamma?: number;
   scenes?: SceneConfig[];
 }
 
@@ -134,8 +147,20 @@ const DEVICE_FIELDS: Fields<DeviceConfig> = {
   topic: true,
   capabilities: true,
   whiteColorTemp: true,
+  colorSegments: true,
+  whiteSegments: true,
+  whiteChannels: true,
+  gamma: true,
   scenes: true,
 };
+const WHITE_CHANNEL_FIELDS: Fields<WhiteChannels> = {
+  r: true,
+  g: true,
+  b: true,
+  w: true,
+};
+// WLED has at most 32 segments.
+const WLED_SEGMENT_MAX = 31;
 const SCENE_FIELDS: Fields<SceneConfig> = { name: true, id: true };
 const HEATED_BEDDING_FIELDS: Fields<
   HeatedBeddingZoneConfig & HeatedBeddingGroupConfig
@@ -632,21 +657,18 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
     );
   }
 
-  if (
-    type === "wled" &&
-    capabilities.includes("color_temp") &&
-    capabilities.includes("color_hs")
-  ) {
+  const white = validateWhiteSegments(d, index, type);
+  if (type === "wled" && capabilities.includes("color_temp") && !white) {
     throw new Error(
-      `devices[${String(index)}]: color_temp and color_hs cannot be combined for WLED devices`,
+      `devices[${String(index)}]: color_temp on a WLED device requires whiteChannels`,
     );
   }
 
   const { whiteColorTemp } = d;
   if (whiteColorTemp !== undefined) {
-    if (type === "wled") {
+    if (type === "wled" && !white) {
       throw new Error(
-        `devices[${String(index)}]: whiteColorTemp is not supported for WLED devices`,
+        `devices[${String(index)}]: whiteColorTemp on a WLED device requires whiteChannels`,
       );
     }
     if (!capabilities.includes("color_hs")) {
@@ -687,7 +709,120 @@ function validateDevice(data: unknown, index: number): DeviceConfig {
     topic: d.topic,
     capabilities,
     ...(whiteColorTemp === undefined ? {} : { whiteColorTemp }),
+    ...white,
     ...(scenes ? { scenes } : {}),
+  };
+}
+
+function validateSegments(value: unknown, field: string): number[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some(
+      (id) =>
+        typeof id !== "number" ||
+        !Number.isInteger(id) ||
+        id < 0 ||
+        id > WLED_SEGMENT_MAX,
+    ) ||
+    new Set(value).size !== value.length
+  ) {
+    throw new Error(
+      `${field} must be a non-empty array of distinct segment ids from 0 to ${String(WLED_SEGMENT_MAX)}`,
+    );
+  }
+  return value as number[];
+}
+
+// A WLED device whose white light comes from segments of its own: strips of
+// two color temperatures on the channels of whiteSegments, and color from
+// colorSegments.
+function validateWhiteSegments(
+  d: Record<string, unknown>,
+  index: number,
+  type: DeviceType,
+): Pick<
+  DeviceConfig,
+  "colorSegments" | "whiteSegments" | "whiteChannels" | "gamma"
+> | null {
+  const label = `devices[${String(index)}]`;
+  const fields = [
+    "colorSegments",
+    "whiteSegments",
+    "whiteChannels",
+    "gamma",
+  ] as const;
+  const present = fields.filter((field) => d[field] !== undefined);
+  if (present.length === 0) return null;
+  if (type !== "wled") {
+    throw new Error(
+      `${label}: ${String(present[0])} is only supported for WLED devices`,
+    );
+  }
+  if (fields.slice(0, 3).some((field) => d[field] === undefined)) {
+    throw new Error(
+      `${label}: colorSegments, whiteSegments, and whiteChannels must be configured together`,
+    );
+  }
+
+  const colorSegments = validateSegments(
+    d.colorSegments,
+    `${label}.colorSegments`,
+  );
+  const whiteSegments = validateSegments(
+    d.whiteSegments,
+    `${label}.whiteSegments`,
+  );
+  if (whiteSegments.some((id) => colorSegments.includes(id))) {
+    throw new Error(
+      `${label}: a segment cannot be in both colorSegments and whiteSegments`,
+    );
+  }
+
+  const channels = d.whiteChannels;
+  if (typeof channels !== "object" || channels === null) {
+    throw new Error(`${label}.whiteChannels must be an object`);
+  }
+  rejectUnknownFields(`${label}.whiteChannels`, channels, WHITE_CHANNEL_FIELDS);
+  const kelvins = Object.keys(WHITE_CHANNEL_FIELDS).map(
+    (channel) => (channels as Record<string, unknown>)[channel],
+  );
+  if (
+    kelvins.some(
+      (k) =>
+        typeof k !== "number" || !Number.isFinite(k) || k < 1000 || k > 20000,
+    ) ||
+    new Set(kelvins).size !== 2
+  ) {
+    throw new Error(
+      `${label}.whiteChannels must give r, g, b, and w each one of two color temperatures from 1000 to 20000 kelvins`,
+    );
+  }
+
+  const [cool, warm] = colorTempRange({
+    colorSegments,
+    whiteSegments,
+    whiteChannels: channels as WhiteChannels,
+  });
+  if (cool < COLOR_TEMP_MIN || warm > COLOR_TEMP_MAX || cool >= warm) {
+    throw new Error(
+      `${label}.whiteChannels must span at least one whole mired within ${String(COLOR_TEMP_MIN)} to ${String(COLOR_TEMP_MAX)} mireds, the range of ColorTemperature`,
+    );
+  }
+
+  const { gamma } = d;
+  if (
+    gamma !== undefined &&
+    (typeof gamma !== "number" || !(gamma >= 1 && gamma <= 3))
+  ) {
+    throw new Error(`${label}.gamma must be a number from 1 to 3`);
+  }
+
+  return {
+    colorSegments,
+    whiteSegments,
+    whiteChannels: channels as WhiteChannels,
+    ...(gamma === undefined ? {} : { gamma }),
   };
 }
 

@@ -75,6 +75,7 @@ import {
   homeKitToZ2m,
   parseWledMessage,
   wledToHomeKit,
+  wledWrite,
   z2mToHomeKit,
   z2mWriteToHomeKit,
 } from "./convert.ts";
@@ -126,6 +127,7 @@ export function buildStatusData(
       type: d.type,
       capabilities: [...d.capabilities],
       ...(d.scenes ? { scenes: d.scenes } : {}),
+      ...(d.whiteChannels ? { light: d } : {}),
       state: stateCache.get(d.topic) ?? null,
     })),
     ...(config.heatedBedding?.length
@@ -366,7 +368,10 @@ export async function startBridge(
       raw?: RawState,
     ) => Record<string, unknown>,
     mqttTopic: (topic: string) => string,
-    written?: (converted: Record<string, unknown>) => HomeKitState,
+    follow?: (converted: Record<string, unknown>) => {
+      homeKit: HomeKitState;
+      raw?: RawState;
+    },
   ): PublishFn {
     return (topic, payload) => {
       const converted = convert(payload, stateCache.get(topic));
@@ -383,13 +388,16 @@ export async function startBridge(
         lastColorPublish.set(topic, Date.now());
       }
       const entry = accessoryMap.get(topic);
-      if (!written || !entry) return;
+      if (!follow || !entry) return;
+      const { homeKit, raw } = follow(converted);
+      const cached = stateCache.get(topic);
+      if (raw && cached) stateCache.set(topic, { ...cached, ...raw });
       // The controller's own values stand for what it wrote: a white is
       // published as a temperature, but the write was a hue and saturation.
-      const follow = Object.fromEntries(
-        Object.entries(written(converted)).filter(([key]) => !(key in payload)),
+      const state = Object.fromEntries(
+        Object.entries(homeKit).filter(([key]) => !(key in payload)),
       );
-      entry.updateState(entry.accessory, follow, device.capabilities);
+      entry.updateState(entry.accessory, state, device.capabilities);
     };
   }
 
@@ -401,13 +409,27 @@ export async function startBridge(
           device,
           (p, raw) => homeKitToZ2m(p, raw, device),
           z2mSetTopic,
-          z2mWriteToHomeKit,
+          (message) => ({ homeKit: z2mWriteToHomeKit(message) }),
         ),
-      toHomeKit: z2mToHomeKit,
+      toHomeKit: (raw: RawState, merged: RawState, device: DeviceConfig) =>
+        z2mToHomeKit(raw, merged, device.capabilities),
     },
     wled: {
       publish: (device: DeviceConfig) =>
-        makePublish(device, homeKitToWled, (t) => `${t}/api`),
+        makePublish(
+          device,
+          (p, raw) => homeKitToWled(p, raw, device),
+          (t) => `${t}/api`,
+          (message) => {
+            const state = wledWrite(message, device);
+            return state
+              ? {
+                  homeKit: wledToHomeKit(state, state, device),
+                  raw: { white: state.white },
+                }
+              : { homeKit: {} };
+          },
+        ),
       toHomeKit: wledToHomeKit,
     },
   };
@@ -467,7 +489,7 @@ export async function startBridge(
     const getState = (topic: string) => {
       const raw = stateCache.get(topic);
       if (!raw) return;
-      return proto.toHomeKit(raw, raw, device.capabilities);
+      return proto.toHomeKit(raw, raw, device);
     };
 
     const isFan = device.capabilities.includes("fan");
@@ -683,7 +705,7 @@ export async function startBridge(
     const hkState = protocols[entry.device.type].toHomeKit(
       rawPartial,
       merged,
-      entry.device.capabilities,
+      entry.device,
     );
     if (suppressing) {
       delete hkState.hue;
