@@ -104,6 +104,8 @@ These come from two sources. The HAP write log records what arrives. And
 Apple's frameworks on macOS 27.2.1 can be called directly: a Mac Catalyst
 program can load `Home.framework` and run the Home app's own color code,
 and Siri's color names are a table in `HomeAutomationInternal.framework`.
+The programs that do this, and their output, are in
+[tools/apple-home](../tools/apple-home/README.md).
 
 **The Home app** writes a color as Hue and Saturation only, or as
 ColorTemperature only, never with Brightness or On

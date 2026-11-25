@@ -1,0 +1,93 @@
+(a) Hue+Saturation only: supportsRGBColor=1
+  RGB 228/56                                   -> {Hue=228, Saturation=56}
+  RGB 28/23                                    -> {Hue=28, Saturation=23}
+  RGB 221.8/20.2 (cool palette 1)              -> {Hue=222, Saturation=20}
+  RGB 0/0                                      -> {Hue=0, Saturation=0}
+  RGB 359.6/99.5                               -> {Hue=360, Saturation=100}
+  RGB 240/100                                  -> {Hue=240, Saturation=100}
+  RGB 28.4/23.5 (rounding)                     -> {Hue=28, Saturation=24}
+  RGB 28.6/22.5 (rounding)                     -> {Hue=29, Saturation=23}
+  TEMP 366                                     -> {Hue=30, Saturation=66}
+  TEMP 250                                     -> {Hue=29, Saturation=36}
+  TEMP 100 (below min)                         -> {Hue=222, Saturation=20}
+  TEMP 600 (above max)                         -> {Hue=28, Saturation=100}
+  TEMP 250.4                                   -> {Hue=29, Saturation=36}
+  TEMP 250.5                                   -> {Hue=29, Saturation=36}
+  BOTH rgb 28/23 + temp 366                    -> {Hue=28, Saturation=23}
+  BOTH rgb 100/50 + temp 300                   -> {Hue=100, Saturation=50}
+(b) Hue+Saturation+ColorTemperature (140-500 step 1): supportsRGBColor=1
+  RGB 228/56                                   -> {Hue=228, Saturation=56}
+  RGB 28/23                                    -> {Hue=28, Saturation=23}
+  RGB 221.8/20.2 (cool palette 1)              -> {Hue=222, Saturation=20}
+  RGB 0/0                                      -> {Hue=0, Saturation=0}
+  RGB 359.6/99.5                               -> {Hue=360, Saturation=100}
+  RGB 240/100                                  -> {Hue=240, Saturation=100}
+  RGB 28.4/23.5 (rounding)                     -> {Hue=28, Saturation=24}
+  RGB 28.6/22.5 (rounding)                     -> {Hue=29, Saturation=23}
+  TEMP 366                                     -> {ColorTemperature=366}
+  TEMP 250                                     -> {ColorTemperature=250}
+  TEMP 100 (below min)                         -> {ColorTemperature=140}
+  TEMP 600 (above max)                         -> {ColorTemperature=500}
+  TEMP 250.4                                   -> {ColorTemperature=250}
+  TEMP 250.5                                   -> {ColorTemperature=251}
+  BOTH rgb 28/23 + temp 366                    -> {ColorTemperature=366}
+  BOTH rgb 100/50 + temp 300                   -> {ColorTemperature=300}
+(c) ColorTemperature only (140-500 step 1): supportsRGBColor=0
+  RGB 228/56                                   -> {}
+  RGB 28/23                                    -> {}
+  RGB 221.8/20.2 (cool palette 1)              -> {}
+  RGB 0/0                                      -> {}
+  RGB 359.6/99.5                               -> {}
+  RGB 240/100                                  -> {}
+  RGB 28.4/23.5 (rounding)                     -> {}
+  RGB 28.6/22.5 (rounding)                     -> {}
+  TEMP 366                                     -> {ColorTemperature=366}
+  TEMP 250                                     -> {ColorTemperature=250}
+  TEMP 100 (below min)                         -> {ColorTemperature=140}
+  TEMP 600 (above max)                         -> {ColorTemperature=500}
+  TEMP 250.4                                   -> {ColorTemperature=250}
+  TEMP 250.5                                   -> {ColorTemperature=251}
+  BOTH rgb 28/23 + temp 366                    -> {ColorTemperature=366}
+  BOTH rgb 100/50 + temp 300                   -> {ColorTemperature=300}
+palette type 0 on (a) Hue+Saturation only
+  swatch 1                                     -> {Hue=222, Saturation=20}
+  swatch 2                                     -> {Hue=251, Saturation=5}
+  swatch 3                                     -> {Hue=28, Saturation=23}
+  swatch 4                                     -> {Hue=30, Saturation=48}
+  swatch 5                                     -> {Hue=30, Saturation=67}
+  swatch 6                                     -> {Hue=255, Saturation=68}
+palette type 0 on (b) Hue+Saturation+ColorTemperature (140-500 step 1)
+  swatch 1                                     -> {Hue=222, Saturation=20}
+  swatch 2                                     -> {Hue=251, Saturation=5}
+  swatch 3                                     -> {ColorTemperature=366}
+  swatch 4                                     -> {Hue=30, Saturation=48}
+  swatch 5                                     -> {Hue=30, Saturation=67}
+  swatch 6                                     -> {Hue=255, Saturation=68}
+palette type 0 on (c) ColorTemperature only (140-500 step 1)
+  swatch 1                                     -> {}
+  swatch 2                                     -> {}
+  swatch 3                                     -> {ColorTemperature=366}
+  swatch 4                                     -> {}
+  swatch 5                                     -> {}
+  swatch 6                                     -> {}
+palette type 1 on (a) Hue+Saturation only
+  swatch 1                                     -> {Hue=257, Saturation=4}
+  swatch 2                                     -> {Hue=20, Saturation=9}
+  swatch 3                                     -> {Hue=29, Saturation=27}
+  swatch 4                                     -> {Hue=30, Saturation=51}
+  swatch 5                                     -> {Hue=30, Saturation=73}
+  swatch 6                                     -> {Hue=223, Saturation=16}
+palette type 1 on (b) Hue+Saturation+ColorTemperature (140-500 step 1)
+  swatch 1                                     -> {ColorTemperature=145}
+  swatch 2                                     -> {ColorTemperature=172}
+  swatch 3                                     -> {ColorTemperature=222}
+  swatch 4                                     -> {ColorTemperature=303}
+  swatch 5                                     -> {ColorTemperature=400}
+  swatch 6                                     -> {ColorTemperature=140}
+palette type 1 on (c) ColorTemperature only (140-500 step 1)
+  swatch 1                                     -> {ColorTemperature=145}
+  swatch 2                                     -> {ColorTemperature=172}
+  swatch 3                                     -> {ColorTemperature=222}
+  swatch 4                                     -> {ColorTemperature=303}
+  swatch 5                                     -> {ColorTemperature=400}
+  swatch 6                                     -> {ColorTemperature=140}

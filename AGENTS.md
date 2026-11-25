@@ -61,7 +61,9 @@ make demo               # Serve the status page with sample data
   `Capability`. The compiler already reports a missing case, and Bun's coverage
   has no ignore comments, so the unreachable arm fails the coverage threshold.
 - New files carry the Apache 2.0 header, copied from an existing file: `//` for
-  TypeScript, `#` for shell, after any shebang.
+  TypeScript, `#` for shell, after any shebang. The data files in
+  `tools/apple-home` are output from Apple's frameworks, so they have no
+  header; the TSV files begin with provenance lines instead.
 
 ## Testing
 

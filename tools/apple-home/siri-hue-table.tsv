@@ -1,0 +1,717 @@
+## Siri's named colors: HueSemantic from SiriOntology, as built by HomeAutomationInternal.framework.
+## Extracted by siri-hue-table.m on macOS 27.2.1 (26B131), arm64e, 2026-11-24.
+## Columns: index in the array, HueSemantic key, name, hue in degrees, saturation in percent, brightness in percent.
+## The framework stores doubles; they print rounded to one decimal place.
+index	key	name	hue	saturation	brightness
+0	0	greenish	110.0	100.0	60.0
+1	1	candle	29.7	83.9	100.0
+2	2	40w tungsten	28.9	43.9	100.0
+3	3	100w tungsten	31.1	33.3	100.0
+4	4	halogen	32.9	12.2	100.0
+5	6	high noon sun	60.0	1.6	100.0
+6	621	sunlight	45.0	80.0	100.0
+7	7	overcast sky	212.2	21.2	100.0
+8	8	clear blue sky	211.1	74.9	100.0
+9	9	warm fluorescent	34.6	10.2	100.0
+10	10	standard fluorescent	152.7	4.3	100.0
+11	11	cool white fluorescent	207.9	16.9	100.0
+12	12	full spectrum fluorescent	9.2	5.1	100.0
+13	13	black light fluorescent	279.3	100.0	100.0
+14	14	mercury vapor	192.3	15.3	100.0
+15	15	sodium vapor	24.2	30.2	100.0
+16	16	metal halide	193.8	5.1	100.0
+17	17	high pressure sodium	35.9	70.2	100.0
+18	18	air force blue	204.0	44.6	65.9
+19	19	alice blue	208.0	5.8	100.0
+20	20	alizarin crimson	354.9	83.2	89.0
+21	21	almond	30.0	14.2	93.7
+22	22	amaranth	348.1	81.3	89.8
+23	23	amber	44.9	100.0	100.0
+24	24	american rose	346.0	98.8	100.0
+25	25	amethyst	270.0	50.0	80.0
+26	26	antique brass	21.8	43.0	80.4
+27	27	antique fuchsia	315.8	36.6	56.9
+28	28	antique white	34.3	14.0	98.0
+29	29	apricot	23.5	29.5	98.4
+30	30	aqua	180.0	100.0	100.0
+31	31	aquamarine	159.8	50.2	100.0
+32	32	army green	69.4	61.4	32.5
+33	33	arylide yellow	51.0	54.0	91.4
+34	34	ash grey	135.0	6.3	74.6
+35	35	asparagus	92.9	36.7	66.3
+36	36	atomic tangerine	20.0	60.0	100.0
+37	37	auburn	0.0	74.5	64.7
+38	38	aureolin	56.4	100.0	99.2
+39	39	aurometalsaurus	183.3	14.1	50.2
+40	40	azure	210.1	100.0	100.0
+41	41	baby blue	199.2	42.9	94.1
+42	42	baby pink	0.0	20.5	95.7
+43	43	banana mania	43.5	27.6	98.0
+44	44	banana yellow	51.1	79.2	100.0
+45	45	battleship grey	60.0	1.5	51.8
+46	46	beau blue	205.7	18.2	90.2
+47	47	beige	60.0	10.2	96.1
+48	48	bisque	32.5	23.2	100.0
+49	49	bistre	24.0	49.2	23.9
+50	50	bittersweet	6.4	63.1	99.6
+51	51	black	0.0	0.0	0.0
+52	52	blanched almond	36.0	19.6	100.0
+53	53	bleu de france	210.0	78.8	90.6
+54	54	blond	50.0	24.0	98.0
+55	55	blue	240.0	100.0	100.0
+56	56	blue gray	210.0	50.0	80.0
+57	57	blue green	191.8	93.0	72.9
+58	58	blue purple	271.1	81.0	88.6
+59	59	blue violet	271.1	81.0	88.6
+60	60	blush	342.3	58.1	87.1
+61	61	bondi blue	190.9	100.0	71.4
+62	62	bone	39.2	11.5	89.0
+63	63	boston university red	0.0	100.0	80.0
+64	64	bottle green	164.2	100.0	41.6
+65	65	boysenberry	327.5	62.9	53.0
+66	66	brandeis blue	213.6	100.0	100.0
+67	67	brass	52.2	63.6	71.0
+68	68	brick red	351.7	68.0	79.6
+69	69	begonia	355.0	56.0	98.0
+70	70	bright red	3.0	83.0	96.0
+71	71	bright white	0.0	0.0	100.0
+72	73	bright blue	228.0	92.0	98.0
+73	72	bright yellow	65.0	64.0	87.0
+74	74	bright cerulean	193.6	86.4	83.8
+75	75	bright green	96.0	100.0	100.0
+76	76	bright lavender	272.3	35.1	89.4
+77	77	bright maroon	345.6	83.1	76.5
+78	78	bright pink	330.1	100.0	100.0
+79	79	bright turquoise	177.3	96.5	91.0
+80	80	brilliant lavender	290.3	26.6	100.0
+81	81	brilliant rose	332.5	66.6	100.0
+82	82	british racing green	153.6	100.0	25.8
+83	83	bronze	29.8	75.6	80.4
+84	84	brown	0.0	74.5	64.7
+85	85	bubble gum	349.4	24.4	100.0
+86	86	buff	49.1	45.9	94.1
+87	87	bulgarian rose	359.1	91.7	28.2
+88	88	burgundy	345.0	100.0	50.2
+89	89	burlywood	33.8	39.2	87.1
+90	90	burnt orange	25.0	100.0	80.0
+91	92	burnt umber	25.0	100.0	80.0
+92	91	burnt sienna	13.8	65.2	91.4
+93	92	burnt umber	8.8	73.9	54.1
+94	93	byzantine	310.9	73.0	74.2
+95	94	byzantium	311.0	63.4	43.9
+96	95	cg blue	195.6	100.0	64.8
+97	96	cg red	3.8	78.2	87.8
+98	97	cadet	199.4	27.1	44.7
+99	98	cadet blue	181.8	40.6	62.8
+100	99	cadet grey	205.2	17.6	69.0
+101	100	cadmium green	153.6	100.0	42.0
+102	101	cadmium orange	28.1	81.0	92.9
+103	102	cadmium red	351.0	100.0	89.0
+104	100	cadmium green	57.9	100.0	100.0
+105	103	cadmium yellow	57.9	100.0	100.0
+106	104	cal poly pomona green	136.6	61.0	30.2
+107	105	cambridge blue	140.0	15.6	75.7
+108	106	camouflage green	91.1	20.1	52.6
+109	107	canary	60.0	40.0	100.0
+110	108	canary yellow	56.2	100.0	100.0
+111	109	candy apple red	1.9	100.0	100.0
+112	110	candy pink	355.3	50.3	89.4
+113	111	capri	195.1	100.0	100.0
+114	112	caput mortuum	7.4	64.0	34.9
+115	5	carbon arc	0.0	0.0	78.0
+116	113	cardinal	349.9	84.7	76.9
+117	114	caribbean green	165.0	100.0	80.0
+118	115	carmine	344.9	100.0	100.0
+119	116	carmine pink	3.6	72.0	92.2
+120	117	carmine red	346.8	100.0	100.0
+121	118	carnation pink	336.4	35.0	100.0
+122	119	carnelian	0.0	84.9	70.2
+123	120	carolina blue	210.9	30.8	86.7
+124	121	carrot orange	32.9	86.2	92.9
+125	122	celadon	123.4	23.6	88.2
+126	123	celeste	180.0	30.2	100.0
+127	124	celestial blue	205.3	64.9	81.6
+128	125	cerise	342.7	78.0	87.1
+129	126	cerise pink	335.6	75.1	92.5
+130	127	cerulean	195.8	100.0	65.4
+131	128	cerulean blue	223.8	77.9	74.5
+132	129	chamoisee	25.7	43.8	62.7
+133	130	champagne	34.6	34.0	98.0
+134	131	charcoal	204.0	31.6	31.0
+135	132	chartreuse	90.1	100.0	100.0
+136	133	cherry	342.7	78.0	87.1
+137	134	cherry blossom pink	348.3	28.2	100.0
+138	135	chestnut	0.0	55.2	80.4
+139	136	chocolate	25.0	85.7	82.4
+140	137	chrome yellow	39.3	100.0	100.0
+141	138	cinereous	12.4	19.0	59.6
+142	139	cinnabar	4.8	77.1	89.0
+143	140	cinnamon	25.0	85.7	82.4
+144	141	citrine	54.5	95.6	89.5
+145	142	classic rose	325.5	18.8	98.4
+146	143	cobalt	215.1	100.0	67.0
+147	144	cocoa brown	25.0	85.7	82.4
+148	145	coffee	24.6	50.4	43.5
+149	146	columbia blue	200.4	39.2	100.0
+150	147	cool black	212.1	100.0	38.8
+151	148	cool grey	228.8	18.6	67.5
+152	149	copper	28.9	72.3	72.2
+153	150	copper rose	0.0	33.3	60.0
+154	151	coquelicot	13.2	100.0	100.0
+155	152	coral	16.1	68.6	100.0
+156	153	coral pink	4.7	51.1	97.3
+157	154	coral red	0.0	75.0	100.0
+158	155	cordovan	355.1	54.0	53.7
+159	156	corn	54.3	62.9	98.4
+160	157	cornell red	0.0	84.9	70.2
+161	158	cornflower	201.5	34.4	92.2
+162	159	cornflower blue	218.5	57.8	92.9
+163	160	cornsilk	48.0	13.8	100.0
+164	161	cosmic latte	42.5	9.4	100.0
+165	162	cotton candy	334.0	26.2	100.0
+166	163	cream	57.4	18.4	100.0
+167	164	crimson	348.0	90.9	86.3
+168	165	crimson red	0.0	100.0	60.0
+169	166	crimson glory	344.2	100.0	74.6
+170	167	cyan	180.0	100.0	100.0
+171	168	daffodil	60.0	80.8	100.0
+172	169	dandelion	55.3	80.0	94.1
+173	170	dark blue	240.0	100.0	54.6
+174	171	dark brown	30.0	67.3	39.6
+175	172	dark byzantium	315.0	38.7	36.5
+176	173	dark candy apple red	0.0	100.0	64.4
+177	174	dark cerulean	209.0	93.7	49.5
+178	175	dark chestnut	9.6	36.9	59.6
+179	176	dark coral	9.7	66.4	80.4
+180	177	dark cyan	180.0	100.0	54.6
+181	178	dark electric blue	205.9	30.8	47.0
+182	179	dark goldenrod	42.7	94.0	72.1
+183	180	dark gray	0.0	0.0	66.3
+184	181	dark green	158.0	98.0	19.6
+185	182	dark jungle green	162.0	27.7	14.2
+186	183	dark khaki	55.6	43.4	74.1
+187	184	dark lava	27.3	30.5	28.2
+188	185	dark lavender	270.4	47.3	58.8
+189	186	dark magenta	300.0	100.0	54.6
+190	213	dartmouth green	155.4	100.0	41.2
+191	187	dark midnight blue	210.0	100.0	40.0
+192	188	dark olive green	82.0	56.1	42.0
+193	189	dark orange	32.9	100.0	100.0
+194	190	dark orchid	280.1	75.5	80.0
+195	191	dark pastel blue	212.1	41.4	79.6
+196	192	dark pastel green	138.1	98.4	75.2
+197	193	dark pastel purple	262.7	48.2	83.9
+198	194	dark pastel red	9.4	82.5	76.1
+199	195	dark pink	342.0	63.6	90.6
+200	196	dark powder blue	220.0	100.0	60.0
+201	197	dark raspberry	329.7	71.9	52.9
+202	198	dark red	0.0	100.0	54.6
+203	199	dark salmon	15.1	47.6	91.4
+204	200	dark scarlet	344.1	96.5	33.8
+205	201	dark sea green	120.0	23.9	73.7
+206	202	dark sienna	0.0	66.7	23.6
+207	203	dark slate blue	248.5	56.1	54.5
+208	204	dark slate gray	180.0	40.5	31.0
+209	205	dark spring green	150.3	79.8	44.8
+210	206	dark tan	45.0	44.1	56.8
+211	207	dark tangerine	38.0	93.0	100.0
+212	208	dark taupe	27.3	30.5	28.2
+213	209	dark terra cotta	353.3	61.8	80.0
+214	210	dark turquoise	180.9	100.0	82.0
+215	211	dark violet	282.1	100.0	82.8
+216	212	dark yellow	53.0	80.0	84.0
+217	214	davy grey	0.0	0.0	33.3
+218	215	deep carmine	346.9	81.1	66.3
+219	216	deep carmine pink	357.5	79.9	93.8
+220	217	deep carrot orange	19.4	81.1	91.4
+221	218	deep cerise	329.6	77.1	85.5
+222	219	deep champagne	34.6	34.0	98.0
+223	220	deep chestnut	3.2	61.1	72.6
+224	221	deep coffee	1.3	42.0	43.9
+225	222	deep fuchsia	300.0	56.5	75.7
+226	223	deep jungle green	178.4	100.0	29.4
+227	224	deep lilac	280.0	54.6	73.3
+228	225	deep magenta	300.0	100.0	80.0
+229	226	deep peach	25.7	35.6	100.0
+230	227	deep pink	327.6	92.2	100.0
+231	228	deep saffron	30.0	80.0	100.0
+232	229	deep sky blue	195.1	100.0	100.0
+233	230	denim	213.2	88.9	74.2
+234	231	desert	32.8	44.6	75.7
+235	232	desert sand	25.2	26.1	93.0
+236	233	dim gray	0.0	0.0	41.2
+237	234	dodger blue	209.6	88.2	100.0
+238	235	dogwood rose	334.9	88.8	84.4
+239	236	dollar bill	97.7	45.9	73.3
+240	237	drab	42.5	84.7	58.8
+241	238	duke blue	240.0	100.0	61.2
+242	239	earth yellow	34.2	57.8	88.2
+243	240	ecru	45.5	34.1	76.1
+244	241	eggplant	329.1	34.0	38.1
+245	242	eggshell	46.2	10.8	94.1
+246	243	egyptian blue	225.6	90.4	65.1
+247	244	electric blue	182.8	51.0	100.0
+248	245	electric crimson	345.2	100.0	100.0
+249	246	electric cyan	180.0	100.0	100.0
+250	247	electric indigo	266.1	100.0	100.0
+251	248	electric lavender	290.3	26.6	100.0
+252	249	electric lime	72.0	100.0	100.0
+253	250	electric purple	284.9	100.0	100.0
+254	251	electric ultramarine	254.8	100.0	100.0
+255	252	electric violet	273.6	100.0	100.0
+256	253	emerald	140.0	60.0	78.4
+257	254	eton blue	134.4	25.1	78.4
+258	255	fallow	32.8	44.6	75.7
+259	256	falu red	0.0	81.2	50.2
+260	257	fashion fuchsia	320.4	100.0	95.6
+261	258	fawn	29.7	51.0	89.8
+262	259	fern	125.6	39.9	73.7
+263	260	fern green	105.8	45.4	47.5
+264	261	ferrari red	9.4	100.0	100.0
+265	262	field drab	41.5	72.2	42.4
+266	263	fire engine red	356.9	84.5	80.8
+267	264	firebrick	0.0	80.9	69.8
+268	265	flame	16.9	84.9	88.6
+269	266	flamingo pink	343.6	43.6	98.8
+270	267	flavescent	52.0	42.5	96.9
+271	268	flax	50.0	45.3	93.4
+272	269	floral white	40.0	5.8	100.0
+273	270	fluorescent orange	44.9	100.0	100.0
+274	271	fluorescent pink	327.6	92.2	100.0
+275	272	fluorescent yellow	72.0	100.0	100.0
+276	273	folly	341.4	100.0	100.0
+277	274	forest green	120.0	75.5	54.5
+278	275	french beige	25.6	45.1	65.1
+279	276	french blue	203.4	100.0	73.4
+280	277	french lilac	289.6	32.4	55.7
+281	278	french rose	337.7	70.0	96.5
+282	279	fuchsia	300.0	100.0	100.0
+283	280	fuchsia pink	300.0	53.4	100.0
+284	281	fuzzy wuzzy	0.0	50.0	80.0
+285	282	gainsboro	0.0	0.0	86.3
+286	283	gamboge	39.4	93.4	89.3
+287	284	ghost white	240.0	2.8	100.0
+288	285	ginger	34.4	100.0	69.0
+289	286	glaucous	216.3	47.3	71.4
+290	287	glitter	234.0	8.0	98.0
+291	288	gold	50.6	100.0	100.0
+292	289	golden brown	36.4	86.3	60.0
+293	290	golden poppy	46.2	100.0	98.8
+294	291	golden yellow	52.5	100.0	100.0
+295	292	goldenrod	42.9	85.3	85.5
+296	293	granny smith apple	112.9	29.8	89.4
+297	294	gray	0.0	0.0	50.2
+298	295	green	120.0	100.0	100.0
+299	296	green blue	209.4	90.5	70.5
+300	297	green yellow	83.7	81.6	100.0
+301	298	grullo	34.3	20.7	66.3
+302	299	guppie green	149.9	100.0	100.0
+303	300	han blue	222.7	67.2	81.1
+304	301	han purple	255.4	90.5	98.1
+305	302	hansa yellow	51.0	54.0	91.4
+306	303	harvard crimson	353.4	100.0	78.8
+307	304	harvest gold	39.9	100.0	85.4
+308	305	heart gold	60.0	100.0	50.2
+309	306	heliotrope	286.3	55.0	100.0
+310	307	hollywood cerise	320.4	100.0	95.6
+311	308	honeydew	120.0	5.8	100.0
+312	309	hot magenta	313.0	88.6	100.0
+313	310	hot pink	330.0	58.8	100.0
+314	311	icterine	58.1	62.8	98.8
+315	312	incandescent	44.9	100.0	100.0
+316	313	indigo	274.6	100.0	51.0
+317	314	international klein blue	223.1	100.0	65.4
+318	315	international orange	18.6	100.0	100.0
+319	316	iris	245.2	61.8	81.2
+320	317	isabelline	30.0	3.3	95.7
+321	318	ivory	60.0	5.8	100.0
+322	319	jade	158.2	100.0	65.8
+323	320	jasmine	47.2	49.3	97.2
+324	321	jasper	358.8	72.6	84.3
+325	322	jazzberry jam	327.7	93.3	64.7
+326	323	jonquil	47.7	62.3	98.1
+327	324	june bud	73.3	60.1	85.5
+328	325	jungle green	163.4	76.0	67.1
+329	326	kelly green	100.6	87.7	73.4
+330	327	khaki	37.2	25.6	76.5
+331	328	la salle green	141.4	93.3	47.1
+332	329	languid lavender	277.9	8.6	86.6
+333	330	lapis lazuli	210.0	75.6	61.1
+334	331	laser lemon	60.0	86.6	99.6
+335	332	laurel green	95.2	15.6	73.0
+336	333	lava	355.0	92.3	81.2
+337	334	lavender	275.0	43.0	86.0
+338	335	lavender blue	240.0	20.0	100.0
+339	336	lavender blush	340.0	5.8	100.0
+340	337	lavender gray	244.6	6.2	81.5
+341	338	lavender indigo	264.7	63.0	92.1
+342	339	lavender mist	240.0	8.0	98.0
+343	340	lavender pink	331.9	30.7	98.4
+344	341	lavender purple	267.5	32.4	71.4
+345	342	lavender rose	315.8	36.2	98.4
+346	343	lawn green	90.5	100.0	98.8
+347	344	lemon	58.1	100.0	100.0
+348	345	lemon yellow	56.3	69.0	100.0
+349	346	lemon chiffon	54.0	19.6	100.0
+350	347	lemon lime	75.1	100.0	100.0
+351	348	light crimson	342.9	57.2	96.1
+352	349	light thulian pink	340.0	37.9	90.2
+353	350	light apricot	28.4	30.1	99.2
+354	351	light blue	194.7	24.8	90.2
+355	352	light brown	28.4	84.0	71.0
+356	353	light carmine pink	355.3	55.2	90.2
+357	354	light coral	0.0	46.6	94.1
+358	355	light cornflower blue	200.7	37.2	91.8
+359	356	light cyan	180.0	12.2	100.0
+360	357	light fuchsia pink	305.1	47.0	97.6
+361	358	light goldenrod yellow	60.0	16.0	98.0
+362	359	light gray	0.0	0.0	82.7
+363	360	light green	120.0	39.5	93.3
+364	361	light khaki	54.0	41.7	94.1
+365	362	light pastel purple	260.7	28.1	85.1
+366	363	light pink	351.0	28.6	100.0
+367	364	light salmon	17.1	52.2	100.0
+368	365	light salmon pink	0.0	40.0	100.0
+369	366	light sea green	176.7	82.0	69.8
+370	367	light sky blue	203.0	46.0	98.0
+371	368	light slate gray	210.0	22.3	60.0
+372	369	light taupe	25.7	39.0	70.2
+373	370	light yellow	60.0	7.0	100.0
+374	371	lilac	300.0	19.0	78.5
+375	372	lime	75.1	100.0	100.0
+376	373	lime green	120.0	75.6	80.4
+377	374	lincoln green	105.7	94.4	34.8
+378	375	linen	30.0	8.0	98.0
+379	376	lion	32.8	44.6	75.7
+380	377	msu green	166.7	65.2	27.0
+381	378	magenta	300.0	100.0	100.0
+382	379	magic mint	153.4	29.2	94.1
+383	380	magnolia	261.8	4.4	100.0
+384	381	mahogany	20.0	100.0	75.2
+385	382	maize	54.3	62.9	98.4
+386	383	majorelle blue	246.9	63.7	86.3
+387	384	malachite	140.3	95.0	85.5
+388	385	mango tango	20.1	73.8	100.0
+389	386	maroon	0.0	100.0	50.2
+390	387	mauve	276.5	31.0	100.0
+391	388	mauve taupe	343.2	34.4	56.9
+392	389	mauvelous	347.6	36.3	93.7
+393	390	medium persian blue	202.5	100.0	64.8
+394	391	medium aquamarine	154.3	53.9	86.6
+395	392	medium blue	240.0	100.0	80.4
+396	393	medium candy apple red	349.6	97.3	88.6
+397	394	medium carmine	5.4	69.7	68.6
+398	395	medium champagne	48.3	29.6	95.3
+399	396	medium electric blue	208.6	98.0	58.8
+400	397	medium jungle green	160.8	47.2	20.8
+401	398	medium lavender magenta	300.0	27.6	86.7
+402	399	medium orchid	288.1	59.8	82.7
+403	400	medium purple	259.6	48.9	85.9
+404	401	medium red violet	323.8	72.7	73.4
+405	402	medium sea green	146.7	66.5	70.3
+406	403	medium slate blue	248.5	56.2	93.4
+407	404	medium spring green	157.0	100.0	98.0
+408	405	medium taupe	9.4	31.1	40.4
+409	406	medium teal blue	212.0	100.0	70.6
+410	407	medium turquoise	177.8	65.5	82.0
+411	408	medium violet red	322.2	89.4	78.0
+412	409	melon	6.6	28.9	99.2
+413	410	midnight blue	240.0	77.7	44.0
+414	411	midnight green	187.2	100.0	32.6
+415	412	mikado yellow	45.4	95.2	100.0
+416	413	mint	158.1	65.6	70.7
+417	414	mint cream	150.0	4.0	100.0
+418	415	mint green	120.0	40.4	100.0
+419	416	misty rose	6.0	11.8	100.0
+420	417	moccasin	34.3	14.0	98.0
+421	418	mode beige	42.5	84.7	58.8
+422	419	moonstone blue	199.0	40.7	76.1
+423	420	mordant red 19	4.1	100.0	68.2
+424	421	moss green	120.0	22.5	87.4
+425	422	mountain meadow	161.3	74.2	73.0
+426	423	mountbatten pink	323.2	20.3	60.0
+427	424	mulberry	328.0	62.0	77.3
+428	425	munsell	210.0	0.8	95.7
+429	426	mustard	47.1	65.4	100.0
+430	427	myrtle	115.0	54.5	25.9
+431	428	nadeshiko pink	339.5	29.6	96.5
+432	429	napier green	100.3	100.0	50.2
+433	430	naples yellow	47.7	62.3	98.1
+434	431	navajo white	35.9	32.2	100.0
+435	432	navy blue	240.0	100.0	50.2
+436	433	neon carrot	30.6	73.8	100.0
+437	434	neon fuchsia	321.8	64.9	99.6
+438	435	neon green	110.6	92.2	100.0
+439	436	north texas green	139.9	96.5	56.4
+440	437	ocean boat blue	202.4	100.0	74.6
+441	438	ochre	30.0	83.3	80.0
+442	439	office green	120.0	100.0	50.2
+443	440	old gold	49.5	71.5	81.2
+444	441	old lace	39.1	9.1	99.2
+445	442	old lavender	303.5	14.1	47.5
+446	443	old mauve	335.6	52.4	40.4
+447	444	old rose	359.1	33.4	75.3
+448	445	olive	60.0	100.0	50.2
+449	446	olive drab	79.6	75.4	55.7
+450	447	olive green	58.5	42.0	72.9
+451	448	olivine	86.6	37.8	72.5
+452	449	onyx	0.0	0.0	5.9
+453	450	opera mauve	318.8	27.9	71.8
+454	451	orange	38.8	100.0	100.0
+455	452	orange yellow	45.4	58.1	97.2
+456	453	orange peel	37.4	100.0	100.0
+457	454	orange red	16.2	100.0	100.0
+458	455	orchid	302.3	48.6	85.5
+459	456	otter brown	30.0	67.3	39.6
+460	457	outer space	190.9	14.5	29.8
+461	458	outrageous orange	11.9	71.0	100.0
+462	459	oxford blue	212.1	100.0	27.8
+463	460	pacific blue	191.1	86.0	78.8
+464	461	pale aqua	205.7	18.2	90.2
+465	462	pale blue	180.0	26.4	93.3
+466	463	pale brown	30.0	44.7	59.6
+467	464	pale carmine	5.4	69.7	68.6
+468	465	pale cerulean	205.4	31.4	88.6
+469	466	pale chestnut	357.5	21.7	86.7
+470	467	pale copper	18.3	52.8	85.5
+471	468	pale cornflower blue	210.0	28.4	93.7
+472	469	pale gold	33.9	39.9	90.2
+473	470	pale goldenrod	54.7	28.6	93.3
+474	471	pale green	120.0	39.5	98.4
+475	472	pale lavender	255.3	18.4	100.0
+476	473	pale magenta	310.3	47.0	97.6
+477	474	pale pink	354.4	12.7	98.0
+478	475	pale plum	300.0	27.6	86.7
+479	476	pale red violet	340.4	48.9	85.9
+480	477	pale robin egg blue	169.2	32.5	87.0
+481	478	pale silver	21.4	7.0	78.8
+482	479	pale taupe	25.2	32.9	73.7
+483	476	pale red violet	340.4	48.9	85.9
+484	480	pale violet red	340.4	48.9	85.9
+485	481	papaya whip	37.1	16.4	100.0
+486	482	paris green	140.0	60.0	78.4
+487	483	pastel blue	196.4	16.0	81.2
+488	484	pastel brown	27.5	36.6	51.4
+489	485	pastel gray	60.0	5.3	81.2
+490	486	pastel green	120.0	46.1	86.7
+491	487	pastel magenta	333.3	37.0	95.7
+492	488	pastel orange	35.2	72.2	100.0
+493	489	pastel pink	345.7	18.0	100.0
+494	490	pastel purple	294.8	12.7	71.0
+495	491	pastel red	3.0	62.0	100.0
+496	492	pastel violet	302.4	24.7	79.6
+497	493	pastel yellow	60.0	40.8	99.2
+498	494	payne grey	205.9	30.8	47.0
+499	495	peach	39.2	29.4	100.0
+500	496	peach puff	28.3	27.4	100.0
+501	497	peach yellow	39.0	30.9	98.0
+502	498	pear	65.8	78.3	88.6
+503	499	pearl	42.4	14.5	91.8
+504	500	pearl aqua	162.0	37.0	84.7
+505	501	peridot	59.0	100.0	90.2
+506	502	periwinkle	240.0	20.0	100.0
+507	503	persian blue	229.1	85.1	73.4
+508	504	persian indigo	258.5	85.3	47.9
+509	505	persian orange	26.0	59.4	85.1
+510	506	persian pink	328.5	48.6	96.8
+511	507	persian plum	0.0	75.0	44.0
+512	508	persian red	0.0	75.0	80.0
+513	509	persian rose	325.8	84.4	99.6
+514	510	phlox	292.5	100.0	100.0
+515	511	phthalo blue	233.4	100.0	53.8
+516	512	phthalo green	150.9	66.0	20.8
+517	513	piggy pink	343.1	12.7	99.2
+518	514	pine green	175.0	99.2	47.4
+519	515	pink	349.5	50.0	100.0
+520	516	pink flamingo	299.6	54.1	99.2
+521	517	pink sherbet	346.2	42.1	96.9
+522	518	pink pearl	324.4	25.6	90.6
+523	519	pistachio	96.1	42.1	77.3
+524	520	platinum	40.0	1.3	89.8
+525	521	plum	300.0	27.6	86.7
+526	522	portland orange	10.7	78.8	100.0
+527	523	powder blue	186.7	23.5	90.2
+528	524	princeton orange	33.6	100.0	100.0
+529	525	prussian blue	204.6	100.0	32.6
+530	526	psychedelic purple	292.5	100.0	100.0
+531	527	puce	345.0	33.3	80.0
+532	528	pumpkin	24.2	90.6	100.0
+533	529	purple	300.0	100.0	50.2
+534	530	purple heart	270.3	66.0	61.2
+535	531	purple mountain's majesty	269.5	30.6	73.0
+536	532	purple mountain majesty	269.0	34.1	71.4
+537	533	purple pizzazz	312.3	69.3	99.6
+538	534	purple taupe	311.3	20.0	31.3
+539	535	radical red	347.8	79.2	100.0
+540	536	raspberry	337.2	95.2	89.1
+541	537	raspberry glace	343.2	34.4	56.9
+542	538	raspberry pink	330.4	64.6	88.6
+543	539	raspberry rose	338.4	62.0	70.1
+544	540	raw sienna	23.5	58.4	83.9
+545	541	razzle dazzle rose	315.0	80.0	100.0
+546	542	razzmatazz	337.9	83.6	89.0
+547	543	red	0.0	100.0	100.0
+548	544	red orange	3.3	71.4	100.0
+549	545	red brown	0.0	74.5	64.7
+550	546	red violet	322.2	89.4	78.0
+551	547	rich black	180.0	100.0	25.0
+552	548	rich carmine	342.1	100.0	84.4
+553	549	rich electric blue	198.6	96.2	81.7
+554	550	rich lilac	284.4	51.4	82.3
+555	551	rich maroon	337.5	72.7	69.0
+556	552	robin's egg blue	179.0	84.9	80.8
+557	553	rose	330.1	100.0	100.0
+558	554	rose bonbon	329.8	73.4	97.6
+559	555	rose ebony	3.6	32.1	40.4
+560	556	rose madder	354.9	83.2	89.0
+561	557	rose pink	320.0	60.0	100.0
+562	558	rose quartz	303.3	10.6	66.6
+563	559	rose taupe	0.0	35.4	56.5
+564	560	rose vale	357.4	54.3	67.0
+565	561	rosewood	353.5	100.0	39.6
+566	562	rosso corsa	0.0	100.0	83.2
+567	563	rosy brown	0.0	23.9	73.7
+568	564	royal azure	220.0	100.0	65.8
+569	565	royal blue	225.0	71.0	88.2
+570	566	royal fuchsia	321.3	78.2	79.1
+571	567	royal purple	266.6	52.1	66.2
+572	568	ruby	337.4	92.4	87.9
+573	569	ruddy brown	24.9	78.6	73.3
+574	570	ruddy pink	354.2	36.8	88.2
+575	571	rufous	7.8	95.8	65.9
+576	572	russet	25.5	78.9	50.2
+577	573	rust	18.1	92.4	71.7
+578	574	sacramento state green	164.0	100.0	33.8
+579	575	saddle brown	25.0	86.3	54.5
+580	576	safety orange	24.2	100.0	100.0
+581	577	saffron	45.3	80.2	95.7
+582	578	saint patrick blue	235.9	71.3	47.9
+583	579	salmon	14.0	58.8	100.0
+584	580	salmon pink	349.6	43.2	100.0
+585	581	sand	45.5	34.1	76.1
+586	582	sand dune	42.5	84.7	58.8
+587	583	sandstorm	52.0	72.9	92.5
+588	584	sandy brown	27.6	60.6	95.7
+589	585	sandy taupe	42.5	84.7	58.8
+590	586	sap green	92.5	66.4	49.0
+591	587	sapphire	216.5	92.0	72.9
+592	588	satin sheen gold	43.2	73.9	79.6
+593	589	scarlet	8.5	100.0	100.0
+594	590	school bus yellow	50.8	100.0	100.0
+595	591	screamin green	121.8	53.8	100.0
+596	592	sea blue	197.4	100.0	58.0
+597	593	sea green	146.5	66.9	54.6
+598	594	seal brown	0.0	60.0	19.6
+599	595	seashell	24.7	6.6	100.0
+600	596	selective yellow	43.8	100.0	100.0
+601	597	sepia	30.0	82.1	44.0
+602	598	shadow	37.3	32.6	54.1
+603	599	shamrock	160.7	66.5	80.8
+604	600	shamrock green	156.5	100.0	62.0
+605	601	shocking pink	315.2	93.9	98.8
+606	602	sienna	11.7	83.1	53.4
+607	603	silver	0.0	0.0	75.3
+608	604	skobeloff	180.0	100.0	45.4
+609	605	sky blue	197.4	42.6	92.1
+610	606	sky magenta	320.4	45.5	81.2
+611	607	slate blue	248.3	56.2	80.4
+612	608	slate gray	210.0	22.2	56.5
+613	609	smalt	220.0	100.0	60.0
+614	610	smokey topaz	357.2	58.5	57.7
+615	611	smoky black	30.0	50.0	6.3
+616	612	snow	0.0	2.0	100.0
+617	613	spiro disco ball	195.2	93.9	98.8
+618	614	spring green	149.9	100.0	100.0
+619	615	steel blue	207.3	61.1	70.6
+620	616	stil de grain yellow	47.7	62.3	98.1
+621	617	stizza	0.0	100.0	60.0
+622	618	stormcloud	180.0	100.0	50.2
+623	619	straw	54.4	51.3	89.4
+624	620	sunglow	45.0	80.0	100.0
+625	622	sunset	34.6	34.0	98.0
+626	623	sunset orange	3.9	67.2	99.2
+627	624	tan	34.3	33.4	82.4
+628	625	tangelo	18.6	100.0	97.6
+629	626	tangerine	33.0	100.0	95.0
+630	627	tangerine yellow	48.0	100.0	100.0
+631	628	taupe	27.3	30.5	28.2
+632	629	taupe gray	320.0	4.3	54.5
+633	630	tawny	25.5	100.0	80.4
+634	631	tea green	100.0	20.0	94.1
+635	632	tea rose	0.0	20.5	95.7
+636	633	teal	180.0	100.0	50.2
+637	634	teal blue	193.9	60.3	53.4
+638	635	teal green	170.1	100.0	42.8
+639	636	terra cotta	10.2	59.6	88.6
+640	637	thistle	300.0	11.6	84.7
+641	638	thulian pink	333.0	50.0	87.1
+642	639	tiffany blue	178.3	94.6	72.9
+643	640	tiger eye	29.6	73.2	87.9
+644	641	timberwolf	33.3	4.1	85.9
+645	642	titanium yellow	58.0	100.0	93.4
+646	643	tomato	9.1	72.2	100.0
+647	644	topaz	34.8	51.4	100.0
+648	645	tractor red	350.2	94.4	99.2
+649	646	trolley grey	0.0	0.0	50.2
+650	647	tropical rain forest	168.2	100.0	45.8
+651	648	true blue	206.7	100.0	81.2
+652	649	tufts blue	211.9	66.3	75.7
+653	650	tumbleweed	23.7	38.7	87.1
+654	651	turkish rose	346.6	37.1	71.0
+655	652	turquoise	175.3	77.4	83.6
+656	653	turquoise blue	176.2	100.0	100.0
+657	654	turquoise green	142.2	25.3	83.9
+658	655	tuscan red	341.7	35.3	39.9
+659	656	twilight lavender	328.6	47.1	54.2
+660	657	tyrian purple	325.2	98.1	40.0
+661	658	ua blue	222.0	100.0	66.6
+662	659	ua red	339.0	100.0	85.0
+663	660	ucla blue	220.9	44.2	58.4
+664	661	ucla gold	42.1	100.0	100.0
+665	662	ufo green	141.1	71.3	81.6
+666	663	up forest green	148.7	98.5	26.6
+667	664	up maroon	358.9	86.2	48.3
+668	665	usc cardinal	0.0	100.0	60.0
+669	666	usc gold	48.0	100.0	100.0
+670	667	ube	252.8	38.4	76.5
+671	668	ultra pink	300.0	56.4	100.0
+672	669	ultramarine	243.6	93.0	56.1
+673	670	ultramarine blue	227.7	73.4	96.1
+674	671	umber	21.4	28.3	38.8
+675	672	united nations blue	216.1	60.3	89.8
+676	673	university of california gold	40.0	78.7	71.7
+677	674	unmellow yellow	60.0	60.0	100.0
+678	675	upsdell red	356.2	81.6	68.2
+679	676	vanilla	48.3	29.6	95.3
+680	677	vegas gold	50.1	55.3	77.2
+681	678	venetian red	355.9	96.0	78.5
+682	679	verdigris	177.3	62.5	70.1
+683	680	vermilion	4.8	77.1	89.0
+684	681	veronica	276.9	86.7	94.1
+685	682	violet	300.0	45.3	93.4
+686	683	violet blue	228.8	71.9	69.8
+687	684	violet red	336.2	66.4	96.9
+688	685	viridian	160.9	50.7	50.9
+689	686	vivid auburn	1.6	75.3	57.3
+690	687	vivid burgundy	348.9	81.7	62.4
+691	688	vivid cerise	328.3	86.7	85.4
+692	689	vivid tangerine	11.7	46.2	100.0
+693	690	vivid violet	277.4	100.0	100.0
+694	691	warm black	180.0	100.0	25.8
+695	692	waterspout	180.0	100.0	100.0
+696	693	wenge	6.7	18.0	39.2
+697	694	wheat	39.1	27.0	96.1
+698	695	white	0.0	0.0	100.0
+699	696	white smoke	0.0	0.0	96.1
+700	697	wild strawberry	329.0	73.8	100.0
+701	698	wild watermelon	349.6	57.1	98.8
+702	699	wild blue yonder	225.7	22.2	81.5
+703	700	wine	352.8	58.8	44.7
+704	701	wisteria	281.0	27.3	86.3
+705	702	xanadu	135.8	14.1	52.5
+706	703	yale blue	211.6	89.7	57.3
+707	704	yellow	60.0	100.0	100.0
+708	705	yellow orange	34.3	74.2	100.0
+709	706	yellow green	79.7	75.6	80.4
+710	707	zaffre	232.9	100.0	65.8
+711	708	zinnwaldite brown	23.3	81.8	17.3

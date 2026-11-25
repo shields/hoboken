@@ -1,0 +1,29 @@
+colorProfile min=140 max=500
+--- Hue+Sat+CT light, read back
+  H=228 S=56 CT=250                                -> prims=2 preferred=HFTemperatureColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(0.440000,0.552000,1.000000); temperatureColor: <HFTemperatureColor: 0x> 250.000000m>
+  H=0 S=0 CT=250                                   -> prims=2 preferred=HFTemperatureColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,1.000000,1.000000); temperatureColor: <HFTemperatureColor: 0x> 250.000000m>
+  H=228 S=56 CT=140 (min)                          -> prims=1 preferred=HFRGBColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(0.440000,0.552000,1.000000); temperatureColor: 0x>
+  H=30 S=66 CT=140 (min)                           -> prims=1 preferred=HFRGBColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,0.670000,0.340000); temperatureColor: 0x>
+  temp 140 mired rgb rep hue 241.354 sat 5.138
+  H=222 S=20 CT=140 (matches 140 mired rgb ~)      -> prims=1 preferred=HFRGBColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(0.800000,0.860000,1.000000); temperatureColor: 0x>
+  H=228 S=56 only (no CT value)                    -> prims=1 preferred=HFRGBColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(0.440000,0.552000,1.000000); temperatureColor: 0x>
+  H only                                           -> nil
+  CT=300 only                                      -> prims=1 preferred=HFTemperatureColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,0.750166,0.501789); temperatureColor: <HFTemperatureColor: 0x> 300.000000m>
+  H=0 S=0 CT=500                                   -> prims=2 preferred=HFTemperatureColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,1.000000,1.000000); temperatureColor: <HFTemperatureColor: 0x> 500.000000m>
+--- Hue+Sat only light
+  H=228 S=56                                       -> prims=1 preferred=HFRGBColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(0.440000,0.552000,1.000000); temperatureColor: 0x>
+  H=0 S=0                                          -> prims=1 preferred=HFRGBColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,1.000000,1.000000); temperatureColor: 0x>
+--- CT-only light
+  CT=300                                           -> prims=1 preferred=HFTemperatureColor
+        <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,0.750166,0.501789); temperatureColor: <HFTemperatureColor: 0x> 300.000000m>
+H/S-only colorProfile = nil

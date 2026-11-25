@@ -1,0 +1,19 @@
+{Hue} supportsRGBColor=1  RGB(100,50) -> {Hue=100 Sat=50}  TEMP(300) -> {Hue=30 Sat=50}
+{Saturation} supportsRGBColor=0  RGB(100,50) -> {}  TEMP(300) -> {CT=300}
+{Hue,Sat} supportsRGBColor=1  RGB(100,50) -> {Hue=100 Sat=50}  TEMP(300) -> {Hue=30 Sat=50}
+{CT} supportsRGBColor=0  RGB(100,50) -> {}  TEMP(300) -> {CT=300}
+{Hue,CT} supportsRGBColor=1  RGB(100,50) -> {Hue=100 Sat=50}  TEMP(300) -> {CT=300}
+CT range 153..500: TEMP 366 -> {CT=366}  TEMP 100 -> {CT=153}  TEMP 600 -> {CT=500}  palette3 warm white -> {CT=366}
+   colorByAdjustingForProfile(warm white) -> <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,0.877333,0.770000); temperatureColor: <HFTemperatureColor: 0x> 366.000000m> ; item writes {CT=366}
+CT range 153..370: TEMP 366 -> {CT=366}  TEMP 100 -> {CT=153}  TEMP 600 -> {CT=370}  palette3 warm white -> {CT=366}
+   colorByAdjustingForProfile(warm white) -> <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,0.877333,0.770000); temperatureColor: <HFTemperatureColor: 0x> 366.000000m> ; item writes {CT=366}
+CT range 200..454: TEMP 366 -> {CT=366}  TEMP 100 -> {CT=200}  TEMP 600 -> {CT=454}  palette3 warm white -> {CT=366}
+   colorByAdjustingForProfile(warm white) -> <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,0.877333,0.770000); temperatureColor: <HFTemperatureColor: 0x> 366.000000m> ; item writes {CT=366}
+CT range 50..400: TEMP 366 -> {CT=366}  TEMP 100 -> {CT=100}  TEMP 600 -> {CT=400}  palette3 warm white -> {CT=366}
+   colorByAdjustingForProfile(warm white) -> <HFColorCollection: 0x; RGBColor: <HFRGBColor: 0x> RGB(1.000000,0.877333,0.770000); temperatureColor: <HFTemperatureColor: 0x> 366.000000m> ; item writes {CT=366}
+CT step 10, hue/sat step 5: TEMP 366 -> {CT=370}; RGB(228,56) -> {Hue=230 Sat=55}; RGB(28,23)->{Hue=30 Sat=25}
+hue 10.5 sat 10.5 -> {Hue=11 Sat=11}
+hue 11.5 sat 11.5 -> {Hue=12 Sat=12}
+hue 12.5 sat 12.5 -> {Hue=13 Sat=13}
+hue 13.5 sat 13.5 -> {Hue=14 Sat=13}
+hue 359.9 -> {Hue=360 Sat=50}  hue 360 -> {Hue=0 Sat=50}

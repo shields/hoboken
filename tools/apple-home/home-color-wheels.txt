@@ -1,0 +1,56 @@
+defaultTemperatureRange = 2400, 10000 K
+largestAllowableTemperatureRange = 1000, 40000 K
+Temperature wheel, supportedRange 2400.0..10000.0 K (default)
+  angle 0.00 ->  6600.0 K  151.5 mired | HS-only: Hue=302 Sat=2  | HS+CT: CT=152
+  angle 0.05 ->  5979.5 K  167.2 mired | HS-only: Hue=15 Sat=7   | HS+CT: CT=167
+  angle 0.10 ->  4900.9 K  204.0 mired | HS-only: Hue=27 Sat=21  | HS+CT: CT=204
+  angle 0.15 ->  3772.4 K  265.1 mired | HS-only: Hue=30 Sat=40  | HS+CT: CT=265
+  angle 0.20 ->  2852.5 K  350.6 mired | HS-only: Hue=30 Sat=62  | HS+CT: CT=351
+  angle 0.25 ->  2400.0 K  416.7 mired | HS-only: Hue=30 Sat=76  | HS+CT: CT=417
+  angle 0.30 ->  2852.5 K  350.6 mired | HS-only: Hue=30 Sat=62  | HS+CT: CT=351
+  angle 0.35 ->  3772.4 K  265.1 mired | HS-only: Hue=30 Sat=40  | HS+CT: CT=265
+  angle 0.40 ->  4900.9 K  204.0 mired | HS-only: Hue=27 Sat=21  | HS+CT: CT=204
+  angle 0.45 ->  5979.5 K  167.2 mired | HS-only: Hue=15 Sat=7   | HS+CT: CT=167
+  angle 0.50 ->  6600.0 K  151.5 mired | HS-only: Hue=302 Sat=2  | HS+CT: CT=152
+  angle 0.55 ->  7102.3 K  140.8 mired | HS-only: Hue=243 Sat=5  | HS+CT: CT=141
+  angle 0.60 ->  7975.5 K  125.4 mired | HS-only: Hue=227 Sat=11 | HS+CT: CT=140
+  angle 0.65 ->  8889.0 K  112.5 mired | HS-only: Hue=223 Sat=16 | HS+CT: CT=140
+  angle 0.70 ->  9633.7 K  103.8 mired | HS-only: Hue=222 Sat=19 | HS+CT: CT=140
+  angle 0.75 -> 10000.0 K  100.0 mired | HS-only: Hue=222 Sat=20 | HS+CT: CT=140
+  angle 0.80 ->  9633.7 K  103.8 mired | HS-only: Hue=222 Sat=19 | HS+CT: CT=140
+  angle 0.85 ->  8889.0 K  112.5 mired | HS-only: Hue=223 Sat=16 | HS+CT: CT=140
+  angle 0.90 ->  7975.5 K  125.4 mired | HS-only: Hue=227 Sat=11 | HS+CT: CT=140
+  angle 0.95 ->  7102.3 K  140.8 mired | HS-only: Hue=243 Sat=5  | HS+CT: CT=141
+  angle 1.00 ->  6600.0 K  151.5 mired | HS-only: Hue=302 Sat=2  | HS+CT: CT=152
+Temperature wheel, supportedRange 2000.0..7142.9 K (light with CT 140..500 mired)
+  angle 0.00 ->  6600.0 K  151.5 mired | HS-only: Hue=302 Sat=2  | HS+CT: CT=152
+  angle 0.05 ->  5920.4 K  168.9 mired | HS-only: Hue=17 Sat=7   | HS+CT: CT=169
+  angle 0.10 ->  4739.1 K  211.0 mired | HS-only: Hue=28 Sat=23  | HS+CT: CT=211
+  angle 0.15 ->  3503.1 K  285.5 mired | HS-only: Hue=30 Sat=46  | HS+CT: CT=285
+  angle 0.20 ->  2495.6 K  400.7 mired | HS-only: Hue=30 Sat=73  | HS+CT: CT=401
+  angle 0.25 ->  2000.0 K  500.0 mired | HS-only: Hue=29 Sat=91  | HS+CT: CT=500
+  angle 0.30 ->  2495.6 K  400.7 mired | HS-only: Hue=30 Sat=73  | HS+CT: CT=401
+  angle 0.35 ->  3503.1 K  285.5 mired | HS-only: Hue=30 Sat=46  | HS+CT: CT=285
+  angle 0.40 ->  4739.1 K  211.0 mired | HS-only: Hue=28 Sat=23  | HS+CT: CT=211
+  angle 0.45 ->  5920.4 K  168.9 mired | HS-only: Hue=17 Sat=7   | HS+CT: CT=169
+  angle 0.50 ->  6600.0 K  151.5 mired | HS-only: Hue=302 Sat=2  | HS+CT: CT=152
+  angle 0.55 ->  6680.2 K  149.7 mired | HS-only: Hue=288 Sat=3  | HS+CT: CT=150
+  angle 0.60 ->  6819.6 K  146.6 mired | HS-only: Hue=265 Sat=3  | HS+CT: CT=147
+  angle 0.65 ->  6965.5 K  143.6 mired | HS-only: Hue=252 Sat=4  | HS+CT: CT=144
+  angle 0.70 ->  7084.4 K  141.2 mired | HS-only: Hue=244 Sat=5  | HS+CT: CT=141
+  angle 0.75 ->  7142.9 K  140.0 mired | HS-only: Hue=241 Sat=5  | HS+CT: CT=140
+  angle 0.80 ->  7084.4 K  141.2 mired | HS-only: Hue=244 Sat=5  | HS+CT: CT=141
+  angle 0.85 ->  6965.5 K  143.6 mired | HS-only: Hue=252 Sat=4  | HS+CT: CT=144
+  angle 0.90 ->  6819.6 K  146.6 mired | HS-only: Hue=265 Sat=3  | HS+CT: CT=147
+  angle 0.95 ->  6680.2 K  149.7 mired | HS-only: Hue=288 Sat=3  | HS+CT: CT=150
+  angle 1.00 ->  6600.0 K  151.5 mired | HS-only: Hue=302 Sat=2  | HS+CT: CT=152
+RGB wheel (angle, radius)
+  angle 0.6333 r 0.787 -> rgb 0.440 0.552 1.000 k=none | HS-only: Hue=228 Sat=56   | HS+CT: Hue=228 Sat=56
+  angle 0.6333 r 0.000 -> rgb 1.000 1.000 1.000 k=none | HS-only: Hue=0 Sat=0      | HS+CT: Hue=0 Sat=0
+  angle 0.6333 r 0.080 -> rgb 1.000 1.000 1.000 k=none | HS-only: Hue=0 Sat=0      | HS+CT: Hue=0 Sat=0
+  angle 0.6333 r 0.500 -> rgb 0.822 0.858 1.000 k=none | HS-only: Hue=228 Sat=18   | HS+CT: Hue=228 Sat=18
+  angle 0.6333 r 1.000 -> rgb 0.000 0.200 1.000 k=none | HS-only: Hue=228 Sat=100  | HS+CT: Hue=228 Sat=100
+  angle 0.0000 r 1.000 -> rgb 1.000 0.000 0.000 k=none | HS-only: Hue=0 Sat=100    | HS+CT: Hue=0 Sat=100
+  angle 0.3333 r 1.000 -> rgb 0.000 1.000 0.000 k=none | HS-only: Hue=120 Sat=100  | HS+CT: Hue=120 Sat=100
+  angle 0.0833 r 0.500 -> rgb 1.000 0.911 0.822 k=none | HS-only: Hue=30 Sat=18    | HS+CT: Hue=30 Sat=18
+  angle 0.0833 r 0.300 -> rgb 1.000 0.979 0.957 k=none | HS-only: Hue=30 Sat=4     | HS+CT: Hue=30 Sat=4

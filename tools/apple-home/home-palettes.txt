@@ -1,0 +1,14 @@
+RGB palette (type 0)
+  1  hue 221.792  sat 20.188  bri 1.000  no temperature
+  2  hue 251.000  sat  5.000  bri 1.000  no temperature
+  3  hue  28.000  sat 23.000  bri 1.000  temperature 366.00 mireds (2732 K)
+  4  hue  29.886  sat 48.126  bri 1.000  no temperature
+  5  hue  29.647  sat 66.667  bri 1.000  no temperature
+  6  hue 255.000  sat 68.000  bri 1.000  no temperature
+temperature palette (type 1)
+  1  hue 256.921  sat  3.881  bri 1.000  temperature 144.93 mireds (6900 K)
+  2  hue  19.628  sat  8.660  bri 1.000  temperature 172.41 mireds (5800 K)
+  3  hue  28.598  sat 26.776  bri 1.000  temperature 222.22 mireds (4500 K)
+  4  hue  29.922  sat 50.614  bri 1.000  temperature 303.03 mireds (3300 K)
+  5  hue  29.841  sat 72.769  bri 1.000  temperature 400.00 mireds (2500 K)
+  6  hue 223.025  sat 16.453  bri 1.000  temperature 111.11 mireds (9000 K)
