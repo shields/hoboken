@@ -1,498 +1,151 @@
 # Hoboken Project Instructions
 
-## Project Overview
+Minimal HomeKit bridge for Zigbee2MQTT (Z2M), WLED, and the heated bedding
+(heated mattress pads and heated blankets) and curtains that the Tucson service
+exposes over MQTT. It uses `@homebridge/hap-nodejs` directly, with no
+framework.
 
-Minimal HomeKit bridge for Zigbee2MQTT and WLED. Uses `@homebridge/hap-nodejs`
-directly (no framework). Connects to MQTT, reads device config from YAML.
-Tucson's MQTT profile adds heated mattress pads and heated blankets, referred
-to collectively as heated bedding. Use short zone names such as "Bed Side A".
-
-## Toolchain
-
-- **Runtime**: Node.js 26 with unflagged TypeScript type stripping
-- **Package manager**: Bun (`bun install`, `bun.lock`)
-- **Bun version**: `packageManager` in package.json, which CI installs; both
-  Dockerfiles' `oven/bun` tags must match (`test/toolchain.test.ts`)
-- **Playwright version**: `playwright` in package.json; the
-  `mcr.microsoft.com/playwright` tag in `Dockerfile.playwright` must match
-  (`test/toolchain.test.ts`), because the image bundles the browser revision
-  that npm release launches. Renovate holds the npm release for 3 days but not
-  the image, so the image's PR is red until the npm release joins its branch.
-- **Node.js major**: the final stage's `gcr.io/distroless/nodejs<major>` image in
-  `Dockerfile`, `node-version` in `.github/workflows/build.yml`, and the
-  `@types/node` major in package.json must agree (`test/toolchain.test.ts`).
-  `integration/tucson-roundtrip.ts` requires the workflow's major.
-- **Test runner**: Bun test (`bun test`, `bun test --coverage`)
-- **TypeScript 7**: type checking only (`noEmit`), `erasableSyntaxOnly`
-- **ESLint 10**: `typescript-eslint` with `strictTypeChecked` + `stylisticTypeChecked`
-- **Container**: `gcr.io/distroless/nodejs26-debian13`
+`README.md` is the overview: what the bridge exposes, configuration,
+deployment, and failure handling. The detail is in `doc/`:
+`color-coalescing.md` for write coalescing, white and color handling, and WLED
+white segments; `mqtt.md` for the broker URL, authentication, topic
+permissions, and refusals; `tucson.md` for heated bedding and curtain behavior.
+Read the relevant part before changing a feature, and update it with the
+change. Keep the README short and put detail in `doc/`. This file holds only
+rules and traps that those documents, the code, and the tests do not show;
+describe behavior there, not here.
 
 ## Commands
 
 ```sh
-make setup                # Frozen dependencies and Lefthook pre-commit checks
-make fmt                  # ESLint fixes and Prettier for code and non-code files
-bun install               # Install dependencies
-make lint                 # tsc --noEmit, ESLint, Renovate config validation, Prettier
-make test                 # Unit tests with coverage
-make test-broker-deps     # System packages for the pinned Mosquitto build
-make test-integration     # WLED, heated bedding, authenticated broker, refused subscription, dropped session, and malformed URL round trips (Node.js)
-make test-screenshot      # Compare status page against golden file (Docker)
-make run                  # Run with Node.js
-make demo                 # Serve the status page with sample data
-make golden-screenshot    # Regenerate status page golden file (Docker)
+make setup              # Frozen install; Lefthook pre-commit hook (make lint)
+make fmt                # ESLint fixes and Prettier
+make lint               # Workflow locks, tsc, ESLint, Renovate config, Prettier
+make test               # Unit tests with coverage (Bun)
+make test-integration   # Round trips through a real broker (Node.js); see README
+make test-screenshot    # Full suite and status page golden file (Docker)
+make golden-screenshot  # Regenerate the golden file (Docker)
+make run                # Run with Node.js
+make demo               # Serve the status page with sample data
 ```
 
-Follow the [shared TypeScript guide](https://github.com/shields/right-answers/blob/main/typescript.md)
-and its configuration baselines. The `@typescript/native` npm alias supplies
-TypeScript 7's `tsc`. The `typescript` alias points to `@typescript/typescript6`,
-which supplies the TypeScript 6 API required by typescript-eslint; TypeScript 7.0
-has no compiler API. Keep these aliases until typescript-eslint supports the
-native compiler's API. See Microsoft's
-[side-by-side setup](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6.0).
+## Toolchain
 
-## Module Architecture
+- Bun installs packages and runs the unit tests. The application and the
+  integration tests run on Node.js, which strips types, so TypeScript syntax
+  must be erasable.
+- Follow the [shared TypeScript guide](https://github.com/shields/right-answers/blob/main/typescript.md).
+  Keep its side-by-side aliases (`@typescript/native` for TypeScript 7's `tsc`,
+  `typescript` for the TypeScript 6 API that typescript-eslint needs) until
+  typescript-eslint supports the native compiler's API.
+- `test/toolchain.test.ts` ties `packageManager`, `playwright`, and the
+  `@types/node` major in package.json to the image tags in the Dockerfiles and
+  `node-version` in `build.yml`. Renovate holds the Playwright npm release for
+  3 days but not the image, so the image's PR is red until the npm release
+  joins its branch.
+- Pin every Docker base image as `image:tag@sha256:digest`. To update one, pull
+  it and take the digest from `docker inspect`.
 
-Each module is independently testable with dependency injection:
+## Code
 
-- `src/config.ts` — Config loading/validation, MQTT URL checks, MQTT credential resolution, type definitions
-- `src/convert.ts` — Pure value conversion functions (Z2M ↔ HomeKit)
-- `src/accessories.ts` — HAP accessory/scene creation, takes `PublishFn`/`GetStateFn`
-- `src/bridge.ts` — MQTT client, bridge wiring, state cache, lifecycle
-- `src/heated-bedding-profile.ts` — Pure heated bedding payload parsing, topic naming, fan write coalescing, the power-on timer, and group identity and state aggregation
-- `src/heated-bedding-source.ts` — Heated bedding availability, session, and confirmed-write state machine, injected publish/clock
-- `src/tucson-mqtt.ts` — Dedicated MQTT 5 connection, credentials, URL checks, and reconnect policy shared by the heated bedding and curtain sources
-- `src/heated-bedding-mqtt.ts` — Binds `TucsonMQTT` to the heated bedding source
-- `src/curtain-mqtt.ts` — Binds `TucsonMQTT` to the curtain source
-- `src/heated-bedding-accessories.ts` — Fan and preheat accessories backed by the heated bedding source, for one zone or a group of zones
-- `src/main.ts` — Entry point (~10 lines)
+- Accessory creation takes `PublishFn` and `GetStateFn`, never the MQTT client.
+- `tucson-source.ts`, `tucson-mqtt.ts`, and `tucson-profile.ts` own the MQTT
+  session, request/result, and wire validation shared by heated bedding and
+  curtains. The `heated-bedding-*` and `curtain-*` modules supply state parsing
+  and accessory behavior.
+- Write "homekit" out in identifiers (`homeKitToZ2m`, `HomeKitState`), not
+  "hk", except in function-local variables.
+- Do not add a `default: never` arm to a switch over a union such as
+  `Capability`. The compiler already reports a missing case, and Bun's coverage
+  has no ignore comments, so the unreachable arm fails the coverage threshold.
+- New files carry the Apache 2.0 header, copied from an existing file: `//` for
+  TypeScript, `#` for shell, after any shebang.
 
-## Key Design Decisions
+## Testing
 
-- **Dependency injection**: Accessory creation takes `publish` and `getState`
-  functions, not MQTT client. This enables testing without mocking hap-nodejs.
-- **MQTT is the only mock boundary**: HAP-NodeJS objects (Bridge, Accessory,
-  Service, Characteristic) are lightweight enough to instantiate directly in tests.
-- **Scenes as momentary switches**: `onSet(true)` publishes `{"scene_recall": id}`,
-  then auto-resets to off after 1 second.
-- **Fan speed**: a `fan_speed` device's `RotationSpeed` is a percentage in
-  steps of `FAN_SPEED_STEP` (100/3), so `off`, `low`, `medium`, and `high` are
-  0, 33, 67, and 100. HAP-NodeJS stores the values the bridge sets as the
-  nearest steps (33.33…, 66.67…, 100), which are what the Home app and Siri
-  send. It checks a controller's write only against the range: one above 100
-  fails with `INVALID_VALUE_IN_REQUEST` before `onSet` runs, and only the
-  `HAP-NodeJS:Characteristic` debug namespace shows why. Any other value is
-  published as sent and stays on the characteristic until the next read or
-  Zigbee2MQTT report replaces it. `homeKitSpeedToZ2mFanMode` maps it to the
-  nearest step, except that any positive value is at least `low`.
-- **White on `color_hs` lights**: `homeKitToZ2m` publishes a HomeKit write
-  that asks for a white as `color_temp`, so that the bulb uses its white
-  LEDs (`requestedColorTemp`). Zero saturation, with any hue or none, or hue
-  228 and saturation 56 (a Home app white swatch) is white (`isWhite`): the
-  device's `whiteColorTemp` or `DEFAULT_WHITE_COLOR_TEMP` (370 mireds,
-  2700 K). Siri's "warm white" (31, 33) is `WARM_WHITE_COLOR_TEMP` (454,
-  2200 K) and its "cool white" (208, 17) is `COOL_WHITE_COLOR_TEMP` (250,
-  4000 K); the three are Zigbee2MQTT's `neutral`, `warm`, and `cool`
-  presets. Any other hue and saturation within 1 of the Home app's
-  temperature curve (`hueSaturationToColorTemp`) is the temperature it stands
-  for, limited to 140–500, which covers the Home app's Temperature tab and
-  preset swatches on a light without `ColorTemperature`. All of this applies
-  only to a device with white LEDs: one with `whiteColorTemp`, with the
-  `color_temp` capability, or with a `color_temp` in the state cache.
-  Otherwise the write stays a color. The cached `color_temp` is never the
-  value published: while a bulb shows a color, Zigbee2MQTT replaces it with
-  one computed from that color by McCamy's formula, which gives 574 mireds
-  for blue. WLED gets RGB (255, 255, 255); which LEDs light is the strip's
-  Auto White setting. See `doc/color-coalescing.md`, which also records what
-  the Home app and Siri write.
-- **The Home app's temperature curve**: `colorTempToHueSaturation` is the
-  closed form of `HFGetColorForLightTemperature` in Apple's Home framework,
-  checked against that function's output. Use it, not HAP-NodeJS's
-  `ColorUtils` table, which assigns different colors (370 mireds is (30, 67)
-  on the curve and (27, 42) in the table), so that what the bridge reports
-  for a temperature is what the Home app would write for it.
-- **`color_temp` with `color_hs`**: a Z2M light may have both, against HAP
-  R13 §10.11 but as Home Assistant, homebridge-hue, and homebridge-z2m do. A
-  write with `ColorTemperature` and Hue or Saturation publishes only
-  `color_temp`, unless it is `COLOR_TEMP_MIN` with both Hue and Saturation,
-  which is the state of a light showing a color written back, and is
-  published as the color. `z2mToHomeKit` reports only the active `color_mode`'s
-  fields: in `color_temp` mode the temperature and the curve's hue and
-  saturation for it, in `hs` or `xy` mode the color and
-  `COLOR_TEMP_MIN`, because the Home app shows a light as a color only while
-  its `ColorTemperature` is the minimum (a light without `color_hs` gets no
-  `color_temp` then), and everything when there is no `color_mode`. It reads an update against the merged state. A
-  characteristic whose field the state lacks reads as its last value. After
-  publishing a write, `makePublish` sets the characteristics that the write
-  implies and did not set (`z2mWriteToHomeKit`), because the report that
-  follows a write is suppressed.
-- **HomeKit write logs**: the `set-characteristics` listener on the HAP
-  server logs each write request as it arrives, as `HAP write from <address>`
-  with the accessory name, characteristic, and value of every write in it.
-  HAP-NodeJS refuses a value outside a characteristic's range before `onSet`
-  runs, so this line is the only record of such a value. `makePublish` then
-  logs each published write as the coalesced HomeKit payload, the MQTT topic,
-  and the message. Neither Zigbee2MQTT at its `info` level nor the broker
-  records what a controller sent.
-- **WLED white segments**: a WLED device with `colorSegments`,
-  `whiteSegments`, and `whiteChannels` gets white from strips of two color
-  temperatures on the channels of its white segments (`whiteStrips`). A
-  temperature lights the white segments and darkens the color segments, and
-  a color does the reverse; each write addresses segments by `id` and sets
-  `sel`, because WLED reports only the first selected segment's color.
-  `whiteChannelValues` cross-fades the two strips in mireds with both full
-  on at the midpoint and undoes WLED's `gamma`; `colorTempRange` is what the
-  strips span, in whole mireds, and is the `ColorTemperature` range of the
-  characteristic and the minimum that marks a color. A white by name or on
-  the Home app's curve follows `requestedColorTemp` as for Zigbee2MQTT. A
-  reported color with a lit white channel is a white. One with only the cool
-  strips lit cannot be told from a color, so `makePublish` keeps the white
-  it last wrote as `white` in the cached state, from `wledWrite`, and
-  `wledColorToHomeKit` reads that same color reported back as the white. See
-  `doc/color-coalescing.md`.
-- **WLED color reports**: `<topic>/c` is `#RRGGBB`, or `#WWRRGGBB` with one or
-  two `W` digits when the white channel is lit (`parseWledHexColor`). The
-  cached `col` then has a fourth element, and `wledRgb` adds it to each color
-  channel for HomeKit and for the status page swatch. A device with white
-  segments has other channels than red, green, and blue, and its swatch is
-  the hue and saturation that HomeKit is given.
-- **MQTT disconnect handling**: `onSet` throws
-  `HapStatusError(SERVICE_COMMUNICATION_FAILURE)` when MQTT is disconnected.
-  The coalesced flush on the next tick swallows only that error, for a
-  connection that dropped in between; any other error from publishing is
-  thrown.
-- **Invalid heated bedding messages**: An invalid heated bedding MQTT message
-  tears down the whole heated bedding connection, which reconnects with backoff,
-  instead of invalidating only the affected zone. Partially invalid state isn't
-  trusted, so every zone starts over from a clean MQTT session.
-- **Heated bedding groups**: a `zones` entry has no source state of its own.
-  `createHeatedBeddingAccessories` gives it a control that reads every member
-  through `usableState` and writes every member through the same
-  `writeFan`/`writePreheat` path as the member's own accessory, so coalescing,
-  explicit-off precedence, caller limits, confirmation, and the sequence rule
-  apply to each member and writes in flight on the group and on a member need no
-  coordination between them. The group reads as on while any member is on, with
-  the highest level among those on, or the highest stored level while all are
-  off (`aggregateHeatedBeddingStates`); it is unavailable if any member is, and
-  a write checks every member first so that none is sent a command when one is
-  unavailable. Active on is a `{ resume: true }` fan write rather than
-  `{ active: true }`: a window of only resumes sends nothing to a zone whose
-  power is on, deciding by the latest in-flight write that sets power and
-  otherwise by reported power, and a resume that finds a power-on in flight
-  joins its waiters instead of sending another command. Any other write in the
-  window makes the resume an ordinary power on, and an off still wins. Every
-  other group write sends the per-zone write to all members. A group write
-  resolves only when every member does; each failure is logged once with the
-  zone's topic as `group_write_failed`, the first failure in the listed order
-  supplies the HAP error, and members that succeeded are not rolled back. A
-  successful write responds with the aggregate of every member's `usableState`
-  read after the last member settles, never the states the members resolved with,
-  because HAP stores the response as the characteristic's value without a
-  notification and a member can change between two members' confirmations. A
-  member that is not usable at that point fails the write with
-  `SERVICE_COMMUNICATION_FAILURE` and is logged like any failure. The
-  `changed` observer updates the group's accessories like any zone's. The
-  source gets the distinct zones of all entries (`heatedBeddingZoneConfigs`),
-  because it rejects a repeated zone. The status page lists a group as its
-  members' states beside the aggregate, and the unknown-state metric counts a
-  group once, as unknown if any member is.
-- **Heated bedding auto-off**: a fan write that powers a zone on carries
-  `auto_off_seconds` of six hours (`prepareHeatedBeddingCommand`), because the
-  Sunbeam firmware returns a zone's timer to 10 hours whenever the zone turns
-  off. `TucsonSource` leaves the timer out, just before it publishes, only when
-  the zone reports power on and the resume rule above also finds it on, that
-  is, no power-off is in flight. Writing the timer restarts the countdown even
-  when the value is unchanged, which power and level writes do not, so a zone
-  that is on gets none. An unconfirmed power-on does not count, because it can
-  still fail and leave the zone on at the firmware's 10 hours.
-  Tucson rejects a timer alone for a zone that is off and preheat combined with
-  anything, so only a power-on carries it, and preheat from off keeps the
-  firmware's default. Confirmation waits for the reported timer like any other
-  command field.
-- **No config reload**: restart the container for config changes.
-- **MQTT credentials**: `Config` holds only `mqtt.username` and the password
-  file path. `main.ts` calls `resolveMQTTCredentials(config.mqtt)` and passes
-  the resulting `MQTTCredentials` to `startBridge`, which gives them to every
-  MQTT client, so the status page, metrics, and logs cannot reach the password.
-  `validateConfig` stays pure and `startBridge` takes credentials only as an
-  argument. Every client builds its options with `credentialOptions`, which
-  empties mqtt.js's `auth` so userinfo in the broker URL cannot replace the
-  configured login. `startBridge` rejects, before creating any client or server,
-  credentials whose username differs from `config.mqtt.username`, a configured
-  username without credentials, credentials without a configured username, and a
-  password file without a username, so a library caller cannot connect
-  anonymously or under the wrong name. The messages name the fields but never
+- Check tests by mutation. Once a change and its tests pass, break the lines
+  that the change added or edited, one small way at a time (invert a condition,
+  move a boundary, change a constant, delete a statement or a branch), and run
+  the tests that cover them. A mutant that every test passes shows a missing
+  assertion, unless it cannot change behavior: add the test, see it fail, then
+  restore the code. No mutation tool is installed, so mutate by hand. Stage the
+  passing change first, so that `git diff` shows only the mutant and is empty
+  again once it is restored.
+- `make lint test` must pass before each commit. `bunfig.toml` sets 100%
+  thresholds for lines, functions, and statements, with `demo/**` excluded.
+  Coverage shows that a line ran, not that a test checks it.
+- All verification is automated; no manual browser testing.
+- Instantiate HAP-NodeJS objects directly; never mock hap-nodejs. The `mqtt`
+  module is the only mock.
+- Never load the machine to provoke a race (CPU burners, stress tools, floods
+  of parallel runs). Make the ordering deterministic: fake timers or an
+  injected clock in unit tests; in integration tests, have the simulated device
+  or controller delay, drop, or reorder the specific message, and poll for the
+  outcome with a deadline.
+- Stop every process a test or probe starts before the command returns.
+- `demo/status-page.png` is compared with a fresh screenshot of
+  `demo/fixture.ts` at zero pixel tolerance. Regenerate it only with
+  `make golden-screenshot`, which runs in the Docker image that CI uses, never
+  on the host.
+
+## Lights and fans
+
+- Read `doc/color-coalescing.md` before changing how `src/convert.ts` or
+  `makePublish` handles color, white, or WLED segments.
+- Never publish the cached `color_temp` as a white. While a bulb shows a color,
+  Zigbee2MQTT replaces it with a value computed from that color (574 mireds for
+  blue). Whites go through `requestedColorTemp`.
+- Convert a temperature to hue and saturation with `colorTempToHueSaturation`,
+  the Home app's own curve, never HAP-NodeJS's `ColorUtils` table, which gives
+  different colors.
+- HAP-NodeJS checks a controller's write against a characteristic's range but
+  not its `minStep`. A `fan_speed` device's `RotationSpeed` off the
+  `FAN_SPEED_STEP` grid reaches `onSet` and stays on the characteristic until
+  the next read or report; one above 100 fails before `onSet` runs.
+
+## MQTT and secrets
+
+- The password exists only in `MQTTCredentials`, which `main.ts` resolves and
+  passes to `startBridge`. `Config` and `validateConfig` never hold or read it.
+  Every MQTT client builds its options with `credentialOptions`, so that
+  userinfo in the broker URL cannot replace the configured login.
+- No part of `mqtt.url` is printed except through `displayMQTTURL`, because a
+  malformed URL cannot be reliably stripped of its credentials. Every entry
+  point checks the URL with `assertMQTTURL`, and every client is created and
+  connected through `withoutErrorMessage`. Error messages name fields and never
   echo values.
-- **MQTT URL**: a URL that is not well formed cannot be reliably stripped of its
-  credentials, so no part of it is printed anywhere. `isMQTTURL` accepts a URL
-  only if mqtt.js can connect with it as written. Node's legacy `url.parse`,
-  which mqtt.js uses, must find a scheme that mqtt.js builds a stream for
-  (`mqtt`, `mqtts`, `tcp`, `ssl`, `tls`, `ws`, `wss`), a host, and a port of 1
-  or more, and the WHATWG `URL` parser must find the same host. WHATWG
-  percent-encodes a host that is not ASCII for `mqtt`, `mqtts`, `tcp`, `ssl`,
-  and `tls`, where `url.parse` writes punycode, so those URLs fail; `ws` and
-  `wss` pass because WHATWG writes punycode for them too. The second check
-  rejects what `url.parse` truncates without complaint, such as a space, `;`, or
-  `%` in the host, where mqtt.js would connect to the text before it. A control
-  character in the host fails too, because WHATWG percent-encodes one in the
-  host of a non-special scheme and strips a leading or trailing one from the
-  whole URL, so the comparison cannot see it. `url.parse` must also find no `@`
-  in the path or fragment. A `/`, `?`, or `#` in a password ends the authority
-  early, and both parsers then agree on a wrong host, the username or the text
-  between a later `@` and the delimiter, which mqtt.js would resolve, connect to
-  with the partial credentials, and quote in `MQTT error` lines. Such a URL
-  cannot be told from a path, query, or fragment that holds an `@`, so both are
-  refused; `%40` writes an `@` there. A bare hostname fails because mqtt.js
-  throws "Missing protocol". mqtt.js would map an unknown scheme to `mqtt`, so
-  the scheme list is stricter than mqtt.js. A `+unix` URL fails too, for lack of
-  a host: mqtt.js reaches a socket only for `mqtt+unix` and `tcp+unix`, and
-  dials `localhost` over TCP for `mqtts`, `ssl`, `tls`, `ws`, and `wss`. A `ws`
-  or `wss` URL with an IPv6 address fails too, because mqtt.js writes its host
-  without brackets and `new WebSocket` rejects the result. `validateConfig`,
-  `startBridge`, and the `TucsonMQTT` constructor call `assertMQTTURL`,
-  which throws "mqtt.url is not a valid MQTT URL". The log line and status page
-  use `displayMQTTURL`, which shows only the scheme, host, and port, or "(not
-  shown)" for a URL that does not pass; `startBridge` has already refused such a
-  URL, so that is a second layer. It never shows the path, query, or fragment,
-  which can carry a token. `loadConfig` stops on a YAML error or warning, such
-  as an unresolved tag, and reports it by code, line, and column only, because
-  the parser's messages quote the offending line. It parses with `stringKeys`,
-  so a key that is a list or a mapping is a parse error rather than a process
-  warning and an unknown-field message that quote it, and it replaces the error
-  that converting the document throws for an alias with no anchor, which names
-  the alias, with one that has no `cause`, because Node prints the cause of an
-  uncaught error. Every client creates and connects through `withoutErrorMessage`,
-  which replaces any error that mqtt.js or Node throws synchronously, because
-  Node quotes the URL in them, with "MQTT client could not be started" and keeps
-  only a string `code`. `isMQTTURL` runs the legacy parser with
-  `process.noDeprecation` set and then puts back the value that it found, except
-  that Node has already set it, read-only, under `--no-deprecation`. Node 22 and
-  24 emit DEP0170 with the whole URL for a port that `url.parse` finds invalid
-  but `new URL` accepts, as in `mqtt:user:pw@host:1x`; Node 26 throws an error
-  that quotes the URL instead. Node 24 and 26 emit DEP0169, which does not quote
-  the URL, for any `url.parse` call outside `node_modules`. A process emits each
-  warning once, so `test/mqtt-url-report.ts` checks the shared lists in
-  `test/mqtt-urls.ts` in a fresh process, which `config.test.ts` starts under
-  Bun and `integration/mqtt-url-rejection.ts` starts under Node. It also creates
-  and connects an mqtt.js client for every valid URL with
-  `net.createConnection`, `tls.connect`, and the `createWebsocket` option
-  stubbed, so that the stream builders run and no socket opens; `manualConnect`
-  alone never runs them. Every malformed URL in those lists that has a place for
-  credentials carries a secret there, so any output that quotes part of one
-  fails.
-- **Main MQTT reconnect backoff**: the main client sets
-  `reconnectOnConnackError` in every configuration, because mqtt.js otherwise
-  never retries after a refused login, and starts `reconnectPeriod` at the
-  Tucson MQTT client's `MIN_BACKOFF`. Each `reconnect` event, which mqtt.js
-  emits once per attempt however that attempt fails, doubles
-  `client.options.reconnectPeriod` up to `MAX_BACKOFF`. The doubled period is
-  the wait after that attempt fails. Counting `reconnect` rather than `error`,
-  `close`, or `offline` counts a failed attempt once. `connect` starts a timer,
-  like the Tucson client's stable-connection timer, that resets the
-  period to `MIN_BACKOFF` once the connection has stayed up for `MAX_BACKOFF`;
-  `close` and shutdown clear it. A broker that accepts the login and then drops
-  the session, such as VerneMQ or EMQX with `deny_action=disconnect` after a
-  denied publish, keeps the period, so each drop is followed by a longer wait
-  and the bridge does not request every device's state once a second.
-- **Main MQTT subscription results**: the main client's connect handler passes
-  `subscribe` a callback, and the client sets `resubscribe: false`. With
-  mqtt.js's own resubscribe on, it re-sends the earlier subscriptions before the
-  handler runs and without a callback, so the handler's call has nothing left to
-  send and a refusal after a reconnect goes unreported. mqtt.js reports a SUBACK
-  failure code (bit 0x80) as an error whose `packet.granted` holds one code per
-  requested topic, while the grants argument still carries the requested QoS.
-  Codes name topics only when their count matches the request. A refusal logs
-  the refused topics and any other failure logs every requested topic, each as
-  one `log.error` line and one `mqttErrors` count per `subscribe` call. The
-  connection stays up.
-- **State cache**: `Map<string, Z2MState>` in bridge.ts, keyed by device topic.
-- **Dashboard browser support**: The status page targets modern browsers
-  (Chrome/Edge 111+, Safari 18+). Features like the View Transitions API are
-  used with graceful fallback.
-- **Status page audience**: The `GET /` status page is a developer/operator
-  diagnostic tool. It intentionally shows raw Z2M state values, JSON payloads,
-  MQTT topics, and internal IDs. Annotations (%, K, color swatches) are hints
-  alongside the raw data, not replacements for it.
+- Add each new URL case to `test/mqtt-urls.ts`. A malformed URL that has a
+  place for credentials carries a secret there, so that any output quoting part
+  of it fails.
+- A new config key must join its section's allowlist for `rejectUnknownFields`
+  and the table in README "Supported keys".
 
-## Capability Mapping
+## Tucson heated bedding and curtains
 
-| Capability   | HomeKit Characteristic             | Conversion                               |
-| ------------ | ---------------------------------- | ---------------------------------------- |
-| `on_off`     | `Characteristic.On`                | boolean passthrough                      |
-| `brightness` | `Characteristic.Brightness`        | Z2M 0–254 ↔ HK 0–100                     |
-| `color_temp` | `Characteristic.ColorTemperature`  | mireds, passthrough                      |
-| `color_hs`   | `Hue` + `Saturation`               | ranges match; white becomes `color_temp` |
-| `fan`        | `Active` (FanV2 service)           | `fan_state` ON/OFF ↔ 1/0                 |
-| `fan_speed`  | `RotationSpeed` + `TargetFanState` | speed thirds, smart=AUTO                 |
-
-`color_temp` and `color_hs` may be combined on a Z2M light, not on a WLED one.
-
-## Naming Conventions
-
-- Prefer writing out "homekit" (e.g. `homeKitToZ2m`, `HomeKitState`,
-  `HOMEKIT_CONVERTED_KEYS`) over abbreviating to "hk", except in
-  function-local variables where brevity aids readability.
-
-## Type Conventions
-
-- **Exhaustive switches**: When switching on a union type like `Capability` or
-  `DeviceType`, rely on TypeScript's type narrowing to catch missing cases at
-  compile time — do not add a `default: never` arm. Bun's coverage engine does
-  not support ignore comments, so unreachable default branches break the 100%
-  line coverage requirement.
-- Capability type: `"on_off" | "brightness" | "color_temp" | "color_hs" | "fan" | "fan_speed"`
-- `PublishFn = (topic: string, payload: Record<string, unknown>) => void`
-- `GetStateFn = (topic: string) => Z2MState | undefined`
-- `Z2MState = Record<string, unknown>` (Z2M state payloads vary by device)
-
-## Testing Requirements
-
-- 100% line/branch/function coverage
-- All HAP objects instantiated directly (no mocking hap-nodejs)
-- MQTT client is the only mock: use `bun:test` module mocking for `mqtt`
-- Use Bun's fake timers for scene auto-reset tests
-- **Timing**: never load the machine to provoke a race (CPU burners such as
-  `yes > /dev/null`, stress tools, floods of parallel runs). Make the ordering
-  deterministic instead: fake timers or an injected clock in unit tests; in
-  integration tests, have the simulated device or controller delay, drop, or
-  reorder the specific message (the heated bedding controller's `mode` drops or
-  rejects writes this way), and poll for the outcome with a deadline.
-- **Processes**: stop every process a test or probe starts before the command
-  returns.
-- Tests must pass: `make lint test`
-- **Screenshot golden file**: `demo/status-page.png` is a committed screenshot
-  of the status page rendered from `demo/fixture.ts` inside a Docker container
-  (`Dockerfile.playwright`) for cross-platform determinism. The test in
-  `test/screenshot.test.ts` compares a fresh Playwright screenshot against this
-  file with zero pixel tolerance. Both golden generation (`make golden-screenshot`)
-  and CI testing run inside the same Docker image so fonts and rendering match
-  exactly. The `PLAYWRIGHT_IN_DOCKER` env var triggers `--no-sandbox` for
-  Chromium inside the container. `make test-screenshot` runs the full Bun suite
-  in that image so the shared coverage thresholds cover the application.
-
-## Docker Images
-
-Pin all Docker base images to `sha256` digests for reproducibility. Keep
-the version tag alongside the digest for documentation, e.g.
-`FROM image:v1.2.3@sha256:abcd...`. When updating an image, pull it,
-grab the digest with `docker inspect`, and replace the hash in the
-`FROM` line.
-
-## Copyright Notice
-
-All new files must include the Apache 2.0 copyright header. Use `//` comments
-for TypeScript and `#` comments for shell scripts, placed immediately after the
-shebang line if present. See existing files for the exact format.
-
-## Development Workflow
-
-Follow red-green-refactor TDD:
-
-1. **Red**: Write a failing test first
-2. **Green**: Write the minimum code to make the test pass
-3. **Refactor**: Clean up while keeping tests green
-
-All verification is automated — no manual browser testing. Run before each
-commit:
-
-```sh
-make lint test
-```
-
-## Config Validation Rules
-
-- `bridge.mac`: MAC format `XX:XX:XX:XX:XX:XX` (hex digits)
-- `bridge.pincode`: format `XXX-XX-XXX` (digits)
-- `bridge.port`: positive integer
-- `bridge.bind`: optional string (network interface name or IP for mDNS)
-- `mqtt.url`: non-empty string that passes `isMQTTURL`, checked before
-  `mqtt.username`; the error never quotes the URL
-- `mqtt.username`: optional non-empty string of at most 65535 bytes; cannot
-  accompany userinfo in `mqtt.url`
-- `mqtt.passwordFile`: optional non-empty path; `mqtt.password` is rejected so
-  the password never lives in config.yaml
-- Unknown keys: every object the validator accepts rejects keys outside its
-  allowlist through one helper, `rejectUnknownFields`. The objects are the top
-  level (`bridge`, `mqtt`, `devices`, `heatedBedding`, `curtains`, `metrics`),
-  `bridge`, `mqtt`, `metrics`, each `devices` entry (`name`, `type`, `topic`,
-  `capabilities`, `whiteColorTemp`, `colorSegments`, `whiteSegments`,
-  `whiteChannels`, `gamma`, `scenes`), `whiteChannels` (`r`, `g`, `b`, `w`),
-  each `scenes` entry (`name`, `id`), and each `heatedBedding` and `curtains`
-  entry. The message gives the
-  section path and the JSON-escaped key, never a value, so a misspelled
-  `mqtt.username` cannot connect anonymously and a misspelled `metrics.bind`
-  cannot leave the status page on every interface. The check runs first in each
-  section, so a misspelled required field is named rather than reported
-  missing, except that `mqtt.password` is checked before it and keeps its own
-  message. A new config key must join its section's allowlist, a `Record` over
-  the interface's keys that the compiler requires to be complete.
-- MQTT password: only from `mqtt.passwordFile` (strictly decoded UTF-8; a
-  leading byte order mark and one trailing line ending, LF or CRLF, removed, so
-  a lone trailing CR stays); the environment is never consulted, so a stray
-  `MQTT_PASSWORD` is ignored. A username needs a password file, a password file
-  needs a username, and an unreadable, invalid UTF-8, empty, or oversized (over
-  65535 bytes) password fails startup. Messages never contain the password.
-- `devices`: non-empty array unless `heatedBedding` configures at least one zone;
-  a configuration with only heated bedding can omit `devices` or use an empty array
-- Each device: `name`, `topic`, `capabilities` (non-empty, valid values);
-  a `wled` device cannot have `color_temp` without `whiteChannels`, because
-  WLED alone has no color temperature to write or report
-- `whiteColorTemp`: optional integer from 140 to 500 mireds, the HAP
-  `ColorTemperature` range, so that kelvins are rejected; only on a device
-  with `color_hs`, and on a `wled` device only with `whiteChannels`
-- `colorSegments`, `whiteSegments`, `whiteChannels`: only on a `wled` device
-  and only all three together. Each list is non-empty, of distinct segment
-  ids from 0 to 31, and no id is in both. `whiteChannels` gives `r`, `g`,
-  `b`, and `w` each a color temperature from 1000 to 20000 kelvins, two
-  different temperatures in all, whose `colorTempRange` is at least one whole
-  mired wide and within 140 to 500, because the rest of the bridge limits
-  `ColorTemperature` to that range (about 2000 to 7142 kelvins). `gamma`,
-  from 1 to 3, is optional with them. `color_temp` on a `wled` device
-  requires them
-- Scene IDs: positive integers
-- `heatedBedding`: optional array of `name`, `prefix`, `controller`, and exactly
-  one of `zone` or `zones`; `zones` lists at least two distinct zones of that
-  controller and prefix
-- Heated bedding topics use Tucson's lowercase controller/zone identifiers and prefix
-  grammar; `bridge` controllers and `availability` zones are reserved
-- Identities determine HAP accessory identities and are unique across prefixes:
-  a single zone's is its controller and zone, a group's is its controller and
-  its set of zones (`heatedBeddingIdentity`), independent of order, name, and
-  prefix. A zone name has no comma, so a group's never equals a single zone's.
-  A group's zones may also be configured as entries of their own, and groups
-  may overlap, but a controller/zone pair keeps one prefix across every entry
-- Heated bedding and curtain routes cannot overlap device routes or each other;
-  wildcard device topics cannot accompany either. A heated bedding entry's routes
-  are those of each of its zones, and a zone shared by entries has the same owner
-  in each, so it is no overlap. A curtain owns its controller's topic, so a
-  controller that has both heated bedding and a curtain overlaps on its
-  availability route
-- Heated bedding entries contain only logical MQTT names
-
-## Tucson curtains
-
-- `curtains` entries use `name`, `prefix`, and `controller`. A curtain is a
-  single-endpoint controller (a Tucson profile with `endpoint_count` 1), so it
-  has no zone: state is on `<prefix>/<controller>`, commands on
-  `<prefix>/<controller>/set`, refresh requests on `.../get`, results on
-  `.../result`, and availability on `.../availability`. "Zone" is the Sunbeam
-  product's term and stays with heated bedding; a `zone` or `zones` key on a
-  curtain is an unknown field. The accessory identity (`curtainIdentity`) is
-  the controller alone and unique across prefixes. `bridge` and `availability`
-  are reserved controller names. A controller named `availability` would carry
-  state on `<prefix>/availability`, which a client that reads every topic ending
-  in `/availability` as an availability message cannot parse as state, and one
-  named `bridge` would put its availability on the prefix's own
-  `<prefix>/bridge/availability` route. A curtain-only configuration may omit
-  `devices`.
-- `tucson-source.ts`, `tucson-mqtt.ts`, and `tucson-profile.ts` own the shared
-  MQTT session, request/result, and wire-validation behavior. Bedding and
-  curtain modules supply state parsing and accessory behavior. An endpoint is a
-  zone of a multi-endpoint controller or, without a `zone`, the whole controller
-  (`tucsonTopic`).
+- An invalid heated bedding message tears down the whole heated bedding
+  connection, which reconnects with backoff, instead of invalidating one zone,
+  because partially invalid state is not trusted.
+- A heated bedding group has no source state. It reads every member through
+  `usableState` and writes every member through the same
+  `writeFan`/`writePreheat` path as the member's own accessory, so writes on a
+  group and on a member need no coordination.
+- A group's Active on must stay a `{ resume: true }` fan write, which sends
+  nothing to a zone that is already on, not `{ active: true }`.
+- A successful group write responds with the aggregate of every member's
+  `usableState` read after the last member settles, never the states the
+  members resolved with, because HAP stores the response as the
+  characteristic's value without a notification.
+- Tucson rejects a timer alone for a zone that is off, and preheat combined
+  with anything, so only a power-on carries `auto_off_seconds`.
 - Curtains expose only target position writes. Do not add start/stop commands
   or `HoldPosition` without a separate request.
-- Report current position from the device. Infer movement from reported
-  current/target positions only when motion telemetry is absent.
-- Production Zemismart mapping is pending hardware qualification in Tucson;
-  its synthetic curtain profile is test-only.
+- Use short zone names such as "Bed Side A".
+
+## Status page
+
+- The `GET /` status page is a diagnostic tool for operators. It deliberately
+  shows raw state values, JSON payloads, MQTT topics, and internal IDs.
+  Annotations (%, K, color swatches) are hints beside the raw data, not
+  replacements for it.
+- It targets Chrome/Edge 111+ and Safari 18+. Newer features such as the View
+  Transitions API need a fallback.

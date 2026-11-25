@@ -4,11 +4,11 @@ A minimal HomeKit bridge for Zigbee2MQTT and WLED. Exposes Z2M lights, ceiling
 fans, smart plugs, scenes, and WLED LED controllers to Apple Home for HomePod
 and Siri voice commands.
 
-Tucson's MQTT profile adds support for heated mattress pads and heated blankets
-(heated bedding). Each configured zone appears as a ten-level fan and a
-separate stateful preheat switch, with short display names such as "Bed Side A"
-and "Bed Side A Preheat". A group of zones can appear the same way, as one fan
-and one preheat switch for the whole bed.
+[Tucson](https://github.com/shields/tucson), a separate service that owns the
+device connections, adds heated mattress pads and heated blankets (heated
+bedding) over its MQTT profile, each zone or group of zones as a ten-level fan
+and a preheat switch, and a Zemismart BCD300FB Wi-Fi curtain motor as a window
+covering.
 
 It also provides an HTTP endpoint with a live-updating dashboard presenting all
 data in both MQTT and HAP forms, as well as Prometheus metrics and health check
@@ -31,30 +31,13 @@ It does not have any device discovery, self-update, or plugins. You get exactly 
 you configure, and you will always get that.
 
 All dependencies are pure JS/TS code. Test coverage is enforced at 100%
-line, function, and statement coverage.
-
-The deployment is a reproducible, distroless container image. You can
-run it on K3s or whatever.
+line, function, and statement coverage. The deployment is a reproducible,
+distroless container image. You can run it on K3s or whatever.
 
 It's called "Hoboken" because that has some of the same letters as
 "HomeKit Bridge".
 
-### Modules
-
-| Module               | Responsibility                                          |
-| -------------------- | ------------------------------------------------------- |
-| `src/config.ts`      | Load and validate YAML config; resolve MQTT credentials |
-| `src/convert.ts`     | Value conversion (Z2M/WLED ↔ HomeKit)                   |
-| `src/accessories.ts` | Create HAP accessories and scenes                       |
-| `src/bridge.ts`      | MQTT client, bridge wiring, lifecycle                   |
-| `src/metrics.ts`     | Prometheus metrics and HTTP server                      |
-| `src/main.ts`        | Entry point                                             |
-
-Modules are split for testability. Each has clear inputs/outputs and minimal
-coupling. Accessory creation takes injected `publish`/`getState` functions
-rather than an MQTT client directly.
-
-### Device Types
+## Devices
 
 Each device has a `type` field (defaults to `"z2m"`) that selects the MQTT
 protocol:
@@ -63,8 +46,6 @@ protocol:
 | ------ | --------------------- | ----------------------------- |
 | `z2m`  | Zigbee2MQTT (default) | JSON on `<topic>`             |
 | `wled` | WLED MQTT API         | Sub-topics `/g`, `/c`, `/api` |
-
-### Capabilities
 
 Devices declare capabilities in `config.yaml`:
 
@@ -77,30 +58,29 @@ Devices declare capabilities in `config.yaml`:
 | `fan`        | `Active` (FanV2)                   | `fan_state` ON/OFF ↔ 1/0                 | not supported              |
 | `fan_speed`  | `RotationSpeed` + `TargetFanState` | `fan_mode` ↔ speed thirds                | not supported              |
 
+A Z2M group works as a device: use the group's friendly name as the topic.
+Commands are broadcast to all group members at the Zigbee level, and devices
+that don't support a given cluster ignore it, so give the group the
+capabilities of its most capable member.
+
 ### White on color lights
 
-"Set the lights to white" arrives from HomeKit as a color with zero
-saturation, "warm white" as hue 31 and saturation 33, and "cool white" as
-hue 208 and saturation 17. For a Zigbee2MQTT light that reports a
-`color_temp`, Hoboken publishes a color temperature instead, so that the
-bulb uses its white LEDs. White is the device's `whiteColorTemp` in mireds
-(1,000,000 / kelvins, from 140 to 500), or 370 (2700 K) without one; warm
-white is 454 (2200 K) and cool white 250 (4000 K). The Home app's
-Temperature tab and white swatches write a hue and saturation too, and
-those become the temperature they stand for. A device with `whiteColorTemp`
-or the `color_temp` capability gets the color temperature even before it
-has reported any state.
+"Set the lights to white" arrives from HomeKit as a color. For a Zigbee2MQTT
+light that reports a `color_temp`, or that has `whiteColorTemp` or the
+`color_temp` capability, Hoboken publishes a color temperature instead, so that
+the bulb uses its white LEDs. White is the device's `whiteColorTemp` in mireds
+(1,000,000 / kelvins, from 140 to 500), or 370 (2700 K) without one; Siri's
+"warm white" is 454 (2200 K) and "cool white" 250 (4000 K). The Home app's
+Temperature tab and white swatches become the temperature they stand for.
 
-A Zigbee2MQTT light can have `color_temp` and `color_hs` together. HomeKit
-then gets a color temperature as well as a color, and a request that sets
-both publishes the color temperature, except for the minimum of 140
-mireds with both Hue and Saturation, which is what a light showing a color
-reports and a scene writes back, and is published as the color. The HomeKit
-specification does not allow the combination, but Home Assistant and the
-Homebridge plugins for Hue, deCONZ, and Zigbee2MQTT use it.
+A Zigbee2MQTT light can have `color_temp` and `color_hs` together, which the
+HomeKit specification does not allow but other bridges also do.
 
 A WLED light gets RGB (255, 255, 255). For an RGBW strip, set Auto White
 to "Accurate" in WLED's LED preferences to light the white LEDs alone.
+
+[doc/color-coalescing.md](doc/color-coalescing.md) has the rules and what the
+Home app and Siri write.
 
 ### WLED white segments
 
@@ -122,15 +102,12 @@ channel, and it can have `color_temp`:
 ```
 
 A color temperature or a white lights the white segments and turns the
-color segments off; a color does the reverse. The two kinds of strip
-cross-fade across the range, with both full on at the midpoint, so the
-light is brightest there. The range HomeKit offers is the one the strips
-span, which must lie within 140 to 500 mireds (about 2000 to 7142 K).
-Other segments are left alone, but WLED reports the color of the
-lowest-numbered selected segment, so a selected segment that is in neither
-list and has a lower id than the listed ones hides the fixture's color from
-the bridge; deselect it in WLED. Auto White must be "None" on the white
-outputs.
+color segments off; a color does the reverse. The range HomeKit offers is the
+one the strips span, which must lie within 140 to 500 mireds (about 2000 to
+7142 K). Auto White must be "None" on the white outputs. WLED reports the
+color of the lowest-numbered selected segment, so deselect in WLED any
+selected segment that is in neither list and has a lower id than the listed
+ones.
 
 ### Scenes
 
@@ -138,33 +115,11 @@ Scenes are exposed as momentary switches. "Hey Siri, turn on Movie Mode"
 publishes `{"scene_recall": <id>}` to Z2M. The switch auto-resets to off after
 1 second.
 
-### Heated Bedding Zones
+### Heated bedding
 
-Configure heated mattress pad or heated blanket zones separately from `devices`:
-
-```yaml
-heatedBedding:
-  - name: "Bed Side A"
-    prefix: "tuya"
-    controller: "bed"
-    zone: "side_a"
-  - name: "Bed Side B"
-    prefix: "tuya"
-    controller: "bed"
-    zone: "side_b"
-```
-
-Match these logical names to Tucson's configuration. A bridge with only heated bedding
-can omit `devices` or set it to `[]`. Entry identities must be unique even
-across prefixes, because they determine accessory identities; a single zone's
-identity is its controller and zone. Display names and prefixes can change
-without changing those identities. Heated bedding
-configuration contains only `name`, `prefix`, `controller`, and `zone` or
-`zones`, and any other field fails startup; Tucson owns controller credentials,
-protocol versions, and device connections.
-
-An entry can give `zones` instead of `zone` to control several zones of one
-controller as a group:
+Configure heated mattress pad or heated blanket zones separately from
+`devices`. An entry gives one `zone`, or `zones` to control several zones of
+one controller as a group:
 
 ```yaml
 heatedBedding:
@@ -182,132 +137,43 @@ heatedBedding:
     zones: ["side_a", "side_b"]
 ```
 
-Each entry has exactly one of `zone` and `zones`, and a group lists at least
-two distinct zones. A group can sit beside the entries for its own zones, as
-above, and shares their connection and per-zone writes. A group's identity
-comes from its controller and its set of zones, so reordering the zones,
-renaming the group, or changing the prefix keeps its accessories, and it never
-matches the identity of a single zone. Two groups over the same zones are
-duplicates; groups that merely share a zone are allowed. A controller/zone pair
-must use one prefix everywhere it appears.
+Each zone or group appears as a ten-level fan and a stateful preheat switch.
+Match the logical names to Tucson's configuration; Tucson owns controller
+credentials, protocol versions, and device connections. A bridge with only
+heated bedding can omit `devices`. An entry's controller and zone, or for a
+group its controller and set of zones, identify its accessories, so they must
+be unique even across prefixes, and renaming an entry or changing its prefix
+keeps its accessories.
 
-A group's fan is on while any of its zones is on. Its speed is the highest
-level among the zones that are on, or the highest stored level while all are
-off. Active on powers on each zone that is off, and each resumes its own stored
-level; a zone that is already on is left alone. Active off powers off every
-zone and preserves their levels. A positive RotationSpeed sets every zone to
-that level, which turns it on, and zero powers off every zone and preserves
-their levels. An explicit off takes precedence over other fan writes in the
-same 50 ms window, including writes to a zone's own fan. The preheat switch is
-on while any zone preheats; turning it on preheats every zone and turning it
-off cancels preheat on every zone.
+A group's fan is on while any of its zones is on, at the highest level among
+them. Active on powers on each zone that is off, at its own stored level, and
+every other write goes to every zone. A group write succeeds only when
+every zone confirms it, and a group is unavailable ("No Response") while any of
+its zones is.
 
-A group write goes to each zone through the same confirmed path as that zone's
-own accessory, so writes to the group and to a zone's accessory that are in
-flight together stay consistent. The write succeeds only when every zone's
-command is confirmed, and it returns the group's state as it is when the last
-zone settles, including any change a zone's own accessory made in between.
-Otherwise it returns the HomeKit error that the first failing zone, in the
-order listed, returned, and the bridge logs a `group_write_failed` event for
-each failing zone. Zones whose commands were confirmed keep their change. A
-group is unavailable ("No Response") while any of its zones is, and refuses
-writes without sending any command. A zone that becomes unavailable after it
-confirmed, before the last zone settles, fails the write with a communication
-failure and is logged the same way.
+A fan write that powers a zone on also sets its auto-off timer to six hours. A
+preheat that turns a zone on leaves the controller's 10-hour default.
 
-The fan's Active control changes power. RotationSpeed zero turns power off
-and preserves the selected level; positive values select levels 1–10 in
-10% steps. The reported speed retains that selected level while power is
-off. An explicit off takes precedence over other fan writes arriving in
-the same 50 ms window. Preheat follows its reported Boolean until the
-controller changes it.
+[doc/tucson.md](doc/tucson.md) has the identity rules, what each write does,
+and how writes are confirmed.
 
-A fan write that powers a zone on also sets its auto-off timer to six hours,
-because the controller returns the timer to 10 hours whenever the zone turns
-off. The timer is left out only while the zone reports power on and no
-power-off is in flight. A power-on still in flight can fail, so a write that
-follows one carries the timer too. A write to a zone that is already on sends
-no timer, because the controller restarts the countdown whenever the timer is
-written, even with the same value; power and level writes leave it running.
-Preheat is sent alone, so a preheat that turns a zone on leaves the
-controller's 10-hour default.
+### Curtains
 
-Writes wait for a confirmed command result and reported state that matches
-it. Once a newer write to the same zone has been sent, the confirmed result
-alone suffices, and the write returns the current reported state. Failed or
-expired writes return a HomeKit error and retain reported
-values. MQTT reconnection cancels pending writes and requires current
-subscriptions, a fresh session heartbeat, online availability, and known
-state. Commands are never replayed after reconnection. Existing Zigbee2MQTT
-and WLED devices use their existing MQTT connection and conversion rules.
+The optional `curtains` configuration presents single-endpoint Tucson
+controllers as HomeKit window coverings:
 
-Physical side mapping and controller compatibility still require hardware
-qualification. Actual Home app and Siri testing remains part of that
-qualification.
-
-### Failure Handling
-
-- **MQTT disconnect**: `onSet` throws `HapStatusError(SERVICE_COMMUNICATION_FAILURE)`
-  → HomeKit shows "No Response"
-- **Unknown device state**: `onGet` throws `HapStatusError(SERVICE_COMMUNICATION_FAILURE)`
-  when no cached state exists → HomeKit shows "Not Responding" until real state
-  arrives. Z2M devices recover quickly because the bridge requests state via
-  `{topic}/get` on connect. WLED devices require **Retain** enabled in WLED's
-  MQTT settings (`Settings → Sync Interfaces → MQTT → Send on change → Retain`)
-  so the broker delivers the last `/g` and `/c` values when the bridge subscribes.
-  Without retain, the bridge has no way to learn the device's current state at
-  startup.
-- **MQTT reconnect**: re-subscribes and refreshes state automatically. The
-  Zigbee2MQTT and WLED connection waits 1 second before its first retry and
-  doubles the wait with each further attempt up to 60 seconds. The wait returns
-  to 1 second only after a connection has stayed up for 60 seconds, so a broker
-  that accepts the login and then drops the session, such as one that
-  disconnects a client after a denied publish, is retried at the growing
-  interval rather than every second.
-- **MQTT URL and credentials**: a malformed `mqtt.url` and credential
-  misconfiguration exit at startup (see [MQTT URL](#mqtt-url) and
-  [MQTT authentication](#mqtt-authentication)). A broker that refuses the
-  connection, with or without `mqtt.username`, is reported as
-  `MQTT error: Connection refused: ...` and retried with that backoff (see
-  [MQTT authentication](#mqtt-authentication)).
-- **MQTT subscriptions**: a broker that refuses a Zigbee2MQTT or WLED
-  subscription is reported as `MQTT subscription refused for ...` and counted;
-  the connection stays up and the refused devices report no state (see
-  [MQTT authentication](#mqtt-authentication)).
-- **Config changes**: restart the container (no hot reload)
-
-### Metrics
-
-Opt-in Prometheus metrics via `prom-client`. Add a `metrics` section to
-`config.yaml` with a `port` to enable.
-
-| Metric                                  | Type    | Labels   |
-| --------------------------------------- | ------- | -------- |
-| `hoboken_mqtt_connected`                | Gauge   |          |
-| `hoboken_mqtt_messages_received_total`  | Counter | `device` |
-| `hoboken_mqtt_messages_published_total` | Counter |          |
-| `hoboken_mqtt_errors_total`             | Counter |          |
-| `hoboken_devices_configured`            | Gauge   |          |
-
-Default Node.js process metrics (CPU, memory, event loop lag) are also included.
-The `k8s/deployment.yaml` includes Prometheus scrape annotations.
-
-#### Status Page
-
-When metrics are enabled, `GET /` serves an HTML status page showing:
-
-- Bridge name and version
-- MQTT connection status and active HAP connection count
-- Each device with its topic, capabilities, scenes, and current state
-
-This is useful for quick diagnostics without checking logs or Prometheus.
-The page loads new data in real time using SSE.
-
-To preview the status page with sample data:
-
-```sh
-make demo
+```yaml
+curtains:
+  - name: Living Room Curtain
+    prefix: tuya
+    controller: living_room
 ```
+
+A curtain's state is on `<prefix>/<controller>` (`tuya/living_room` above),
+without a zone. Set `TargetPosition` from zero (closed) to 100 (open);
+start/stop controls and HomeKit `HoldPosition` are not exposed. Tucson supports
+the Zemismart BCD300FB Wi-Fi motor; other models are not implied to work. See
+[doc/tucson.md](doc/tucson.md).
 
 ## Config
 
@@ -383,131 +249,29 @@ which in Kubernetes with `hostNetwork: true` can cause mDNS to advertise a
 cluster-internal IP (e.g., `cni0`) instead of the LAN IP. Set `bind` to the
 host's LAN interface name (e.g., `eno1`) so HomeKit clients can reach the bridge.
 
-### MQTT URL
+### MQTT broker
 
 `mqtt.url` names the broker as `scheme://host[:port]`, such as
 `mqtt://mosquitto:1883` or `mqtts://broker.example.com:8883`. The scheme is
-`mqtt`, `mqtts`, `tcp`, `ssl`, `tls`, `ws`, or `wss`, the host is required, and
-a port, if present, is 1 to 65535. A bare hostname does not work, because
-mqtt.js requires a scheme, and neither does `host:port`, because mqtt.js reads
-the host as the scheme. A Unix socket URL such as
-`mqtt+unix:///run/mosquitto.sock` does not work either. Write a non-ASCII
-hostname in punycode, such as `xn--bcher-kva.example`; `ws` and `wss` URLs also
-accept it as written. A `ws` or `wss` URL needs a hostname rather than an IPv6
-address, because mqtt.js writes the address without its brackets and cannot
-connect.
+`mqtt`, `mqtts`, `tcp`, `ssl`, `tls`, `ws`, or `wss`. Hoboken refuses to start
+with `mqtt.url is not a valid MQTT URL` for a URL that mqtt.js could not connect
+with as written, and never prints any part of the URL, because it can carry
+credentials.
 
-Hoboken refuses to start with `mqtt.url is not a valid MQTT URL` when the URL
-breaks these rules. The URL can carry credentials, and a URL that is not well
-formed cannot be reliably stripped of them, so no part of it appears in that
-error, the logs, the status page, the metrics, or a process warning. Hoboken
-parses the URL as mqtt.js does, with Node.js's legacy `url.parse`, and again
-with the WHATWG `URL` parser, and requires both to find the same host. That
-rejects what `url.parse` alone accepts, such as a port above 65535 or a stray
-character in the host, where `url.parse` drops the rest of the host and mqtt.js
-connects to what remains. It also rejects an `@` in the path, query, or
-fragment, because a password with an unencoded `/`, `?`, or `#` ends the host
-there and leaves the username, or part of the password, as the host; write `%40`
-for an `@` that belongs in a path or query. If mqtt.js still fails
-synchronously while it creates a client, Hoboken reports only
-`MQTT client could not be started` and the error code, because Node.js quotes the
-URL in those errors.
-
-### MQTT authentication
-
-Brokers that require a login take an optional `mqtt.username` and an
-`mqtt.passwordFile` that names a file containing the password. Hoboken reads the
-file once at startup as UTF-8, removes a leading byte order mark, and removes one
-trailing line ending, either a line feed or a carriage return and line feed, so a
-file made with `echo`, `kubectl create secret --from-file`, or a Windows editor
-works as written. A lone trailing carriage return stays part of the password.
-The file must be valid UTF-8; invalid bytes, including a UTF-16 file with a byte
-order mark, fail startup instead of becoming a different password. Hoboken takes
-the password from no other source and ignores any `MQTT_PASSWORD` environment
-variable. The connection for Zigbee2MQTT and WLED devices and the heated bedding
-and curtain connections use the same credentials.
-
-Hoboken refuses to start when `mqtt.username` has no `mqtt.passwordFile`, when
-`mqtt.passwordFile` has no `mqtt.username`, when the password file cannot be
-read, is not valid UTF-8, or is empty (a file holding only a line ending, with or
-without a byte order mark, is empty), when `mqtt.username` or
-`mqtt.passwordFile` is not a non-empty string, when the username or password is
-longer than 65535 bytes, when `mqtt.username` is combined with credentials in
-`mqtt.url`, when `config.yaml` contains `mqtt.password`, or when `mqtt` has any
-key other than `url`, `username`, and `passwordFile`, such as a misspelled `user`
-or `passwd`. The error names the key but not its value. Keep the password out of
-`config.yaml`, which is typically a ConfigMap.
-
-Credentials embedded in `mqtt.url` as `scheme://user:password@host` keep working
-when `mqtt.username` and `mqtt.passwordFile` are both unset. mqtt.js
-percent-decodes them, so write `%`, `\`, `/`, `?`, and `#` in them as `%25`,
-`%5C`, `%2F`, `%3F`, and `%23`. Left as they are, most of these make startup
-fail with `mqtt.url is not a valid MQTT URL`, which names no cause, and a `%`
-that is followed by two hexadecimal digits is decoded into a different password
-without any error. mqtt.js also splits the decoded credentials at the last `:`
-that has text on both sides, so percent-encoding cannot protect a `:` in a
-password. Use `mqtt.username` and `mqtt.passwordFile` for such a password, and
-for one with any other special character.
-
-The logs and the status page show only the scheme, host, and port of `mqtt.url`,
-never its credentials, path, or query. A YAML error or warning in `config.yaml`,
-such as a syntax error, an unresolved tag, or a key that is a list or a mapping,
-stops startup and is reported by its code, line, and column without the text of
-the line, which can hold such credentials. An alias with no anchor is reported
-without a position. The configured password never appears in logs, the status
-page, metrics, or error messages. Rotating it takes a restart.
+Brokers that require a login take `mqtt.username` and an `mqtt.passwordFile`
+that names a file containing the password, with or without a trailing line
+ending. The password comes from no other source: `mqtt.password` in
+`config.yaml` is refused, and an `MQTT_PASSWORD` environment variable is
+ignored. It never appears in logs, the status page, metrics, or error messages.
 Use `mqtts://` unless the broker is on a trusted network, because `mqtt://`
-sends the password unencrypted. `mqtt.passwordFile` can name any file that the
-container can read, so treat `config.yaml` as being as trusted as the container.
-Do not set `DEBUG` to a pattern that matches `mqttjs:client` or
-`mqtt-packet:writeToStream`, such as `DEBUG=*`, `DEBUG=mqtt*`, or
-`DEBUG=mqttjs*`, which makes the MQTT library print the password.
+sends the password unencrypted. Do not set `DEBUG` to a pattern that matches
+the MQTT library, such as `DEBUG=*` or `DEBUG=mqtt*`, which makes it print the
+password.
 
-When the broker refuses the connection, with or without `mqtt.username`, the
-Zigbee2MQTT and WLED connection logs `MQTT error: Connection refused: ...`,
-counts it in `hoboken_mqtt_errors_total`, and keeps retrying. It waits 1 second
-before the first retry and doubles the wait with each further attempt up to 60
-seconds. The wait returns to 1 second only after a connection has stayed up for
-60 seconds. The heated bedding and curtain connections log an
-`mqtt_connection_error` event with the reason code, count it in the same metric,
-and retry with the same doubling waits, each shortened at random by up to 25
-percent: the first retry comes 0.75 to 1 second after the failure and the
-longest waits are 45 to 60 seconds. Correcting the broker therefore takes
-effect without a restart.
-
-Brokers that restrict topics per user must grant Hoboken these topics:
-
-- Zigbee2MQTT devices: read `<topic>`; write `<topic>/set` and `<topic>/get`.
-- WLED devices: read `<topic>/g` and `<topic>/c`; write `<topic>/api`.
-- Heated bedding: read `<prefix>/bridge/availability`,
-  `<prefix>/bridge/heartbeat`, `<prefix>/<controller>/availability`, and each
-  zone's `<prefix>/<controller>/<zone>` and `<prefix>/<controller>/<zone>/result`;
-  write each zone's `<prefix>/<controller>/<zone>/set`. A group needs the topics
-  of each of its zones and no others.
-- Curtains: read `<prefix>/bridge/availability`, `<prefix>/bridge/heartbeat`,
-  `<prefix>/<controller>/availability`, `<prefix>/<controller>`, and
-  `<prefix>/<controller>/result`; write `<prefix>/<controller>/set`.
-
-With an `acl_file`, Mosquitto accepts a subscription to a topic that the user
-cannot read and then delivers nothing, so a missing read permission shows up as
-a device that never reports state. It also drops a QoS 0 publish that the user
-cannot write without telling the sender, so a missing write permission shows up
-as a Zigbee2MQTT or WLED command that HomeKit reports as done while nothing
-happens.
-
-A broker that enforces read permissions when a client subscribes, such as EMQX,
-HiveMQ, or Mosquitto with its dynamic security plugin, refuses the subscription
-instead. The Zigbee2MQTT and WLED connection then logs
-`MQTT subscription refused for <topics>: ...`, naming only the topics the broker
-refused, counts one error in `hoboken_mqtt_errors_total` for the subscription,
-and keeps the connection open, so the topics the broker granted keep working
-while the refused devices report no state. Every reconnect subscribes again and
-reports a refusal again. The line says `failed` instead of `refused` and names
-every topic when the subscription ended without a usable answer from the broker,
-such as a connection that closed first. The heated bedding and curtain
-connections treat a refused subscription as a failed connection: they log
-`mqtt_subscription_failed`, count it in the same metric, and reconnect with
-backoff.
+[doc/mqtt.md](doc/mqtt.md) has the URL forms that are refused, the password
+file rules, credentials embedded in the URL, the topics that a broker with
+per-user permissions must grant, and what a refused connection or subscription
+looks like.
 
 ### MAC and PIN Generation
 
@@ -522,96 +286,57 @@ Generate both with (the PIN is redrawn until it is not an excluded value):
 python3 -c "import random; b=random.randbytes(6); excluded={d*8 for d in '0123456789'}|{'12345678','87654321'}; p=next(s for s in iter(lambda: ''.join(random.choices('0123456789',k=8)), None) if s not in excluded); print(f'MAC: {(b[0]|2)&~1:02X}:{b[1]:02X}:{b[2]:02X}:{b[3]:02X}:{b[4]:02X}:{b[5]:02X}'); print(f'PIN: {p[0:3]}-{p[3:5]}-{p[5:8]}')"
 ```
 
-### Z2M Groups as Devices
+## Operation
 
-Hoboken can target Z2M groups by using the group's friendly name as the device
-topic. Commands are broadcast to all group members at the Zigbee level. Devices
-that don't support a given cluster silently ignore it, so capabilities should
-match the most capable member. This is preferable to homebridge-z2m's approach
-of intersecting capabilities.
+### Failure Handling
 
-## Development
+- **MQTT disconnect**: `onSet` throws `HapStatusError(SERVICE_COMMUNICATION_FAILURE)`
+  → HomeKit shows "No Response"
+- **Unknown device state**: `onGet` throws the same error when no cached state
+  exists → HomeKit shows "Not Responding" until real state arrives. Z2M devices
+  recover quickly because the bridge requests state via `{topic}/get` on
+  connect. WLED devices require **Retain** enabled in WLED's MQTT settings
+  (`Settings → Sync Interfaces → MQTT → Send on change → Retain`) so the broker
+  delivers the last `/g` and `/c` values when the bridge subscribes.
+- **MQTT reconnect**: re-subscribes and refreshes state automatically. The
+  Zigbee2MQTT and WLED connection waits 1 second before the first retry and
+  doubles the wait up to 60 seconds.
+- **Broker refusals**: that connection logs a refused login as
+  `MQTT error: Connection refused: ...` and retries with the same backoff, so
+  correcting the broker takes effect without a restart. It logs a refused
+  subscription as `MQTT subscription refused for ...` and stays up, and the
+  refused devices report no state. See
+  [doc/mqtt.md](doc/mqtt.md#refused-connections-and-subscriptions), also for
+  the heated bedding and curtain connections.
+- **Malformed `mqtt.url` or inconsistent credentials**: exit at startup
+- **Config changes**: restart the container (no hot reload)
 
-### Prerequisites
+### Metrics
 
-- [Bun](https://bun.sh/) (package manager and test runner)
-- Node.js 26+ (runtime, for TypeScript type stripping)
-- Make (task runner)
-- A C compiler, CMake, OpenSSL headers, and cJSON headers for integration tests
-- A C++ toolchain and Python, only where re2 (Renovate's regex engine, used by
-  `make lint`) has no prebuilt binary for the platform and Node.js version
+Opt-in Prometheus metrics via `prom-client`. Add a `metrics` section to
+`config.yaml` with a `port` to enable. The server answers `/metrics`,
+`/healthz`, and `/readyz`.
 
-### Setup
+| Metric                                  | Type    | Labels   |
+| --------------------------------------- | ------- | -------- |
+| `hoboken_mqtt_connected`                | Gauge   |          |
+| `hoboken_mqtt_messages_received_total`  | Counter | `device` |
+| `hoboken_mqtt_messages_published_total` | Counter |          |
+| `hoboken_mqtt_errors_total`             | Counter |          |
+| `hoboken_devices_configured`            | Gauge   |          |
+| `hoboken_devices_state_unknown`         | Gauge   |          |
+| `hoboken_hap_connections_active`        | Gauge   |          |
+| `hoboken_hap_pair_verify_total`         | Counter |          |
+| `hoboken_z2m_get_requests_total`        | Counter |          |
 
-```sh
-make setup
-```
+Default Node.js process metrics (CPU, memory, event loop lag) are also included.
+`k8s/deployment.yaml` has Prometheus scrape annotations to uncomment.
 
-Run it under the Node.js that `make lint` will use, because it installs re2 for
-that Node.js version.
-
-### Commands
-
-```sh
-make lint    # Type checking, ESLint, Renovate config validation, Prettier
-make test    # Run tests with coverage
-make run     # Run with Node.js
-```
-
-On Debian or Ubuntu, install the broker build packages with
-`make test-broker-deps`. Then run `make test-integration` on Node.js 26.
-The target builds the pinned Mosquitto release and runs the existing WLED
-tests, heated bedding tests over paired HAP HTTP and MQTT 5 connections, an
-authenticated broker round trip, a round trip with a broker that refuses
-subscriptions, a round trip with a broker that drops every session, and a round
-trip with a malformed `mqtt.url`.
-Use `NODE=/path/to/node make test-integration` to select the runtime.
-
-Heated bedding integration covers reported state on both zones, fan-write
-ordering, the auto-off timer set at power-on, stateful preheat, rejected and
-retained results, session changes,
-the full HAP write deadline, and broker restart without command replay. It also
-covers a group beside both zones: its aggregate state, each write path,
-precedence of an explicit off, a write that fails for one zone, and
-unavailability.
-The simulated MQTT controller exercises the contract; actual Sunbeam, Home
-app, and Siri qualification still requires hardware.
-
-The authenticated round trip runs a broker that refuses anonymous clients and
-restricts each user's topics. It shows that every MQTT connection logs in with a
-password read from a file, that Zigbee2MQTT, heated bedding, and curtain writes
-and state get through the topic permissions, that the status page and metrics
-never carry the password, that `main.ts` exits without a password file and
-never takes the password from `MQTT_PASSWORD`, and that a login the broker
-first refuses, with credentials or without, is retried until the broker accepts
-it.
-
-The refused-subscription round trip runs an in-process broker that refuses
-chosen topics. It shows that the bridge names only the refused topic, counts
-the refusal once, stays connected, keeps delivering the topic the broker
-granted, says nothing when a reconnect is granted, and reports a refusal that
-begins at a later reconnect.
-
-The dropped-session round trip runs an in-process broker that accepts every
-login and closes each session as soon as the bridge subscribes. It shows that
-the Zigbee2MQTT and WLED connection waits at least one, two, and four seconds
-before its next three attempts rather than retrying every second.
-
-The malformed-URL round trip starts `main.ts` with `mqtt.url` values that carry
-a password and are not well formed, such as a port that is not a number, a space
-in the host, a missing host, and a bare hostname. It shows that startup exits
-with `mqtt.url is not a valid MQTT URL` and that no output, including a Node.js
-deprecation warning, contains any part of the URL. It also shows that `startBridge`
-refuses the same URLs without a log line or a warning, and that a fresh Node.js
-process accepts every supported form and raises no warning, also when Node.js
-starts with `--no-deprecation`.
-
-To qualify the complete controller path, run Tucson's `make homekit` target
-with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 26.
-The `integration/tucson-roundtrip.ts` driver pairs through HAP HTTP and
-checks writes, controller-originated updates, and Tucson shutdown. Both
-repositories require their frozen dependencies; missing prerequisites fail
-qualification.
+When metrics are enabled, `GET /` serves an HTML status page showing the
+bridge name and version, MQTT
+connection status, the active HAP connection count, and each device with its
+topic, capabilities, scenes, and current state. It loads new data in real time
+using SSE. To preview it with sample data, run `make demo`.
 
 ## Deployment
 
@@ -623,6 +348,10 @@ docker build -t hoboken .
 
 Multi-stage build: Bun installs deps, distroless Node.js 26 runs the app.
 Image: `gcr.io/distroless/nodejs26-debian13` (no shell, minimal attack surface).
+
+The bridge reads its configuration from `CONFIG_PATH` (default
+`/config/config.yaml`) and stores pairing data in `PERSIST_PATH` (default
+`/persist`).
 
 ### Kubernetes
 
@@ -645,78 +374,59 @@ reconciled automatically.
 4. Select it, then enter the PIN from your config (e.g., `482-37-159`).
 5. Assign the bridge to a room when prompted.
 
-The PIN is only used during the initial pairing. After that, the pairing keys
-stored in `/persist` authenticate all communication. If you delete the PVC or
-change the MAC, you must remove the bridge from Home and re-pair.
+After the initial pairing, the pairing keys stored in `/persist` authenticate
+all communication. If you delete the PVC or change the MAC, you must remove the
+bridge from Home and re-pair.
 
 ### Troubleshooting
 
-Verify mDNS advertisement from a Mac on the same network:
-
 ```sh
-dns-sd -B _hap._tcp
+dns-sd -B _hap._tcp                     # mDNS advertisement, from a Mac on the same network
+nc -z <node-ip> 51826                   # HAP port reachable from the network
+kubectl -n hoboken logs deploy/hoboken  # connection, pairing, and write logs
 ```
-
-Check that the HAP port is reachable from the network:
-
-```sh
-nc -z <node-ip> 51826
-```
-
-View logs for pairing diagnostics:
-
-```sh
-kubectl -n hoboken logs deploy/hoboken
-```
-
-The bridge logs lifecycle events: MQTT connection state, HAP server listening
-address, mDNS advertisement, identify requests, pair-setup completion, and
-connection close events.
 
 To see what the Home app and Siri read and write, set
 `DEBUG=HAP-NodeJS:Accessory,HAP-NodeJS:Characteristic` in the container's
 environment. HAP-NodeJS then logs each characteristic read and write request
 (`Processing characteristic set: ...`), and the reason it rejects a value, such
 as a Zigbee2MQTT fan speed above 100, which the bridge never sees. Unset it
-afterwards, because it logs every request. Do not widen the pattern; see
-[MQTT authentication](#mqtt-authentication).
+afterwards, because it logs every request. Do not widen the pattern, which can
+make the MQTT library print the password.
 
-### Tucson curtains
+## Development
 
-The optional `curtains` configuration presents single-endpoint Tucson
-controllers as HomeKit window coverings:
+Prerequisites:
 
-```yaml
-curtains:
-  - name: Living Room Curtain
-    prefix: tuya
-    controller: living_room
+- [Bun](https://bun.sh/) (package manager and test runner)
+- Node.js 26+ (runtime, for TypeScript type stripping)
+- Make (task runner)
+- A C compiler, CMake, OpenSSL headers, and cJSON headers for integration tests
+- A C++ toolchain and Python, only where re2 (Renovate's regex engine, used by
+  `make lint`) has no prebuilt binary for the platform and Node.js version
+
+```sh
+make setup   # Install dependencies and the pre-commit hook
+make lint    # Type checking, ESLint, Renovate config validation, Prettier
+make test    # Run tests with coverage
+make run     # Run with Node.js
 ```
 
-A curtain-only bridge may omit `devices` or set it to `[]`. Each entry uses the
-same logical topic naming rules as `heatedBedding`; routes must not overlap.
-A curtain is a single-endpoint controller, so its state is on
-`<prefix>/<controller>` (`tuya/living_room` above) and its commands, results, and
-availability are under it, without a zone. Zones are Sunbeam's term and apply
-only to heated bedding, so a `zone` or `zones` key on a curtain is an unknown
-field. A controller name identifies the accessory, so it is unique across
-prefixes, and `bridge` and `availability` are reserved. No Tuya credentials
-belong in Hoboken.
+Run `make setup` under the Node.js that `make lint` will use, because it
+installs re2 for that Node.js version.
 
-Set `TargetPosition` from zero (closed) to 100 (open). `CurrentPosition` comes
-from device reports. `PositionState` uses reported motion when available and
-otherwise compares reported current and target positions. This inference
-cannot detect a motor stalled away from its target. Start/stop controls and
-HomeKit `HoldPosition` are not exposed.
+On Debian or Ubuntu, install the broker build packages with
+`make test-broker-deps`. Then run `make test-integration` on Node.js 26. The
+target builds the pinned Mosquitto release and runs the round trips in
+`integration/` through it: WLED, heated bedding over paired HAP HTTP and MQTT 5
+connections, a broker that requires a login and restricts topics, brokers that
+refuse subscriptions or drop every session, and a malformed `mqtt.url`. Use
+`NODE=/path/to/node make test-integration` to select the runtime. The simulated
+MQTT controller exercises the contract; actual Sunbeam, Home app, and Siri
+qualification still requires hardware.
 
-Target writes complete after Tucson confirms device acceptance, before the
-curtain necessarily finishes moving. Missing positions, stale sessions, or
-unavailable controllers produce “No Response.” The status page displays
-reported state and pending callers.
-
-This is infrastructure for future Zemismart Wi-Fi curtain support. Tucson does
-not yet register a production Zemismart profile; the physical model and
-mapping must be qualified first. Its
-[curtain contract](https://github.com/shields/tucson/blob/main/docs/implementation-plan.md#curtain-infrastructure)
-defines the MQTT interface. `make homekit` in Tucson exercises the synthetic
-curtain profile through both bridges and paired HomeKit clients.
+To qualify the complete controller path, run Tucson's `make homekit` target
+with `HOBOKEN_SOURCE` set to this checkout and `NODE` set to Node.js 26. The
+`integration/tucson-roundtrip.ts` driver pairs through HAP HTTP and checks
+writes, controller-originated updates, and Tucson shutdown. Both repositories
+require their frozen dependencies; missing prerequisites fail qualification.
