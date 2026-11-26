@@ -125,6 +125,23 @@ does a light whose cached state shows the temperature, so that a change
 outside HomeKit to the same value is corrected every time. A color or
 temperature that HomeKit writes starts over too.
 
+A temperature that the controller sets on a Zigbee2MQTT light that is on, a
+single bulb or a group, is published with `"transition": 5` (seconds,
+`ADAPTIVE_TRANSITION_SECONDS`), so that the light fades to it. This covers the
+controller's updates and the temperature recomputed for a brightness, which
+after a change at a switch arrives 10 s late and would otherwise step the
+color visibly. The transition is added to the message only, so the
+characteristic values are those of the temperature alone. Not faded, so that
+the light is right at once: the remembered temperature that a report from
+outside sends when it turns a light on, the temperature that a write turning
+a light on carries, one that the controller sets before the light has
+reported that it is on (a light turned on at another brightness gets the
+temperature for it right after the write), any color or temperature that
+HomeKit writes, a scene recall, the command for a light that is off (its
+`transtime` is 0), and every WLED message. Zigbee2MQTT reports the new
+temperature when it sends the command, not when the fade ends, so the write
+is confirmed as any other is.
+
 The log line for a publish that carries only Adaptive Lighting's temperature
 begins `Adaptive Lighting for`, not `HomeKit write for`.
 

@@ -4669,6 +4669,8 @@ describe("Adaptive Lighting", () => {
     };
   }
 
+  const fade = (color_temp: number) => ({ color_temp, transition: 5 });
+
   const ON = {
     state: "ON",
     brightness: 254,
@@ -4684,14 +4686,20 @@ describe("Adaptive Lighting", () => {
     await start();
     await flush();
 
-    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350)]);
     expect(logged("Adaptive Lighting for")).toEqual([
-      `Adaptive Lighting for "Lamp": {"color_temp":350} published to ${TOPIC}/set as {"color_temp":350}`,
+      `Adaptive Lighting for "Lamp": {"color_temp":350} published to ${TOPIC}/set as {"color_temp":350,"transition":5}`,
     ]);
     expect(controller.isAdaptiveLightingActive()).toBe(true);
+    expect(characteristic(Characteristic.ColorTemperature).value).toBe(350);
     expect(characteristic(Characteristic.Hue).value).toBe(
       Math.round(colorTempToHueSaturation(350).hue),
     );
+    expect(characteristic(Characteristic.Saturation).value).toBe(
+      Math.round(colorTempToHueSaturation(350).saturation),
+    );
+    expect(characteristic(Characteristic.Brightness).value).toBe(100);
+    expect(characteristic(Characteristic.On).value).toBe(true);
     await shutdown();
   });
 
@@ -4711,10 +4719,7 @@ describe("Adaptive Lighting", () => {
     expect(sent()).toEqual([{ state: "ON", color_temp: 395 }]);
     jest.advanceTimersByTime(1);
     await flush();
-    expect(sent()).toEqual([
-      { state: "ON", color_temp: 395 },
-      { color_temp: 350 },
-    ]);
+    expect(sent()).toEqual([{ state: "ON", color_temp: 395 }, fade(350)]);
     await shutdown();
   });
 
@@ -4733,14 +4738,14 @@ describe("Adaptive Lighting", () => {
       );
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(sent().slice(1)).toEqual([{ brightness: 152 }, { color_temp: 370 }]);
+    expect(sent().slice(1)).toEqual([{ brightness: 152 }, fade(370)]);
     report({ ...ON, brightness: 203, color_temp: 370 });
     jest.advanceTimersByTime(9999);
     await flush();
     expect(sent().slice(3)).toEqual([]);
     jest.advanceTimersByTime(1);
     await flush();
-    expect(sent().slice(3)).toEqual([{ color_temp: 360 }]);
+    expect(sent().slice(3)).toEqual([fade(360)]);
     await shutdown();
   });
 
@@ -4758,7 +4763,7 @@ describe("Adaptive Lighting", () => {
     jest.advanceTimersByTime(2000);
     await flush();
     expect(characteristic(Characteristic.On).value).toBe(true);
-    expect(sent()).toEqual([{ color_temp: 350 }, { state: "OFF" }]);
+    expect(sent()).toEqual([fade(350), { state: "OFF" }]);
     await shutdown();
   });
 
@@ -4866,7 +4871,7 @@ describe("Adaptive Lighting", () => {
 
     report({ brightness: 51 });
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }, { state: "OFF" }]);
+    expect(sent()).toEqual([fade(350), { state: "OFF" }]);
     await shutdown();
   });
 
@@ -4881,7 +4886,7 @@ describe("Adaptive Lighting", () => {
     characteristic(Characteristic.On).setValue(true);
     await flush();
     expect(sent()).toEqual([
-      { color_temp: 350 },
+      fade(350),
       { state: "OFF" },
       { state: "ON", color_temp: 350 },
     ]);
@@ -4918,17 +4923,17 @@ describe("Adaptive Lighting", () => {
     report(ON);
     await start();
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350)]);
 
     report({ ...ON, color_temp: 348 });
     jest.advanceTimersByTime(60000);
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350)]);
 
     report({ ...ON, color_temp: 400 });
     jest.advanceTimersByTime(60000);
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }, { color_temp: 347 }]);
+    expect(sent()).toEqual([fade(350), fade(347)]);
     expect(controller.isAdaptiveLightingActive()).toBe(true);
     await shutdown();
   });
@@ -4942,14 +4947,14 @@ describe("Adaptive Lighting", () => {
     report(ON);
     await start(FLAT);
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350)]);
 
     report({ ...ON, color_temp: 370 });
     for (let minute = 0; minute < 4; minute++) {
       jest.advanceTimersByTime(60000);
       await flush();
     }
-    expect(sent()).toEqual([{ color_temp: 350 }, { color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350), fade(350)]);
     await shutdown();
   });
 
@@ -4965,7 +4970,7 @@ describe("Adaptive Lighting", () => {
       jest.advanceTimersByTime(60000);
       await flush();
     }
-    expect(sent()).toEqual([{ color_temp: 350 }, { color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350), fade(350)]);
 
     characteristic(Characteristic.ColorTemperature).setValue(370);
     await flush();
@@ -4975,10 +4980,10 @@ describe("Adaptive Lighting", () => {
     await start(FLAT);
     await flush();
     expect(sent()).toEqual([
-      { color_temp: 350 },
-      { color_temp: 350 },
+      fade(350),
+      fade(350),
       { color_temp: 370 },
-      { color_temp: 350 },
+      fade(350),
     ]);
     await shutdown();
   });
@@ -4994,7 +4999,7 @@ describe("Adaptive Lighting", () => {
       jest.advanceTimersByTime(60000);
       await flush();
     }
-    expect(sent()).toEqual([{ color_temp: 350 }, { color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350), fade(350)]);
     await shutdown();
   });
 
@@ -5035,7 +5040,7 @@ describe("Adaptive Lighting", () => {
       jest.advanceTimersByTime(60000);
       await flush();
     }
-    expect(sent().slice(2)).toEqual([{ color_temp: 395 }, { color_temp: 395 }]);
+    expect(sent().slice(2)).toEqual([fade(395), fade(395)]);
     await shutdown();
   });
 
@@ -5093,11 +5098,7 @@ describe("Adaptive Lighting", () => {
       );
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(sent()).toEqual([
-      { color_temp: 350 },
-      { brightness: 50 },
-      { color_temp: 390 },
-    ]);
+    expect(sent()).toEqual([fade(350), { brightness: 50 }, fade(390)]);
     await shutdown();
   });
 
@@ -5109,7 +5110,7 @@ describe("Adaptive Lighting", () => {
 
     characteristic(Characteristic.On).setValue(true);
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }, { state: "ON" }]);
+    expect(sent()).toEqual([fade(350), { state: "ON" }]);
     await shutdown();
   });
 
@@ -5151,18 +5152,18 @@ describe("Adaptive Lighting", () => {
     report({ ...ON, brightness: 25 });
     await start();
     await flush();
-    expect(sent()).toEqual([{ color_temp: 395 }]);
+    expect(sent()).toEqual([fade(395)]);
 
     report({ ...ON, brightness: 254, color_temp: 395 });
     jest.advanceTimersByTime(9999);
     await flush();
-    expect(sent()).toEqual([{ color_temp: 395 }]);
+    expect(sent()).toEqual([fade(395)]);
     jest.advanceTimersByTime(1);
     await flush();
-    expect(sent()).toEqual([{ color_temp: 395 }, { color_temp: 350 }]);
+    expect(sent()).toEqual([fade(395), fade(350)]);
     expect(logged("Adaptive Lighting for")).toEqual([
-      `Adaptive Lighting for "Lamp": {"color_temp":395} published to ${TOPIC}/set as {"color_temp":395}`,
-      `Adaptive Lighting for "Lamp": {"color_temp":350} published to ${TOPIC}/set as {"color_temp":350}`,
+      `Adaptive Lighting for "Lamp": {"color_temp":395} published to ${TOPIC}/set as {"color_temp":395,"transition":5}`,
+      `Adaptive Lighting for "Lamp": {"color_temp":350} published to ${TOPIC}/set as {"color_temp":350,"transition":5}`,
     ]);
     await shutdown();
   });
@@ -5173,7 +5174,7 @@ describe("Adaptive Lighting", () => {
     report(ON);
     await start({ notifyMs: 3_600_000 });
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350)]);
     report({ ...ON, color_temp: 350 });
 
     // HAP-NodeJS notifies controllers of an update only if it changes the value.
@@ -5229,7 +5230,7 @@ describe("Adaptive Lighting", () => {
 
     jest.advanceTimersByTime(10000);
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350)]);
     const color = colorTempToHueSaturation(350);
     expect(characteristic(Characteristic.Hue).value).toBe(
       Math.round(color.hue),
@@ -5278,7 +5279,7 @@ describe("Adaptive Lighting", () => {
     report(GREEN);
     await start();
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350)]);
 
     jest.advanceTimersByTime(1999);
     report({ ...GREEN, last_seen: 1 });
@@ -5591,6 +5592,23 @@ describe("Adaptive Lighting", () => {
     await shutdown();
   });
 
+  test("a bulb that clamps the remembered temperature that a report from outside brings is sent it once more and then left alone", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, shutdown } = await startLamp();
+    report({ ...OFF, color_temp: 370 });
+    await start(FLAT);
+    await flush();
+
+    report({ ...ON, color_temp: 370 });
+    expect(sent()).toEqual([{ color_temp: 350 }]);
+    for (let minute = 0; minute < 4; minute++) {
+      jest.advanceTimersByTime(60000);
+      await flush();
+    }
+    expect(sent()).toEqual([{ color_temp: 350 }, fade(350)]);
+    await shutdown();
+  });
+
   test("a light turned on outside HomeKit is sent nothing while Adaptive Lighting is not active", async () => {
     const { report, sent, shutdown } = await startLamp();
     report(OFF);
@@ -5628,7 +5646,7 @@ describe("Adaptive Lighting", () => {
     jest.advanceTimersByTime(1);
     await flush();
     expect(characteristic(Characteristic.Brightness).value).toBe(50);
-    expect(sent()).toEqual([{ color_temp: 375 }]);
+    expect(sent()).toEqual([fade(375)]);
     await shutdown();
   });
 
@@ -5649,7 +5667,7 @@ describe("Adaptive Lighting", () => {
     jest.advanceTimersByTime(1);
     await flush();
     expect(characteristic(Characteristic.Brightness).value).toBe(80);
-    expect(sent()).toEqual([{ color_temp: 360 }]);
+    expect(sent()).toEqual([fade(360)]);
     await shutdown();
   });
 
@@ -5669,7 +5687,7 @@ describe("Adaptive Lighting", () => {
     jest.advanceTimersByTime(1);
     await flush();
     expect(characteristic(Characteristic.Brightness).value).toBe(50);
-    expect(sent()).toEqual([{ color_temp: 375 }]);
+    expect(sent()).toEqual([fade(375)]);
     await shutdown();
   });
 
@@ -5705,7 +5723,7 @@ describe("Adaptive Lighting", () => {
       );
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(sent()).toEqual([{ brightness: 50 }, { color_temp: 390 }]);
+    expect(sent()).toEqual([{ brightness: 50 }, fade(390)]);
     report({ ...ON, brightness: 50, color_temp: 390 });
     jest.advanceTimersByTime(10000);
     await flush();
@@ -5776,7 +5794,7 @@ describe("Adaptive Lighting", () => {
     expect(sent()).toEqual([{ state: "ON" }]);
     jest.advanceTimersByTime(9000);
     await flush();
-    expect(sent()).toEqual([{ state: "ON" }, { color_temp: 375 }]);
+    expect(sent()).toEqual([{ state: "ON" }, fade(375)]);
     await shutdown();
   });
 
@@ -5830,7 +5848,7 @@ describe("Adaptive Lighting", () => {
       );
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(sent()).toEqual([{ color_temp: 350 }, { brightness: 0 }]);
+    expect(sent()).toEqual([fade(350), { brightness: 0 }]);
     await shutdown();
   });
 
@@ -5878,7 +5896,25 @@ describe("Adaptive Lighting", () => {
     await flush();
     report(OFF);
     await schedule(controller, characteristic, 395);
-    expect(sent()).toEqual([{ color_temp: 350 }, { state: "ON" }]);
+    expect(sent()).toEqual([fade(350), { state: "ON" }]);
+    await shutdown();
+  });
+
+  test("a light of unknown power that a write turns on takes the next temperature without a fade", async () => {
+    jest.useFakeTimers();
+    const { controller, report, sent, start, characteristic, shutdown } =
+      await startLamp();
+    report({ brightness: 254, color_mode: "color_temp", color_temp: 300 });
+    await start(FLAT);
+    await flush();
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    jest.advanceTimersByTime(1000);
+    await schedule(controller, characteristic, 395);
+    expect(sent()).toEqual([
+      { state: "ON", color_temp: 350 },
+      { color_temp: 395 },
+    ]);
     await shutdown();
   });
 
@@ -5904,7 +5940,7 @@ describe("Adaptive Lighting", () => {
 
   for (const [elapsed, again] of [
     [1999, []],
-    [2000, [{ color_temp: 350 }]],
+    [2000, [fade(350)]],
   ] as const) {
     test(`a temperature write stands for the light after ${String(elapsed)} ms`, async () => {
       jest.useFakeTimers();
@@ -5915,7 +5951,7 @@ describe("Adaptive Lighting", () => {
       await flush();
       jest.advanceTimersByTime(elapsed);
       await schedule(controller, characteristic, 350);
-      expect(sent()).toEqual([{ color_temp: 350 }, ...again]);
+      expect(sent()).toEqual([fade(350), ...again]);
       await shutdown();
     });
   }
@@ -5929,7 +5965,7 @@ describe("Adaptive Lighting", () => {
     await flush();
     report({ ...ON, color_temp: 320 });
     await schedule(controller, characteristic, 350);
-    expect(sent()).toEqual([{ color_temp: 350 }, { color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350), fade(350)]);
     await shutdown();
   });
 
@@ -5945,11 +5981,7 @@ describe("Adaptive Lighting", () => {
     await flush();
     jest.advanceTimersByTime(600);
     await schedule(controller, characteristic, 350);
-    expect(sent()).toEqual([
-      { color_temp: 350 },
-      { state: "ON" },
-      { color_temp: 350 },
-    ]);
+    expect(sent()).toEqual([fade(350), { state: "ON" }, fade(350)]);
     await shutdown();
   });
 
@@ -5983,7 +6015,7 @@ describe("Adaptive Lighting", () => {
 
     recall(bridge, "Movie");
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }, { scene_recall: 1 }]);
+    expect(sent()).toEqual([fade(350), { scene_recall: 1 }]);
     expect(controller.isAdaptiveLightingActive()).toBe(false);
     expect(logged("Adaptive Lighting off for")).toEqual([
       'Adaptive Lighting off for "Lamp": a scene was recalled',
@@ -6207,6 +6239,7 @@ describe("Adaptive Lighting", () => {
       service.getCharacteristic(Characteristic.ColorTemperature).value,
     ).toBe(350);
     expect(written).toHaveLength(1);
+    expect(written[0]!.message).not.toMatch(/transition|"tt"/);
     expect(JSON.parse(written[0]!.message)).toMatchObject({
       seg: [
         { id: 0, on: false, sel: false },
@@ -6246,7 +6279,7 @@ describe("Adaptive Lighting", () => {
     report({ ...ON, color_temp: 300 });
     await start();
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350)]);
 
     jest.advanceTimersByTime(500);
     report({
@@ -6267,7 +6300,7 @@ describe("Adaptive Lighting", () => {
     report({ ...ON, color_temp: 300 });
     await start();
     await flush();
-    expect(sent()).toEqual([{ color_temp: 350 }]);
+    expect(sent()).toEqual([fade(350)]);
 
     jest.advanceTimersByTime(2000);
     expect(controller.isAdaptiveLightingActive()).toBe(true);

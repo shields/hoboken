@@ -20,6 +20,8 @@ import {
   updateAccessoryState,
 } from "../src/accessories.ts";
 import {
+  ADAPTIVE_TRANSITION_SECONDS,
+  fadeTemperature,
   hasAdaptiveLighting,
   shouldPublishAdaptiveTemperature,
   showsColor,
@@ -85,6 +87,24 @@ describe("adaptive lighting decisions", () => {
         },
       },
     });
+  });
+
+  test("a temperature alone fades over the transition", () => {
+    expect(ADAPTIVE_TRANSITION_SECONDS).toBe(5);
+    expect(fadeTemperature({ color_temp: 350 })).toEqual({
+      color_temp: 350,
+      transition: 5,
+    });
+  });
+
+  test("a message that changes power or brightness, or has no temperature, does not fade", () => {
+    for (const message of [
+      { state: "ON", color_temp: 350 },
+      { brightness: 100, color_temp: 350 },
+      { brightness: 100 },
+      { color: { hue: 1, saturation: 2 } },
+    ])
+      expect(fadeTemperature(message)).toBe(message);
   });
 
   test("a write gives a light the power and temperature in it", () => {

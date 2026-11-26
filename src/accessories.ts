@@ -31,7 +31,9 @@ import {
   FAN_SPEED_STEP,
   type HomeKitState,
 } from "./convert.ts";
-export type PublishSource = "adaptive-lighting";
+// "adaptive-lighting" is the controller's update; "adaptive-lighting-now" is
+// the remembered temperature of a light that someone turned on elsewhere.
+export type PublishSource = "adaptive-lighting" | "adaptive-lighting-now";
 export type PublishFn = (
   topic: string,
   payload: Record<string, unknown>,

@@ -65,6 +65,7 @@ import {
   showsColor,
   shouldPublishAdaptiveTemperature,
   zigbeeOffTemperatureMessage,
+  fadeTemperature,
   withAdaptiveTemperature,
 } from "./adaptive-lighting.ts";
 import {
@@ -519,7 +520,7 @@ export async function startBridge(
       !entry.acceptsAdaptiveTemperature(temperature)
     )
       return;
-    entry.publish(topic, { color_temp: temperature }, "adaptive-lighting");
+    entry.publish(topic, { color_temp: temperature }, "adaptive-lighting-now");
   }
 
   // `outside` is whether the state is a report of something that HomeKit did
@@ -560,6 +561,7 @@ export async function startBridge(
       homeKit: HomeKitState;
       raw?: RawState;
     },
+    fade?: (converted: Record<string, unknown>) => Record<string, unknown>,
   ): PublishFn {
     return (topic, written, source) => {
       const entry = accessoryMap.get(topic);
@@ -567,33 +569,36 @@ export async function startBridge(
         entry && adaptiveLightingController(entry.accessory);
       const cachedRaw = stateCache.get(topic);
       const adaptive = adaptiveController?.isAdaptiveLightingActive() === true;
+      const reported =
+        adaptive && cachedRaw
+          ? protocols[device.type].toHomeKit(cachedRaw, cachedRaw, device)
+          : undefined;
       const payload = withAdaptiveTemperature(
         written,
         adaptiveTemperatures.get(topic),
         adaptive,
-        adaptive
-          ? {
-              ...(cachedRaw &&
-                protocols[device.type].toHomeKit(cachedRaw, cachedRaw, device)),
-              ...recentlyWritten(topic),
-            }
-          : {},
+        adaptive ? { ...reported, ...recentlyWritten(topic) } : {},
       );
       offTemperatures.delete(topic);
       const converted = convert(payload, cachedRaw);
-      const message = JSON.stringify(converted);
+      // A light that has not yet reported that it is on was turned on by a
+      // write a moment ago, and takes its temperature at once.
+      const message = JSON.stringify(
+        fade && source === "adaptive-lighting" && reported?.on === true
+          ? fade(converted)
+          : converted,
+      );
       rawPublish(mqttTopic(topic), message);
-      const origin =
-        source === "adaptive-lighting"
-          ? `Adaptive Lighting for "${device.name}"`
-          : `HomeKit write for "${device.name}"`;
+      const origin = source
+        ? `Adaptive Lighting for "${device.name}"`
+        : `HomeKit write for "${device.name}"`;
       log.log(
         `${origin}: ${JSON.stringify(written)}${payload === written ? "" : " with the temperature of Adaptive Lighting"} published to ${mqttTopic(topic)} as ${message}`,
       );
       // What the light showed for a temperature that Adaptive Lighting asked
       // for says nothing once HomeKit has set its color or temperature.
       if (
-        source !== "adaptive-lighting" &&
+        !source &&
         ("hue" in payload || "saturation" in payload || "color_temp" in payload)
       )
         adaptiveRequests.delete(topic);
@@ -624,6 +629,7 @@ export async function startBridge(
           (p, raw) => homeKitToZ2m(p, raw, device),
           z2mSetTopic,
           (message) => ({ homeKit: z2mWriteToHomeKit(message) }),
+          fadeTemperature,
         ),
       toHomeKit: (raw: RawState, merged: RawState, device: DeviceConfig) =>
         z2mToHomeKit(raw, merged, device.capabilities),

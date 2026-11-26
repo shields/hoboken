@@ -85,6 +85,22 @@ export function zigbeeOffTemperatureMessage(
   };
 }
 
+export const ADAPTIVE_TRANSITION_SECONDS = 5;
+
+// The controller updates a lit light about once a minute, and a switch's
+// brightness reaches HomeKit 10 s late, so a temperature that steps is
+// visible; a fade makes the shift gradual. A message that also changes power
+// or brightness is a turn-on or a dim, which must not fade.
+export function fadeTemperature(
+  message: Record<string, unknown>,
+): Record<string, unknown> {
+  return "state" in message ||
+    "brightness" in message ||
+    !("color_temp" in message)
+    ? message
+    : { ...message, transition: ADAPTIVE_TRANSITION_SECONDS };
+}
+
 // Zigbee2MQTT and WLED turn a light on for a brightness above zero, so a write
 // that gives one and no power state turns a light on as On does.
 function setsPositiveBrightness(payload: Record<string, unknown>): boolean {
