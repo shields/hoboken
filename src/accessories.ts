@@ -156,7 +156,8 @@ export function createLightAccessory(
   );
   accessory.category = Categories.LIGHTBULB;
 
-  const service = accessory.addService(Service.Lightbulb, device.name);
+  const service = new Service.Lightbulb(device.name);
+  accessory.addService(service);
   let controller: AdaptiveLightingController | undefined;
   const setPayload = createCoalescingPublish(
     device.topic,
