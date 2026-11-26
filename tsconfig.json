@@ -21,6 +21,7 @@
     "test/**/*.ts",
     "demo/**/*.ts",
     "integration/**/*.ts",
+    "tools/**/*.ts",
     "eslint.config.ts"
   ]
 }

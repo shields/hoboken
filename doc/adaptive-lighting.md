@@ -10,6 +10,62 @@ itself, about once a minute and whenever Brightness changes. It does so
 whether or not the light is on or the temperature is new, and it cannot see a
 change made outside HomeKit. The bridge supplies the rest.
 
+## The hub's schedule
+
+The home hub never sends a temperature. It writes a 24-hour schedule to the
+light over the TransitionControl characteristic, and the light computes the
+temperature from it. Brightness is an input and is never changed.
+
+The schedule comes from a fixed table, `NaturalLightingCurve.plist` in
+HomeKitDaemon.framework ("Natural Lighting" is Apple's internal name),
+transcribed in
+[tools/apple-home/natural-lighting-curve.tsv](../tools/apple-home/natural-lighting-curve.tsv).
+It gives a kelvin value at 10% and at 100% brightness for 00:00, 02:30, and
+every half hour after that, in local clock time:
+
+| Local time  | 10%         | 100%        |
+| ----------- | ----------- | ----------- |
+| 00:00–02:30 | 2000 K      | 2250 K      |
+| 06:00       | 2371 K      | 2423 K      |
+| 08:00       | 2683 K      | 2933 K      |
+| 10:00       | 2945 K      | 4451 K      |
+| 11:30–14:30 | 2999–3002 K | 4945–4966 K |
+| 16:00       | 2940 K      | 4482 K      |
+| 18:00       | 2700 K      | 3465 K      |
+| 20:00       | 2233 K      | 2650 K      |
+| 21:30–24:00 | 2000–2011 K | 2250–2400 K |
+
+Neither the location, the date, nor the sun enters. By the local clock, the
+schedule is the same every day of the year, everywhere.
+
+For each time in the table, the hub takes `trunc(1e6 / K)` mireds at each
+brightness, clamps both to the light's ColorTemperature range (a light whose
+range misses the table's 201 to 500 mireds gets no schedule), and sends the
+line through them as a float32 base and factor: `factor = (m100 − m10) / 90`
+and `base = m10 − 10 × factor`. The schedule starts at the current clock time
+in the home's time zone, in whole seconds, with a point interpolated between
+the times around it, and wraps around midnight back to that point. The hub
+reads the hour, minute, and second off the clock, so a change to or from
+daylight saving time moves the schedule with the clock. A point whose rounded
+temperatures at 10% and 100% equal the previous point's becomes a hold on the
+previous one, except the last point, which always stays a point of its own.
+The schedule also carries the brightness range 10 to 100, an update interval
+of 60 s, and a notification interval of 10 minutes.
+
+The light interpolates base and factor linearly in time and sets
+`round(base + factor × clamp(brightness, 10, 100))` mireds, clamped to its
+range. At a fixed brightness the temperature is piecewise linear in mireds,
+not kelvin, between the times in the schedule, and at a fixed time it is
+linear in brightness from 10% to 100% and constant outside that range.
+Brighter is never warmer.
+
+The bridge stores each schedule in `ControllerStorage.<username>.json` under
+its HAP storage path. On 2026-11-25 the hub sent this home's six lights
+schedules that started 2.4 hours apart, and
+`tools/apple-home/natural-lighting-schedule.ts` reproduces all six exactly.
+One is shorter because its light stops at 416 mireds, which turns eight hours
+of the night into a single hold.
+
 ## What is published
 
 The `adaptiveTemperature` hook from `startBridge` remembers each temperature

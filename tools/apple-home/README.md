@@ -1,16 +1,19 @@
 # Apple Home probes
 
-Programs that read how Apple's Home app and Siri choose colors, with the data
-they produced on macOS 27.2.1 (build 26B131, arm64e) on 2026-11-24. The
-conclusions are in [doc/color-coalescing.md](../../doc/color-coalescing.md).
-The programs are kept so that they can be rerun on a later macOS to see what
-changed.
+Programs that read how Apple's Home app and Siri choose colors, and how a
+home hub schedules Adaptive Lighting, with the data they produced on macOS
+27.2.1 (build 26B131, arm64e) on 2026-11-24 and 2026-11-25. The conclusions
+are in [doc/color-coalescing.md](../../doc/color-coalescing.md) and
+[doc/adaptive-lighting.md](../../doc/adaptive-lighting.md). The programs are
+kept so that they can be rerun on a later macOS to see what changed.
 
-**They call Apple frameworks that are not public API** (Home, HomeUI, and
-HomeAutomationInternal) and are not expected to keep working. They are not
-part of the build, the tests, or the Docker image. None talks to HomeKit,
-reads a home or an account, or opens a network connection: they build color
-objects in memory and call pure functions.
+**The Objective-C programs call Apple frameworks that are not public API**
+(Home, HomeUI, and HomeAutomationInternal) and are not expected to keep
+working. None is part of the build, the tests, or the Docker image, except
+that `make lint` type-checks and lints `natural-lighting-schedule.ts`. None
+talks to HomeKit, reads a home or an account, or opens a network connection:
+the Objective-C programs build color objects in memory and call pure
+functions.
 
 ## Building and running
 
@@ -29,6 +32,7 @@ for probe in writes readback limits wheels; do
   "$bin/home-color-$probe" 2>/dev/null | diff - "home-color-$probe.txt"
 done
 "$bin/home-temperature-curve" | grep -v '^#' | diff - home-temperature-curve.tsv
+./natural-lighting-curve.sh | diff - natural-lighting-curve.tsv
 ```
 
 The Home app's frameworks exist on macOS only as Mac Catalyst copies under
@@ -36,15 +40,17 @@ The Home app's frameworks exist on macOS only as Mac Catalyst copies under
 
 ## Programs and data
 
-| Program                    | Output file                  | What it shows                                                                                 |
-| -------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------- |
-| `siri-hue-table.m`         | `siri-hue-table.tsv`         | Siri's 712 named colors: name to hue, saturation, and brightness                              |
-| `home-palettes.m`          | `home-palettes.txt`          | The Home app's default color and temperature swatches                                         |
-| `home-color-writes.m`      | `home-color-writes.txt`      | What the Home app writes for each color, temperature, and swatch                              |
-| `home-color-readback.m`    | `home-color-readback.txt`    | How it turns a light's Hue, Saturation, and ColorTemperature back into a color or temperature |
-| `home-color-limits.m`      | `home-color-limits.txt`      | Which characteristics each write needs, and how values clamp and round                        |
-| `home-color-wheels.m`      | `home-color-wheels.txt`      | What the color and temperature wheels write, and the temperature wheel's range                |
-| `home-temperature-curve.m` | `home-temperature-curve.tsv` | Apple's temperature-to-color curve, checked against the closed form in `src/convert.ts`       |
+| Program                        | Output file                  | What it shows                                                                                 |
+| ------------------------------ | ---------------------------- | --------------------------------------------------------------------------------------------- |
+| `siri-hue-table.m`             | `siri-hue-table.tsv`         | Siri's 712 named colors: name to hue, saturation, and brightness                              |
+| `home-palettes.m`              | `home-palettes.txt`          | The Home app's default color and temperature swatches                                         |
+| `home-color-writes.m`          | `home-color-writes.txt`      | What the Home app writes for each color, temperature, and swatch                              |
+| `home-color-readback.m`        | `home-color-readback.txt`    | How it turns a light's Hue, Saturation, and ColorTemperature back into a color or temperature |
+| `home-color-limits.m`          | `home-color-limits.txt`      | Which characteristics each write needs, and how values clamp and round                        |
+| `home-color-wheels.m`          | `home-color-wheels.txt`      | What the color and temperature wheels write, and the temperature wheel's range                |
+| `home-temperature-curve.m`     | `home-temperature-curve.tsv` | Apple's temperature-to-color curve, checked against the closed form in `src/convert.ts`       |
+| `natural-lighting-curve.sh`    | `natural-lighting-curve.tsv` | The home hub's Adaptive Lighting table: kelvins at 10% and 100% brightness by time of day     |
+| `natural-lighting-schedule.ts` |                              | The schedule that a hub writes to a light from that table                                     |
 
 The `home-color-*.m` programs share `home-color-item.h`, which gives Apple's
 `HFColorControlItem` stub characteristics so that its write and read-back
@@ -110,6 +116,51 @@ float32 rounding.
 The closed form's constants were read from the framework by disassembling
 `_HFGetColorForLightTemperature`.
 
+### natural-lighting-curve and natural-lighting-schedule
+
+`natural-lighting-curve.sh` prints `NaturalLightingCurve.plist` from
+HomeKitDaemon.framework's Resources with `plutil` and `jq`. It calls no
+framework. HomeKitDaemonLegacy has a byte-identical copy. The columns are the
+time of day, in `HH:MM` and in milliseconds, and the kelvins at 10% and at
+100% brightness. The plist's other keys, `ColorTemperatureValueUpdateInterval`
+(60000) and `ColorTemperatureNotifyIntervalThreshold` (600000), are checked
+rather than printed: the script stops with an error if they or the table's
+shape change.
+
+`natural-lighting-schedule.ts` runs on Node.js anywhere, from the committed
+table. It reimplements, from a disassembly of HomeKitDaemonLegacy, what the hub
+does with the table: `HMDNaturalLightingCurve` and
+`HAPCharacteristicValueLinearDerivedTransitionPoint` build the points,
+`-[HMDNaturalLightingCurve transitionPointsWithMillisecondsElapsedSinceStartOfDay:]`
+starts them at the time of day, and
+`+[HAPCharacteristicValueTransition transitionPointsByCoalescingTransitionPoints:ofCurve:]`
+merges runs into holds. Given a time of day and the light's range in mireds
+(default 140 to 500), it prints the points as HAP-NodeJS stores them:
+
+```sh
+node tools/apple-home/natural-lighting-schedule.ts 14:03:37 140 500
+```
+
+With `--compare`, it reads a bridge's `ControllerStorage.<username>.json` and
+regenerates each stored schedule from its start time in the given time zone,
+truncated to whole seconds. It takes the light's range to be the lowest and
+highest temperatures in the stored schedule, which clamps exactly as the real
+range does. It exits nonzero unless it finds a stored schedule and every field
+of every point matches:
+
+```sh
+node tools/apple-home/natural-lighting-schedule.ts --compare \
+  "$PERSIST_PATH/ControllerStorage.<username>.json" America/Los_Angeles
+```
+
+On 2026-11-25 all six schedules that one home's hub had sent this bridge
+matched with no difference, including one for a light whose range stops at
+416 mireds. They test the interpolated first point only weakly, because each
+started in the midday plateau, where the times on either side differ by at
+most a mired. None of them starts exactly at a time in the table, and no
+light's range cuts off the table's coolest values. Those cases are checked
+only against the disassembly.
+
 ## What can break
 
 - A later macOS may rename or remove any of these classes, selectors, or
@@ -118,5 +169,8 @@ The closed form's constants were read from the framework by disassembling
 - A change in output is the finding. Check whether Apple changed a swatch,
   the curve, or the write rule, and update `doc/color-coalescing.md`.
 - The Home app on an iPhone or HomePod may differ from these macOS copies.
+  The hub's schedules matched the macOS table on 2026-11-25; a `--compare`
+  that fails against a later `ControllerStorage` file shows that the table or
+  the way a schedule is built has changed.
   Which phrases Siri maps to which name is decided elsewhere and was not
   found; the table gives only the colors that the names have.

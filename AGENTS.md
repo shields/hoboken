@@ -8,10 +8,10 @@ framework.
 `README.md` is the overview: what the bridge exposes, configuration,
 deployment, and failure handling. The detail is in `doc/`:
 `color-coalescing.md` for write coalescing, white and color handling, and WLED
-white segments; `adaptive-lighting.md` for when a light is sent Adaptive
-Lighting's temperature and what turns it off; `mqtt.md` for the broker URL,
-authentication, topic permissions, and refusals; `tucson.md` for heated
-bedding and curtain behavior.
+white segments; `adaptive-lighting.md` for the hub's schedule, when a light is
+sent Adaptive Lighting's temperature, and what turns it off; `mqtt.md` for the
+broker URL, authentication, topic permissions, and refusals; `tucson.md` for
+heated bedding and curtain behavior.
 Read the relevant part before changing a feature, and update it with the
 change. Keep the README short and put detail in `doc/`. This file holds only
 rules and traps that those documents, the code, and the tests do not show;
