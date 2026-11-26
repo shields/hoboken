@@ -13,6 +13,8 @@
 // limitations under the License.
 
 import {
+  afterAll,
+  beforeAll,
   beforeEach,
   describe,
   expect,
@@ -21,9 +23,12 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { once } from "node:events";
+import { Socket } from "node:net";
 import {
   Characteristic,
-  type HAPConnection,
+  EventedHTTPServer,
+  HAPConnection,
   HAPStatus,
   HapStatusError,
   Service,
@@ -71,7 +76,7 @@ describe("createLightAccessory", () => {
     const accessory = createLightAccessory(device, publish, getState);
     const service = accessory.getService(Service.Lightbulb)!;
 
-    expect(service).toBeDefined();
+    expect(service.displayName).toBe(device.name);
     expect(service.getCharacteristic(Characteristic.On)).toBeDefined();
     expect(service.testCharacteristic(Characteristic.Brightness)).toBe(false);
     expect(service.testCharacteristic(Characteristic.ColorTemperature)).toBe(
@@ -890,7 +895,15 @@ describe("createFanAccessory", () => {
 
   // HAP-NodeJS checks a write against the characteristic's props only when it
   // arrives on a controller's connection.
-  const connection = {} as HAPConnection;
+  let connection: HAPConnection;
+  beforeAll(() => {
+    connection = new HAPConnection(new EventedHTTPServer(), new Socket());
+  });
+  afterAll(async () => {
+    const closed = once(connection, "closed");
+    connection.close();
+    await closed;
+  });
 
   test.each([50, 100 / 3, 100])(
     "onSet RotationSpeed publishes a controller's %p as sent",
