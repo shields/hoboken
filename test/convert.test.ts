@@ -492,13 +492,13 @@ describe("a WLED device with white segments", () => {
   const dark = { id: 0, on: false, sel: false };
   const white = (col: number[]) => [
     dark,
-    { id: 1, on: true, sel: true, col: [col] },
-    { id: 2, on: true, sel: true, col: [col] },
+    { id: 1, on: true, sel: true, col: [col], fx: 0 },
+    { id: 2, on: true, sel: true, col: [col], fx: 0 },
   ];
   const color = (col: number[]) => [
     { id: 1, on: false, sel: false },
     { id: 2, on: false, sel: false },
-    { id: 0, on: true, sel: true, col: [col] },
+    { id: 0, on: true, sel: true, col: [col], fx: 0 },
   ];
 
   test("its ColorTemperature range is what the strips span, in whole mireds", () => {
@@ -588,6 +588,28 @@ describe("a WLED device with white segments", () => {
     expect(
       homeKitToWled({ hue: 240, saturation: 100 }, undefined, NOOK),
     ).toEqual({ seg: color([0, 0, 255]) });
+  });
+
+  test("a color or temperature that is not solid leaves the effect", () => {
+    expect(
+      homeKitToWled({ hue: 240, saturation: 100 }, undefined, NOOK, false),
+    ).toEqual({
+      seg: [
+        { id: 1, on: false, sel: false },
+        { id: 2, on: false, sel: false },
+        { id: 0, on: true, sel: true, col: [[0, 0, 255]] },
+      ],
+    });
+    expect(
+      homeKitToWled({ color_temp: 299 }, undefined, NOOK, false).seg,
+    ).toEqual([
+      dark,
+      { id: 1, on: true, sel: true, col: [[255, 255, 255, 255]] },
+      { id: 2, on: true, sel: true, col: [[255, 255, 255, 255]] },
+    ]);
+    expect(
+      homeKitToWled({ hue: 0, saturation: 100 }, undefined, {}, false),
+    ).toEqual({ seg: [{ col: [[255, 0, 0]] }] });
   });
 
   test("on and brightness go with the segments", () => {
@@ -1490,33 +1512,33 @@ describe("homeKitToWled", () => {
 
   test("converts hue/saturation to seg col RGB", () => {
     expect(homeKitToWled({ hue: 0, saturation: 100 })).toEqual({
-      seg: [{ col: [[255, 0, 0]] }],
+      seg: [{ col: [[255, 0, 0]], fx: 0 }],
     });
   });
 
   test("H=0/S=0 sends full white RGB", () => {
     expect(homeKitToWled({ hue: 0, saturation: 0 })).toEqual({
-      seg: [{ col: [[255, 255, 255]] }],
+      seg: [{ col: [[255, 255, 255]], fx: 0 }],
     });
   });
 
   test("H=228/S=56 sends full white RGB", () => {
     expect(homeKitToWled({ hue: 228, saturation: 56 })).toEqual({
-      seg: [{ col: [[255, 255, 255]] }],
+      seg: [{ col: [[255, 255, 255]], fx: 0 }],
     });
   });
 
   test("fills missing hue from cached state", () => {
     const cached = { on: true, bri: 128, col: [255, 0, 0] };
     expect(homeKitToWled({ saturation: 100 }, cached)).toEqual({
-      seg: [{ col: [[255, 0, 0]] }],
+      seg: [{ col: [[255, 0, 0]], fx: 0 }],
     });
   });
 
   test("fills missing saturation from cached state", () => {
     const cached = { on: true, bri: 128, col: [0, 255, 0] };
     expect(homeKitToWled({ hue: 120 }, cached)).toEqual({
-      seg: [{ col: [[0, 255, 0]] }],
+      seg: [{ col: [[0, 255, 0]], fx: 0 }],
     });
   });
 
@@ -1526,7 +1548,7 @@ describe("homeKitToWled", () => {
     ).toEqual({
       on: true,
       bri: 255,
-      seg: [{ col: [[255, 0, 0]] }],
+      seg: [{ col: [[255, 0, 0]], fx: 0 }],
     });
   });
 

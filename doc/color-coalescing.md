@@ -444,7 +444,13 @@ within 140 to 500, HomeKit's, because the rest of the bridge limits
 
 Each write addresses segments by `id` and also sets `sel`, because WLED
 reports the primary color of the first selected segment on `<topic>/c`
-and nothing about the others. A reported color with a lit white channel
+and nothing about the others. It sets each segment that it lights to the
+Solid effect (`fx: 0`), as a write to a light without white segments
+does, because an effect such as Rainbow ignores the segment's color. Only
+a color or temperature that HomeKit writes does this. WLED reports no
+effect over MQTT, so an effect set in WLED is left by a turn-on or a
+change of brightness, by Adaptive Lighting's updates, and by the
+temperature that Adaptive Lighting adds to a turn-on. A reported color with a lit white channel
 is a white, and its temperature follows from the two strips' levels. A
 white with only the cool strips lit has no white channel (5500 K is
 `[255, 0, 255, 0]` when cool is on `r` and `b`) and cannot be told from

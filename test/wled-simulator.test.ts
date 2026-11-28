@@ -638,6 +638,27 @@ describe("WledSimulator", () => {
       });
     });
 
+    test("an effect is set per segment and only to a byte", () => {
+      const sim = createSegmented(3);
+      expect(sim.effects).toEqual([0, 0, 0]);
+      api({ seg: [{ id: 1, fx: 9 }] });
+      api({ seg: [{ id: 2, fx: 256 }] });
+      api({ seg: [{ id: 2, fx: "r" }] });
+      sim.setEffect(0, 110);
+      sim.setEffect(5, 1);
+      expect(sim.effects).toEqual([110, 9, 0]);
+    });
+
+    test("a change of effect alone publishes the state", () => {
+      createSegmented(2);
+      const before = mockClient.published.length;
+      api({ seg: [{ id: 1, fx: 9 }] });
+      const after = mockClient.published.length;
+      api({ seg: [{ id: 1, fx: 9 }] });
+      expect(after).toBeGreaterThan(before);
+      expect(mockClient.published).toHaveLength(after);
+    });
+
     test("array element without id addresses its index", () => {
       const sim = createSegmented(3);
       api({ seg: [{}, { col: [[1, 2, 3]] }] });

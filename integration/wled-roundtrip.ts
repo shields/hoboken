@@ -469,6 +469,21 @@ describe("WLED integration", { timeout: 30000 }, () => {
       });
     });
 
+    test("HK→WLED color and white end an effect set in WLED", async () => {
+      nook!.setEffect(0, 9);
+      nook!.setEffect(1, 9);
+      nook!.setEffect(2, 9);
+      await client!.setCharacteristics({
+        [nookHueKey]: 240,
+        [nookSatKey]: 100,
+      });
+      await poll(() => nook!.effects[0] === 0, 50, 3000);
+      assert.deepEqual(nook!.effects, [0, 9, 9]);
+      await client!.setCharacteristics({ [nookHueKey]: 0, [nookSatKey]: 0 });
+      await poll(() => nook!.effects[1] === 0, 50, 3000);
+      assert.deepEqual(nook!.effects, [0, 0, 0]);
+    });
+
     test("WLED→HK a white set on the device reads as its temperature", async () => {
       await client!.setCharacteristics({
         [nookHueKey]: 120,

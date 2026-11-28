@@ -8,12 +8,12 @@ that never sees the original source.
 ## Scope
 
 RGB and RGBW devices with one or more segments are covered, limited to each
-segment's `on`, `sel` and primary color (§3c, §6). Every segment is assumed to
-have RGB and white capability. Effects, presets, playlists, nightlight, segment
-geometry (`start`, `stop`, creating or deleting segments), the main-segment
-setting (`mainseg`), Kelvin and random (`"r"`) colors, UDP sync, and HTTP API
-passthrough over MQTT are out of scope. Source references are to WLED v16.0.1,
-`wled00/`.
+segment's `on`, `sel`, effect index (`fx`) and primary color (§3c, §6). Every
+segment is assumed to have RGB and white capability. Effect parameters,
+presets, playlists, nightlight, segment geometry (`start`, `stop`, creating or
+deleting segments), the main-segment setting (`mainseg`), Kelvin and random
+(`"r"`) colors, UDP sync, and HTTP API passthrough over MQTT are out of scope.
+Source references are to WLED v16.0.1, `wled00/`.
 
 ---
 
@@ -161,8 +161,8 @@ Fields are processed in this order within `deserializeState`:
    back on (restoring `briLast`).
 
 3. **`seg`** (`deserializeState` and `deserializeSegment` in `json.cpp`): an
-   object or an array of segment objects. Each element can contain `on`, `sel`
-   and `col`; other fields are out of scope.
+   object or an array of segment objects. Each element can contain `on`, `sel`,
+   `fx` and `col`; other fields are out of scope.
 
    **Which segments an element addresses.** Each element's target is
    `elem["id"] | it`, so a numeric `id` selects that segment.
@@ -182,6 +182,11 @@ Fields are processed in this order within `deserializeState`:
 
    **`sel`**: the segment's selection, read with the same `getBoolVal` rules as
    `on`.
+
+   **`fx`**: the segment's effect index. An integer from 0 to 255 sets it (0 is
+   Solid, which shows the primary color; an effect such as Rainbow ignores
+   it); the simulator ignores any other value, including the strings `"r"` and
+   `"~"`. WLED publishes no effect over MQTT, so a client never reads it back.
 
    **`col`** (array of color values): each element is a color slot (index 0 =
    primary, 1 = secondary, 2 = tertiary). Only slot 0 is modelled. A `col`
@@ -233,12 +238,13 @@ Fields are processed in this order within `deserializeState`:
    published**.
 
    For `seg`, `deserializeSegment` sets `stateChanged` when `differs()`
-   (`json.cpp`) finds the segment's options (which include `on`) or colors
-   different from before, and ignores a change of `sel` alone. So a segment
-   whose `on` or primary color (white included) changes publishes, even when it
-   is not the first selected segment; setting a field to the value it already
-   has publishes nothing; and a message that only changes `sel` publishes
-   nothing (the next publish reflects the new selection).
+   (`json.cpp`) finds the segment's options (which include `on`), colors or
+   effect different from before, and ignores a change of `sel` alone. So a
+   segment whose `on`, primary color (white included) or `fx` changes
+   publishes, even when it is not the first selected segment; setting a field
+   to the value it already has publishes nothing; and a message that only
+   changes `sel` publishes nothing (the next publish reflects the new
+   selection).
 
 ---
 
@@ -341,13 +347,14 @@ acceptable simplification.
 ## 6. Segments
 
 The simulator takes the number of segments as a constructor argument (default
-1). Each segment has three modelled properties:
+1). Each segment has four modelled properties:
 
 | Property | Type    | Default                            | Description                     |
 | -------- | ------- | ---------------------------------- | ------------------------------- |
 | `on`     | boolean | `true`                             | Segment power (`SEG_OPTION_ON`) |
 | `sel`    | boolean | `true` for segment 0, else `false` | Segment selected                |
 | `col`    | byte[4] | `[255, 160, 0, 0]`                 | Primary color R, G, B, W        |
+| `fx`     | byte    | `0`                                | Effect index (0 is Solid)       |
 
 - **Defaults**: the `Segment` constructor (`FX.h`) sets
   `options(SELECTED | SEGMENT_ON)`, so every segment WLED creates starts

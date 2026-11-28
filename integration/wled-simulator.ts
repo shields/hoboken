@@ -28,6 +28,8 @@ export interface WledSegment {
   col: WledColor;
 }
 
+type SimulatedSegment = WledSegment & { fx: number };
+
 // Brightness is a 0–255 quantity (WLED-MQTT-SPEC.md §2); clamp parsed inbound
 // values into range rather than letting out-of-range input corrupt the state.
 function clampBri(n: number): number {
@@ -58,17 +60,18 @@ function boolOrToggle(value: unknown, current: boolean): boolean {
 export class WledSimulator {
   private bri = 128;
   private briLast = 128;
-  private segs: WledSegment[];
-  private main: WledSegment;
+  private segs: SimulatedSegment[];
+  private main: SimulatedSegment;
   private client: MqttClient;
   private prefix: string;
 
   constructor(brokerUrl: string, topic: string, segmentCount = 1) {
     this.prefix = topic;
-    const newSegment = (sel: boolean): WledSegment => ({
+    const newSegment = (sel: boolean): SimulatedSegment => ({
       on: true,
       sel,
       col: [255, 160, 0, 0],
+      fx: 0,
     });
     this.main = newSegment(true);
     this.segs = [
@@ -113,7 +116,16 @@ export class WledSimulator {
   }
 
   get segments(): WledSegment[] {
-    return this.segs.map((seg) => ({ ...seg, col: [...seg.col] }));
+    return this.segs.map(({ on, sel, col }) => ({ on, sel, col: [...col] }));
+  }
+
+  get effects(): number[] {
+    return this.segs.map((seg) => seg.fx);
+  }
+
+  setEffect(id: number, fx: number): void {
+    const seg = this.segs[id];
+    if (seg) seg.fx = fx;
   }
 
   setBrightness(n: number): void {
@@ -256,7 +268,7 @@ export class WledSimulator {
   // changed (WLED's stateChanged).
   private applySeg(seg: unknown): boolean {
     const before = JSON.stringify(
-      this.segs.map(({ on, col }) => ({ on, col })),
+      this.segs.map(({ on, col, fx }) => ({ on, col, fx })),
     );
     if (Array.isArray(seg)) {
       for (const [index, elem] of (seg as unknown[]).entries()) {
@@ -273,7 +285,8 @@ export class WledSimulator {
       }
     }
     return (
-      before !== JSON.stringify(this.segs.map(({ on, col }) => ({ on, col })))
+      before !==
+      JSON.stringify(this.segs.map(({ on, col, fx }) => ({ on, col, fx })))
     );
   }
 
@@ -282,6 +295,7 @@ export class WledSimulator {
     if (!seg) return;
     seg.on = boolOrToggle(elem.on, seg.on);
     seg.sel = boolOrToggle(elem.sel, seg.sel);
+    if (isByte(elem.fx)) seg.fx = elem.fx;
     if (Array.isArray(elem.col)) {
       seg.col = this.parseSegColor(elem.col[0], seg.col) ?? seg.col;
     }

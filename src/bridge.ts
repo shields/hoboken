@@ -587,7 +587,8 @@ export async function startBridge(
     device: DeviceConfig,
     convert: (
       p: Record<string, unknown>,
-      raw?: RawState,
+      raw: RawState | undefined,
+      solid: boolean,
     ) => Record<string, unknown>,
     mqttTopic: (topic: string) => string,
     follow?: (converted: Record<string, unknown>) => {
@@ -618,7 +619,16 @@ export async function startBridge(
         adaptive ? { ...reported, ...recentlyWritten(topic) } : {},
       );
       offTemperatures.delete(topic);
-      const converted = convert(payload, cachedRaw);
+      // A WLED effect ends only for a color or temperature that HomeKit
+      // asked for, not for one that Adaptive Lighting adds or updates.
+      const converted = convert(
+        payload,
+        cachedRaw,
+        !source &&
+          ("hue" in written ||
+            "saturation" in written ||
+            "color_temp" in written),
+      );
       // A light that has not yet reported that it is on was turned on by a
       // write a moment ago, and takes its temperature at once.
       const message = JSON.stringify(
@@ -679,7 +689,7 @@ export async function startBridge(
       publish: (device: DeviceConfig) =>
         makePublish(
           device,
-          (p, raw) => homeKitToWled(p, raw, device),
+          (p, raw, solid) => homeKitToWled(p, raw, device, solid),
           (t) => `${t}/api`,
           (message) => {
             const state = wledWrite(message, device);

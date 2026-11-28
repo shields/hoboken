@@ -582,6 +582,7 @@ export function homeKitToWled(
   payload: Record<string, unknown>,
   cachedRaw?: RawState,
   light: WledLight = {},
+  solid = true,
 ): Record<string, unknown> {
   const api: Record<string, unknown> = {};
 
@@ -614,14 +615,16 @@ export function homeKitToWled(
     rgb = isWhite(h, s) ? [255, 255, 255] : hsToRgb(h, s);
   }
 
-  // Selecting the lit segments makes theirs the color that WLED reports.
+  // Selecting the lit segments makes theirs the color that WLED reports. An
+  // effect such as Rainbow ignores the color, so a color is shown solid.
+  const effect = solid ? { fx: 0 } : {};
   const segments = (
     lit: readonly number[],
     col: number[],
     dark: readonly number[],
   ) => [
     ...dark.map((id) => ({ id, on: false, sel: false })),
-    ...lit.map((id) => ({ id, on: true, sel: true, col: [col] })),
+    ...lit.map((id) => ({ id, on: true, sel: true, col: [col], ...effect })),
   ];
   if (strips && mireds !== undefined) {
     api.seg = segments(
@@ -632,7 +635,7 @@ export function homeKitToWled(
   } else if (strips && rgb) {
     api.seg = segments(strips.colorSegments, rgb, strips.whiteSegments);
   } else if (rgb) {
-    api.seg = [{ col: [rgb] }];
+    api.seg = [{ col: [rgb], ...effect }];
   }
 
   return api;

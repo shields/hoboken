@@ -83,6 +83,8 @@ HomeKit specification does not allow but other bridges also do.
 
 A WLED light gets RGB (255, 255, 255). For an RGBW strip, set Auto White
 to "Accurate" in WLED's LED preferences to light the white LEDs alone.
+A color or white from HomeKit sets each segment it lights to WLED's Solid
+effect, because an effect such as Rainbow ignores the segment's color.
 
 [doc/color-coalescing.md](doc/color-coalescing.md) has the rules and what the
 Home app and Siri write.

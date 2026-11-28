@@ -2489,8 +2489,8 @@ describe("a WLED device with white segments", () => {
     const white = (col: number[]) => ({
       seg: [
         { id: 0, on: false, sel: false },
-        { id: 1, on: true, sel: true, col: [col] },
-        { id: 2, on: true, sel: true, col: [col] },
+        { id: 1, on: true, sel: true, col: [col], fx: 0 },
+        { id: 2, on: true, sel: true, col: [col], fx: 0 },
       ],
     });
     return { ...started, accessory, characteristic, report, sent, white };
@@ -2660,7 +2660,7 @@ describe("a WLED device with white segments", () => {
       seg: [
         { id: 1, on: false, sel: false },
         { id: 2, on: false, sel: false },
-        { id: 0, on: true, sel: true, col: [[0, 0, 255]] },
+        { id: 0, on: true, sel: true, col: [[0, 0, 255]], fx: 0 },
       ],
     });
     expect(characteristic(Characteristic.ColorTemperature).value).toBe(182);
@@ -2950,10 +2950,34 @@ describe("WLED device support", () => {
     );
     expect(apiMsg).toBeDefined();
     const parsed = JSON.parse(apiMsg!.message) as Record<string, unknown>;
-    expect(parsed.seg).toEqual([{ col: [[255, 0, 0]] }]);
+    expect(parsed.seg).toEqual([{ col: [[255, 0, 0]], fx: 0 }]);
 
     await shutdown();
   });
+
+  test.each([
+    ["Hue", Characteristic.Hue, 120],
+    ["Saturation", Characteristic.Saturation, 50],
+  ] as const)(
+    "a HomeKit %s alone ends a WLED effect",
+    async (_, type, value) => {
+      const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
+      mockClient.connected = true;
+      mockClient.emit("connect");
+      const service = bridge.bridgedAccessories
+        .find((a) => a.displayName === "LED Strip")!
+        .getService(Service.Lightbulb)!;
+
+      service.getCharacteristic(type).setValue(value);
+      await flush();
+
+      const apiMsg = mockClient.published.find(
+        (p) => p.topic === "wled/living-room/api",
+      );
+      expect(JSON.parse(apiMsg!.message)).toMatchObject({ seg: [{ fx: 0 }] });
+      await shutdown();
+    },
+  );
 
   test("HomeKit white (H=0/S=0) sends WLED RGB white", async () => {
     const { bridge, shutdown } = await startBridge(wledConfig(), VERSION);
@@ -2974,7 +2998,7 @@ describe("WLED device support", () => {
     );
     expect(apiMsg).toBeDefined();
     const parsed = JSON.parse(apiMsg!.message) as Record<string, unknown>;
-    expect(parsed.seg).toEqual([{ col: [[255, 255, 255]] }]);
+    expect(parsed.seg).toEqual([{ col: [[255, 255, 255]], fx: 0 }]);
 
     await shutdown();
   });
@@ -6914,7 +6938,7 @@ describe("Adaptive Lighting", () => {
       service.getCharacteristic(Characteristic.ColorTemperature).value,
     ).toBe(350);
     expect(written).toHaveLength(1);
-    expect(written[0]!.message).not.toMatch(/transition|"tt"/);
+    expect(written[0]!.message).not.toMatch(/transition|"tt"|"fx"/);
     expect(JSON.parse(written[0]!.message)).toMatchObject({
       seg: [
         { id: 0, on: false, sel: false },
@@ -6922,6 +6946,31 @@ describe("Adaptive Lighting", () => {
         { id: 2, on: true, sel: true },
       ],
     });
+
+    mockClient.emit("message", "wled/nook/g", Buffer.from("0"));
+    process.nextTick(() => {
+      void service
+        .getCharacteristic(Characteristic.On)
+        .handleSetRequest(true, {} as never);
+    });
+    await flush();
+    const turnOn = mockClient.published.findLast(
+      (p) => p.topic === "wled/nook/api",
+    )!.message;
+    expect(turnOn).toMatch(/"on":true/);
+    expect(turnOn).toMatch(/"col"/);
+    expect(turnOn).not.toMatch(/"fx"/);
+
+    process.nextTick(() => {
+      void service
+        .getCharacteristic(Characteristic.ColorTemperature)
+        .handleSetRequest(250, {} as never);
+    });
+    await flush();
+    expect(
+      mockClient.published.findLast((p) => p.topic === "wled/nook/api")!
+        .message,
+    ).toMatch(/"fx":0/);
     await shutdown();
   });
 
