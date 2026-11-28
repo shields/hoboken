@@ -6497,11 +6497,6 @@ describe("Adaptive Lighting", () => {
         restored: restored.transitionStartBuffer,
       });
 
-      expect(stored()).toBeDefined();
-      expect(logged("Adaptive Lighting for")).not.toContainEqual(
-        expect.stringContaining("ended; white is fixed"),
-      );
-
       lamp.report({ ...ON, color_temp: 350 });
       await request(lamp.characteristic, WHITE);
       expect(logged("Adaptive Lighting restored for")).toHaveLength(1);
@@ -6598,47 +6593,29 @@ describe("Adaptive Lighting", () => {
       await scenes.shutdown();
     });
 
-    test("forgets the schedule when the hub stops it after a color", async () => {
-      for (const written of [true, false]) {
+    test("keeps the schedule when the hub stops Adaptive Lighting, and white restores it", async () => {
+      for (const before of ["nothing", "a restore", "a color"]) {
         const lamp = await lampWithSchedule();
-        if (written) await blue(lamp);
-        else lamp.report(BLUE);
-        await request(lamp.characteristic, WHITE);
-        lamp.report({ ...ON, color_temp: 350 });
-        expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+        if (before === "a restore") {
+          await blue(lamp);
+          await request(lamp.characteristic, WHITE);
+          lamp.report({ ...ON, color_temp: 350 });
+          expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+        }
+        if (before === "a color") lamp.report(BLUE);
         await hubStopsAdaptiveLighting(lamp.accessory);
-        expect(stored()).toBeUndefined();
+        expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+        expect(stored()).toBeDefined();
+
+        await request(lamp.characteristic, WHITE);
+        expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+        expect(lamp.sent().at(-1)).toEqual({
+          state: "ON",
+          brightness: 254,
+          color_temp: 350,
+        });
         await lamp.shutdown();
       }
-    });
-
-    test("forgets the schedule when the hub stops it while a color shows", async () => {
-      const lamp = await lampWithSchedule();
-      lamp.report(BLUE);
-      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
-      expect(stored()).toBeDefined();
-      await hubStopsAdaptiveLighting(lamp.accessory);
-      expect(stored()).toBeUndefined();
-      await lamp.shutdown();
-    });
-
-    test("is a fixed white after the hub stops Adaptive Lighting", async () => {
-      const lamp = await lampWithSchedule();
-      await hubStopsAdaptiveLighting(lamp.accessory);
-      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
-      expect(stored()).toBeUndefined();
-      expect(logged("Adaptive Lighting for")).toContain(
-        'Adaptive Lighting for "Lamp" ended; white is fixed until the home hub starts it again',
-      );
-
-      await request(lamp.characteristic, WHITE);
-      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
-      expect(lamp.sent().at(-1)).toEqual({
-        state: "ON",
-        brightness: 254,
-        color_temp: 370,
-      });
-      await lamp.shutdown();
     });
 
     test("is a fixed white for a light that never had a daily schedule", async () => {
@@ -6813,24 +6790,6 @@ describe("Adaptive Lighting", () => {
       await flush();
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
       expect(stored()).toBeUndefined();
-      await hubStopsAdaptiveLighting(lamp.accessory);
-      expect(
-        logged("Adaptive Lighting").filter(
-          (line) => !line.includes("published"),
-        ),
-      ).toEqual([]);
-      await lamp.shutdown();
-    });
-
-    test("a second stop does not forget the schedule again", async () => {
-      const lamp = await lampWithSchedule();
-      await hubStopsAdaptiveLighting(lamp.accessory);
-      await hubStopsAdaptiveLighting(lamp.accessory);
-      expect(
-        logged("Adaptive Lighting for").filter((line) =>
-          line.includes("ended; white is fixed"),
-        ),
-      ).toHaveLength(1);
       await lamp.shutdown();
     });
   });

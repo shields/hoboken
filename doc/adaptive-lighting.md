@@ -275,20 +275,18 @@ Adaptive Lighting off.
   The change in ActiveTransitionCount makes the hub read TransitionControl, so
   the Home app shows Adaptive Lighting on, and a start time that disagrees with
   the context should make the hub write a fresh schedule of its own, which is
-  saved in turn. This comes from reading the hub's code. A live hub has
-  restored Adaptive Lighting after a color from Siri and after one from the
-  Home app, and sent no schedule of its own in the next 20 minutes; whether
-  it replaces a restored schedule before its 24 hours run out has not been
-  seen.
-- **An end.** Adaptive Lighting going off for any reason other than a
-  HomeKit write of Hue, Saturation, or ColorTemperature, a color that the
-  light shows, or a scene recalled through the bridge, is the hub's own stop,
-  a write to TransitionControl of its instance id alone, or the end of the
-  schedule. The bridge then forgets the saved schedule and logs
-  `Adaptive Lighting for … ended; white is fixed until the home hub starts it
-again`, and white is a fixed white until the hub sends a schedule again, as
-  it does when Adaptive Lighting is chosen in the Home app. A restored
-  schedule that the hub does not replace ends after 24 hours in the same way.
+  saved in turn. This comes from reading the hub's code. On a live hub, the
+  bridge restored Adaptive Lighting after a color from Siri and after one from
+  the Home app, and the hub sent no schedule of its own in the next 20
+  minutes; whether it replaces a restored schedule before its 24 hours run
+  out has not been seen.
+- **Whatever ends it,** the saved schedule is kept: a color or temperature,
+  the hub's own stop (a write to TransitionControl of its instance id alone),
+  or the end of a schedule, including a restored one that the hub does not
+  replace within 24 hours. So once the hub has sent a light a schedule that
+  can be restored, Siri's white turns Adaptive Lighting back on. The Home app
+  has no switch for Adaptive Lighting that could mean otherwise; "warm white"
+  is the fixed white.
 - **Without a schedule,** a light that has never had one, or whose saved
   schedule is unreadable, which is logged as an error, gets the fixed white of
   [color-coalescing.md](color-coalescing.md#hobokens-approach), and Adaptive

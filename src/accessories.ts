@@ -56,7 +56,6 @@ export type AdaptiveTemperatureFn = (temperature: number) => boolean;
 export interface AdaptiveWhite {
   load(id: string): SavedSchedule | undefined;
   save(id: string, saved: SavedSchedule): void;
-  forget(id: string): void;
   // Takes the temperature of a restored schedule, which the white's own write
   // carries, without publishing it.
   remember(temperature: number): void;
@@ -78,14 +77,6 @@ export function adaptiveLightingController(
   accessory: Accessory,
 ): AdaptiveLightingController | undefined {
   return adaptiveLightingControllers.get(accessory);
-}
-
-const turnOffs = new WeakMap<Accessory, () => void>();
-
-// Turns Adaptive Lighting off for a reason that leaves the saved schedule in
-// place, as a HomeKit write of a color does.
-export function turnOffAdaptiveLighting(accessory: Accessory): void {
-  turnOffs.get(accessory)?.();
 }
 
 function setByAdaptiveLighting(context: unknown): boolean {
@@ -190,9 +181,6 @@ export function createLightAccessory(
   let controller: AdaptiveLightingController | undefined;
   let saved = white?.load(accessory.UUID);
   let restoring = false;
-  // Set while Adaptive Lighting goes off for a write or for the bridge, which
-  // leave the saved schedule in place.
-  let expected = false;
   const armed = new Set<Characteristic>();
 
   const save = (next: SavedSchedule) => {
@@ -331,47 +319,18 @@ export function createLightAccessory(
   if (hasAdaptiveLighting(device)) {
     // Ahead of the controller's listeners, which it adds each time Adaptive
     // Lighting goes on.
-    for (const type of [
-      Characteristic.Hue,
-      Characteristic.Saturation,
-      Characteristic.ColorTemperature,
-    ]) {
+    for (const type of [Characteristic.Hue, Characteristic.Saturation]) {
       if (!service.testCharacteristic(type)) continue;
       const characteristic = service.getCharacteristic(type);
       characteristic.on("change", (change: CharacteristicChange) => {
-        if ((change.reason as string) !== "write") return;
-        if (armed.delete(characteristic)) {
-          change.context = { controller };
-          return;
-        }
-        expected = true;
-        queueMicrotask(() => {
-          expected = false;
-        });
+        if (armed.delete(characteristic)) change.context = { controller };
       });
     }
-    const lightController = new AdaptiveLightingController(service);
-    controller = lightController;
+    controller = new AdaptiveLightingController(service);
     // HAP-NodeJS restores a persisted transition when the bridge publishes, so
     // the controller joins the accessory before that.
-    accessory.configureController(lightController);
-    adaptiveLightingControllers.set(accessory, lightController);
-    turnOffs.set(accessory, () => {
-      expected = true;
-      lightController.disableAdaptiveLighting();
-      expected = false;
-    });
-    // Off for any other reason is the hub's own stop or the end of the
-    // schedule, so white stays a fixed white until the hub starts it again.
-    service
-      .getCharacteristic(
-        Characteristic.CharacteristicValueActiveTransitionCount,
-      )
-      .on("change", (change: CharacteristicChange) => {
-        if (change.newValue !== 0 || expected || !white || !saved) return;
-        saved = undefined;
-        white.forget(accessory.UUID);
-      });
+    accessory.configureController(controller);
+    adaptiveLightingControllers.set(accessory, controller);
   }
 
   return accessory;

@@ -95,7 +95,6 @@ import {
   createFanAccessory,
   createLightAccessory,
   createSceneAccessory,
-  turnOffAdaptiveLighting,
   updateAccessoryState,
   updateFanAccessoryState,
 } from "./accessories.ts";
@@ -756,7 +755,7 @@ export async function startBridge(
     const adaptive = adaptiveLightingController(entry.accessory);
     if (adaptive?.isAdaptiveLightingActive() !== true) return;
     log.log(`Adaptive Lighting off for "${entry.device.name}": ${reason}`);
-    turnOffAdaptiveLighting(entry.accessory);
+    adaptive.disableAdaptiveLighting();
   }
   const wledTopicMap = new Map<string, { device: string; sub: string }>();
 
@@ -850,12 +849,6 @@ export async function startBridge(
           log.log(
             `Adaptive Lighting schedule for "${device.name}" from the home hub`,
           );
-      },
-      forget: (id) => {
-        HAPStorage.storage().removeItemSync(scheduleKey(id));
-        log.log(
-          `Adaptive Lighting for "${device.name}" ended; white is fixed until the home hub starts it again`,
-        );
       },
       remember: (temperature) => {
         adaptiveTemperatures.set(device.topic, temperature);
