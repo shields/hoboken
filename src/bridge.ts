@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { createVacuumAccessory } from "./vacuum-accessory.ts";
+import { vacuumStatus, vacuumTopics } from "./vacuum-profile.ts";
 import { CurtainMQTT } from "./curtain-mqtt.ts";
 import { curtainIdentity } from "./curtain-profile.ts";
 import type { CurtainSource } from "./curtain-source.ts";
@@ -142,6 +144,7 @@ export function buildStatusData(
   version: string,
   heatedBedding?: HeatedBeddingSource,
   curtains?: CurtainSource,
+  vacuumReports: ReadonlyMap<string, string> = new Map(),
 ): StatusData {
   return {
     mqtt,
@@ -171,6 +174,13 @@ export function buildStatusData(
                 }
               : { name: entry.name, ...zoneStatus(tucsonTopic(entry)) };
           }),
+        }
+      : {}),
+    ...(config.vacuums?.length
+      ? {
+          vacuums: config.vacuums.map((config) =>
+            vacuumStatus(config, vacuumReports),
+          ),
         }
       : {}),
     ...(config.curtains?.length
@@ -308,10 +318,20 @@ export async function startBridge(
     metrics = createMetrics(metricsRegister);
   }
 
-  const displayURL = displayMQTTURL(config.mqtt.url);
-  if (config.devices.length) log.log(`Connecting to MQTT at ${displayURL}`);
+  const vacuums = config.vacuums ?? [];
+  const vacuumReports = new Map<string, string>();
+  const vacuumRoutes = new Map<
+    string,
+    { label: string; updates: (() => void)[] }
+  >();
+  const vacuumAccessories: ReturnType<typeof createVacuumAccessory>[] = [];
+  const pendingVacuumSends = new Set<(error: Error) => void>();
 
-  const mqttClient = config.devices.length
+  const useSharedClient = config.devices.length + vacuums.length > 0;
+  const displayURL = displayMQTTURL(config.mqtt.url);
+  if (useSharedClient) log.log(`Connecting to MQTT at ${displayURL}`);
+
+  const mqttClient = useSharedClient
     ? withoutErrorMessage(() =>
         connect(config.mqtt.url, {
           ...(credentials && credentialOptions(credentials)),
@@ -329,7 +349,7 @@ export async function startBridge(
 
   function mqttConnected(): boolean {
     return (
-      (config.devices.length === 0 || mqttClient?.connected === true) &&
+      (!useSharedClient || mqttClient?.connected === true) &&
       (heatedBedding?.connected ?? (config.heatedBedding?.length ?? 0) === 0) &&
       (curtains?.connected ?? (config.curtains?.length ?? 0) === 0)
     );
@@ -351,6 +371,9 @@ export async function startBridge(
     for (const curtain of config.curtains ?? []) {
       if (!curtains?.source.usableState(tucsonTopic(curtain))) unknown++;
     }
+    for (const config of vacuums) {
+      if (vacuumStatus(config, vacuumReports).on === undefined) unknown++;
+    }
     metrics?.devicesStateUnknown.set(unknown);
     metricsServer?.notifyStateChange();
   }
@@ -360,12 +383,20 @@ export async function startBridge(
     metrics?.mqttErrors.inc();
   });
 
+  function disconnected(): void {
+    // MQTT.js can wait for drain to finish a QoS 0 publish. A closed stream never drains.
+    for (const reject of pendingVacuumSends)
+      reject(new Error("MQTT disconnected"));
+    vacuumReports.clear();
+    for (const vacuum of vacuumAccessories) vacuum.update();
+    cancelAllRetries();
+    updateMetrics();
+  }
+
   mqttClient?.on("close", () => {
     log.log("MQTT connection closed");
     clearTimeout(stableTimer);
-    cancelAllRetries();
-    metrics?.mqttConnected.set(0);
-    metricsServer?.notifyStateChange();
+    disconnected();
   });
 
   // mqtt.js emits reconnect once per attempt however the previous one failed,
@@ -380,9 +411,7 @@ export async function startBridge(
 
   mqttClient?.on("offline", () => {
     log.log("MQTT client offline");
-    cancelAllRetries();
-    metrics?.mqttConnected.set(0);
-    metricsServer?.notifyStateChange();
+    disconnected();
   });
 
   const prePublishCheck = () => {
@@ -664,6 +693,7 @@ export async function startBridge(
         version,
         heatedBedding?.source,
         curtains?.source,
+        vacuumReports,
       );
     metricsServer = startMetricsServer(
       config.metrics.port,
@@ -708,8 +738,13 @@ export async function startBridge(
   }
   const wledTopicMap = new Map<string, { device: string; sub: string }>();
 
+  const deviceCount =
+    config.devices.length +
+    vacuums.length +
+    (config.heatedBedding?.length ?? 0) +
+    (config.curtains?.length ?? 0);
   log.log(
-    `Configuring bridge "${config.bridge.name}" with ${String(config.devices.length)} device(s)`,
+    `Configuring bridge "${config.bridge.name}" with ${String(deviceCount)} device(s)`,
   );
 
   for (const device of config.devices) {
@@ -926,11 +961,53 @@ export async function startBridge(
       curtainAccessories.push(curtain);
     }
   }
-  metrics?.devicesConfigured.set(
-    config.devices.length +
-      (config.heatedBedding?.length ?? 0) +
-      (config.curtains?.length ?? 0),
-  );
+  const publishVacuumCommand = async (topic: string, command: string) => {
+    const client = prePublishCheck();
+    const closed = Promise.withResolvers<never>();
+    pendingVacuumSends.add(closed.reject);
+    try {
+      await Promise.race([
+        client.publishAsync(topic, command, { qos: 0, retain: false }),
+        closed.promise,
+      ]);
+    } catch {
+      metrics?.mqttErrors.inc();
+      throw new HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    } finally {
+      pendingVacuumSends.delete(closed.reject);
+    }
+    metrics?.mqttMessagesPublished.inc();
+  };
+  for (const config of vacuums) {
+    const topics = vacuumTopics(config);
+    const vacuum = createVacuumAccessory(
+      config,
+      () => vacuumStatus(config, vacuumReports).on,
+      publishVacuumCommand,
+    );
+    setAccessoryInfo(
+      vacuum.accessory,
+      "Rockville",
+      "Vacuum",
+      topics.base,
+      version,
+    );
+    bridge.addBridgedAccessory(vacuum.accessory);
+    vacuumAccessories.push(vacuum);
+    for (const topic of [
+      topics.state,
+      topics.availability,
+      topics.bridgeAvailability,
+    ]) {
+      const route = vacuumRoutes.get(topic) ?? {
+        label: topic === topics.bridgeAvailability ? topic : topics.base,
+        updates: [],
+      };
+      route.updates.push(vacuum.update);
+      vacuumRoutes.set(topic, route);
+    }
+  }
+  metrics?.devicesConfigured.set(deviceCount);
   updateMetrics();
 
   mqttClient?.on("connect", () => {
@@ -951,6 +1028,7 @@ export async function startBridge(
           return [`${d.topic}/g`, `${d.topic}/c`];
       }
     });
+    topics.push(...vacuumRoutes.keys());
     mqttClient.subscribe(topics, (error, grants = [], packet) => {
       const denied = deniedTopics(grants, packet?.granted);
       if (!error && denied.length === 0) return;
@@ -1017,6 +1095,14 @@ export async function startBridge(
   }
 
   mqttClient?.on("message", (topic, payload) => {
+    const vacuumRoute = vacuumRoutes.get(topic);
+    if (vacuumRoute) {
+      metrics?.mqttMessagesReceived.labels(vacuumRoute.label).inc();
+      vacuumReports.set(topic, payload.toString());
+      for (const update of vacuumRoute.updates) update();
+      updateMetrics();
+      return;
+    }
     // Try WLED sub-topic lookup first.
     const wled = wledTopicMap.get(topic);
     if (wled !== undefined) {

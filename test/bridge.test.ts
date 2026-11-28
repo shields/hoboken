@@ -98,7 +98,7 @@ class MockMqttClient extends EventEmitter {
   heatedBeddingSubscriptions:
     Record<string, IClientSubscribeOptions> | undefined;
   acknowledged: SubscribeComplete | undefined;
-  heatedBeddingPublications: {
+  publicationsWithCallback: {
     topic: string;
     message: string;
     complete: (error?: Error) => void;
@@ -170,9 +170,24 @@ class MockMqttClient extends EventEmitter {
   ): this {
     this.published.push({ topic, message });
     if (options && complete)
-      this.heatedBeddingPublications.push({ topic, message, complete });
+      this.publicationsWithCallback.push({ topic, message, complete });
     return this;
   }
+
+  publishAsync(
+    topic: string,
+    message: string,
+    options: IClientPublishOptions,
+  ): Promise<void> {
+    this.vacuumOptions = options;
+    return new Promise((resolve, reject) => {
+      this.publish(topic, message, options, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
+  vacuumOptions: IClientPublishOptions | undefined;
 
   end(_force?: boolean, cb?: () => void): this {
     clearTimeout(this.reconnectTimer);
@@ -327,6 +342,162 @@ async function openEvents(
 }
 
 describe("startBridge", () => {
+  test("Rockville switches follow reported state through commands, outages, and retained replay", async () => {
+    const prefix = "home/rockville";
+    const base = `${prefix}/downstairs`;
+    const other = `${prefix}/upstairs`;
+    const bridgeTopic = `${prefix}/bridge/availability`;
+    const config = {
+      ...metricsConfig(),
+      devices: [],
+      vacuums: [
+        { name: "Downstairs", device: "downstairs", prefix },
+        { name: "Upstairs", device: "upstairs", prefix },
+      ],
+    };
+    const { bridge, metricsPort, shutdown } = await startBridge(
+      config,
+      VERSION,
+    );
+    const client = mockClient;
+    const [down, up] = bridge.bridgedAccessories.map((a) =>
+      a.getService(Service.Switch)!.getCharacteristic(Characteristic.On),
+    );
+    const message = (topic: string, payload: string) => {
+      client.emit("message", topic, Buffer.from(payload));
+    };
+    const page = async (path: string) =>
+      (await fetch(`http://127.0.0.1:${String(metricsPort)}${path}`)).text();
+    const unavailable = async (request: Promise<unknown>) => {
+      expect(await Promise.allSettled([request])).toEqual([
+        { status: "rejected", reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE },
+      ]);
+    };
+    try {
+      expect(
+        bridge.bridgedAccessories[0]!.getService(
+          Service.AccessoryInformation,
+        )!.getCharacteristic(Characteristic.SerialNumber).value,
+      ).toBe(base);
+      expect(await page("/metrics")).toContain("hoboken_mqtt_connected 0");
+      emitConnect();
+      expect(client.subscriptions).toEqual([
+        [
+          `${base}/state`,
+          `${base}/availability`,
+          bridgeTopic,
+          `${other}/state`,
+          `${other}/availability`,
+        ],
+      ]);
+      message(`${base}/state`, "paused");
+      message(`${base}/availability`, "online");
+      await unavailable(down!.handleGetRequest());
+      await unavailable(down!.handleSetRequest(true));
+      expect(client.published).toEqual([]);
+      message(bridgeTopic, "online");
+      expect(await down!.handleGetRequest()).toBe(false);
+      expect(await page("/metrics")).toContain(
+        "hoboken_devices_state_unknown 1",
+      );
+      await unavailable(up!.handleGetRequest());
+      message(`${other}/availability`, "online");
+      await unavailable(up!.handleGetRequest());
+      message(`${other}/state`, "segment_cleaning");
+      expect(up!.value).toBe(true);
+      const dock = down!.handleSetRequest(false);
+      expect(client.published).toEqual([
+        { topic: `${base}/command/set`, message: "return" },
+      ]);
+      expect(client.vacuumOptions).toEqual({ qos: 0, retain: false });
+      client.publicationsWithCallback.at(-1)!.complete();
+      expect(await dock).toBe(false);
+      const start = down!.handleSetRequest(true);
+      expect(client.published.at(-1)).toEqual({
+        topic: `${base}/command/set`,
+        message: "start",
+      });
+      client.publicationsWithCallback.at(-1)!.complete();
+      expect(await start).toBe(false);
+      expect(down!.value).toBe(false);
+      const concurrent = down!.handleSetRequest(true);
+      message(`${base}/state`, "spot_cleaning");
+      client.publicationsWithCallback.at(-1)!.complete();
+      expect(await concurrent).toBe(true);
+      expect(down!.value).toBe(true);
+      const failed = down!.handleSetRequest(false);
+      client.publicationsWithCallback
+        .at(-1)!
+        .complete(new Error("send failed"));
+      await unavailable(failed);
+      const metrics = await page("/metrics");
+      for (const metric of [
+        "hoboken_devices_configured 2",
+        "hoboken_devices_state_unknown 0",
+        "hoboken_mqtt_connected 1",
+        "hoboken_mqtt_messages_published_total 3",
+        "hoboken_mqtt_errors_total 1",
+        `hoboken_mqtt_messages_received_total{device="${base}"} 3`,
+        `hoboken_mqtt_messages_received_total{device="${bridgeTopic}"} 1`,
+      ])
+        expect(metrics).toContain(metric);
+      const html = await page("/");
+      for (const value of [
+        "Downstairs",
+        "Upstairs",
+        `${base}/state`,
+        `${base}/availability`,
+        bridgeTopic,
+        "spot_cleaning",
+        "On</td><td>true",
+        "online",
+      ])
+        expect(html).toContain(value);
+      message(`${base}/availability`, "offline");
+      await unavailable(down!.handleGetRequest());
+      expect(await up!.handleGetRequest()).toBe(true);
+      message(bridgeTopic, "offline");
+      expect(up!.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+      await unavailable(up!.handleGetRequest());
+      message(bridgeTopic, "online");
+      message(`${base}/availability`, "online");
+      message(`${base}/state`, "<unknown>");
+      await unavailable(down!.handleGetRequest());
+      expect(await page("/")).toContain("&lt;unknown&gt;");
+      expect(await page("/metrics")).toContain(
+        "hoboken_devices_state_unknown 1",
+      );
+      for (const event of ["offline", "close"]) {
+        const write = Promise.allSettled([up!.handleSetRequest(true)]);
+        const pending = client.publicationsWithCallback.at(-1)!;
+        client.connected = false;
+        client.emit(event);
+        expect(up!.statusCode).toBe(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+        expect(await Promise.race([write, flush()])).toEqual([
+          {
+            status: "rejected",
+            reason: HAPStatus.SERVICE_COMMUNICATION_FAILURE,
+          },
+        ]);
+        pending.complete();
+        await unavailable(up!.handleGetRequest());
+        expect(await page("/metrics")).toContain(
+          "hoboken_devices_state_unknown 2",
+        );
+        expect(await page("/")).toContain("No report");
+        emitConnect();
+        message(bridgeTopic, "online");
+        message(`${other}/state`, "charging");
+        await unavailable(up!.handleGetRequest());
+        message(`${other}/availability`, "online");
+        expect(await up!.handleGetRequest()).toBe(false);
+        expect(await page("/")).toContain("On</td><td>false");
+      }
+    } finally {
+      await shutdown();
+    }
+  });
+
   test("curtain-only bridge exposes reported positions, confirmed targets, diagnostics, and recovery", async () => {
     const topic = "tuya/window";
     const config = { ...metricsConfig(), devices: [], curtains: CURTAINS };
@@ -374,7 +545,7 @@ describe("startBridge", () => {
       const write = service
         .getCharacteristic(Characteristic.TargetPosition)
         .handleSetRequest(90);
-      const sent = client.heatedBeddingPublications[0]!;
+      const sent = client.publicationsWithCallback[0]!;
       const command = JSON.parse(sent.message) as { request_id: string };
       sent.complete();
       heatedBeddingMessage(client, topic, { ...state, target_position: 90 });
@@ -577,7 +748,7 @@ describe("startBridge", () => {
       jest.useFakeTimers();
       const writes = [speed.handleSetRequest(80), active.handleSetRequest(0)];
       jest.advanceTimersByTime(50);
-      const publication = client.heatedBeddingPublications[0]!;
+      const publication = client.publicationsWithCallback[0]!;
       const command = JSON.parse(publication.message) as {
         request_id: string;
         power: boolean;
@@ -597,7 +768,7 @@ describe("startBridge", () => {
       expect(speed.value).toBe(60);
       const preheatWrite = preheat.handleSetRequest(false);
       const preheatCommand = JSON.parse(
-        client.heatedBeddingPublications[1]!.message,
+        client.publicationsWithCallback[1]!.message,
       ) as { request_id: string };
       heatedBeddingMessage(client, "tuya/bed/side_a/result", {
         request_id: preheatCommand.request_id,
@@ -723,7 +894,7 @@ describe("startBridge", () => {
       jest.useFakeTimers();
       const write = active.handleSetRequest(1);
       jest.advanceTimersByTime(50);
-      const publications = client.heatedBeddingPublications;
+      const publications = client.publicationsWithCallback;
       expect(publications.map(({ topic }) => topic)).toEqual([
         "tuya/bed/side_a/set",
         "tuya/bed/side_b/set",

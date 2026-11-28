@@ -1,9 +1,9 @@
 # MQTT Broker Connection
 
 How Hoboken connects to the MQTT broker: the URL, the login, the topics it
-needs, and what a refusal looks like. It opens one connection for Zigbee2MQTT
-and WLED devices and separate MQTT 5 connections for heated bedding and for
-curtains, all with the same credentials.
+needs, and what a refusal looks like. It opens one connection for Zigbee2MQTT,
+WLED, and Rockville devices and separate MQTT 5 connections for heated bedding
+and curtains, all with the same credentials.
 
 ## URL
 
@@ -46,8 +46,8 @@ works as written. A lone trailing carriage return stays part of the password.
 The file must be valid UTF-8; invalid bytes, including a UTF-16 file with a byte
 order mark, fail startup instead of becoming a different password. Hoboken takes
 the password from no other source and ignores any `MQTT_PASSWORD` environment
-variable. The connection for Zigbee2MQTT and WLED devices and the heated bedding
-and curtain connections use the same credentials.
+variable. The shared Zigbee2MQTT, WLED, and Rockville connection uses the same
+credentials as the heated bedding and curtain connections.
 
 Hoboken refuses to start when `mqtt.username` has no `mqtt.passwordFile`, when
 `mqtt.passwordFile` has no `mqtt.username`, when the password file cannot be
@@ -94,6 +94,9 @@ Brokers that restrict topics per user must grant Hoboken these topics:
 
 - Zigbee2MQTT devices: read `<topic>`; write `<topic>/set` and `<topic>/get`.
 - WLED devices: read `<topic>/g` and `<topic>/c`; write `<topic>/api`.
+- Rockville vacuums: read `<prefix>/bridge/availability`, `<prefix>/<device>/availability`,
+  and `<prefix>/<device>/state`. Write `<prefix>/<device>/command/set` with the
+  plain text `start` or `return` at QoS 0, with retain disabled.
 - Heated bedding: read `<prefix>/bridge/availability`,
   `<prefix>/bridge/heartbeat`, `<prefix>/<controller>/availability`, and each
   zone's `<prefix>/<controller>/<zone>` and `<prefix>/<controller>/<zone>/result`;
@@ -107,13 +110,13 @@ With an `acl_file`, Mosquitto accepts a subscription to a topic that the user
 cannot read and then delivers nothing, so a missing read permission shows up as
 a device that never reports state. It also drops a QoS 0 publish that the user
 cannot write without telling the sender, so a missing write permission shows up
-as a Zigbee2MQTT or WLED command that HomeKit reports as done while nothing
-happens.
+as a Zigbee2MQTT, WLED, or Rockville command that HomeKit reports as done while
+nothing happens.
 
 ## Refused connections and subscriptions
 
 When the broker refuses the connection, with or without `mqtt.username`, the
-Zigbee2MQTT and WLED connection logs `MQTT error: Connection refused: ...`,
+shared connection logs `MQTT error: Connection refused: ...`,
 counts it in `hoboken_mqtt_errors_total`, and keeps retrying. It waits 1 second
 before the first retry and doubles the wait with each further attempt up to 60
 seconds. The wait returns to 1 second only after a connection has stayed up for
@@ -128,7 +131,7 @@ therefore takes effect without a restart.
 
 A broker that enforces read permissions when a client subscribes, such as EMQX,
 HiveMQ, or Mosquitto with its dynamic security plugin, refuses the subscription.
-The Zigbee2MQTT and WLED connection then logs
+The shared connection then logs
 `MQTT subscription refused for <topics>: ...`, naming only the topics the broker
 refused, counts one error in `hoboken_mqtt_errors_total` for the subscription,
 and keeps the connection open, so the topics the broker granted keep working

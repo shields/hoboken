@@ -187,6 +187,31 @@ start/stop controls and HomeKit `HoldPosition` are not exposed. Tucson supports
 the Zemismart BCD300FB Wi-Fi motor; other models are not implied to work. See
 [doc/tucson.md](doc/tucson.md).
 
+### Vacuums
+
+Each [Rockville](https://github.com/shields/rockville) vacuum appears as a
+stateful switch. On starts cleaning. Off sends the vacuum to its dock, including
+when it is paused and the switch already reads Off. A bridge with only vacuums
+can omit `devices`.
+
+```yaml
+vacuums:
+  - name: Downstairs Vacuum
+    device: downstairs
+```
+
+Set `prefix` if Rockville uses a topic prefix other than `rockville`. The prefix
+and device identify the accessory, so changing the display name preserves Home
+automations. A write succeeds when Hoboken sends the command. Rockville polls
+the vacuum immediately after executing it. Older releases report changes at
+their regular polling interval.
+
+The switch shows On during floor cleaning, including spot, zone, and room runs
+started outside Home. It shows Off while paused, returning, or charging. Each
+MQTT connection needs a recognized state and online availability reports from
+both the vacuum and Rockville. Home shows No Response while any are missing or
+either goes offline.
+
 ## Config
 
 ```yaml
@@ -243,7 +268,7 @@ the value.
 
 | Object                     | Keys                                                                                                                            |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| top level                  | `bridge`, `mqtt`, `devices`, `heatedBedding`, `curtains`, `metrics`                                                             |
+| top level                  | `bridge`, `mqtt`, `devices`, `heatedBedding`, `curtains`, `vacuums`, `metrics`                                                  |
 | `bridge`                   | `name`, `mac`, `pincode`, `port`, `bind`                                                                                        |
 | `mqtt`                     | `url`, `username`, `passwordFile`                                                                                               |
 | `metrics`                  | `port`, `bind`                                                                                                                  |
@@ -252,6 +277,7 @@ the value.
 | each `scenes` entry        | `name`, `id`                                                                                                                    |
 | each `heatedBedding` entry | `name`, `prefix`, `controller`, `zone`, `zones`                                                                                 |
 | each `curtains` entry      | `name`, `prefix`, `controller`                                                                                                  |
+| each `vacuums` entry       | `name`, `device`, `prefix`                                                                                                      |
 
 ### Bind Interface
 
@@ -311,7 +337,7 @@ python3 -c "import random; b=random.randbytes(6); excluded={d*8 for d in '012345
   (`Settings → Sync Interfaces → MQTT → Send on change → Retain`) so the broker
   delivers the last `/g` and `/c` values when the bridge subscribes.
 - **MQTT reconnect**: re-subscribes and refreshes state automatically. The
-  Zigbee2MQTT and WLED connection waits 1 second before the first retry and
+  shared Zigbee2MQTT, WLED, and Rockville connection waits 1 second before the first retry and
   doubles the wait up to 60 seconds.
 - **Broker refusals**: that connection logs a refused login as
   `MQTT error: Connection refused: ...` and retries with the same backoff, so
@@ -431,8 +457,9 @@ On Debian or Ubuntu, install the broker build packages with
 `make test-broker-deps`. Then run `make test-integration` on Node.js 26. The
 target builds the pinned Mosquitto release and runs the round trips in
 `integration/` through it: WLED, heated bedding over paired HAP HTTP and MQTT 5
-connections, a broker that requires a login and restricts topics, brokers that
-refuse subscriptions or drop every session, and a malformed `mqtt.url`. Use
+connections, Rockville vacuum switches over paired HAP and MQTT, a broker that
+requires a login and restricts topics, brokers that refuse subscriptions or drop
+every session, and a malformed `mqtt.url`. Use
 `NODE=/path/to/node make test-integration` to select the runtime. The simulated
 MQTT controller exercises the contract; actual Sunbeam, Home app, and Siri
 qualification still requires hardware.

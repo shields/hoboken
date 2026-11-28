@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { vacuumStatus } from "../src/vacuum-profile.ts";
 import type { StatusData } from "../src/metrics.ts";
 
 export const fixtureData: StatusData = {
@@ -79,6 +80,16 @@ export const fixtureData: StatusData = {
       capabilities: ["fan", "fan_speed"],
       state: { fan_state: "ON", fan_mode: "medium" },
     },
+  ],
+  vacuums: [
+    vacuumStatus(
+      { name: "Downstairs Vacuum", prefix: "rockville", device: "downstairs" },
+      new Map([
+        ["rockville/downstairs/state", "segment_cleaning"],
+        ["rockville/downstairs/availability", "online"],
+        ["rockville/bridge/availability", "online"],
+      ]),
+    ),
   ],
   curtains: [
     {

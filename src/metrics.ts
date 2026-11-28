@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import type { vacuumStatus } from "./vacuum-profile.ts";
 import { curtainMotion, type CurtainState } from "./curtain-profile.ts";
 import { createServer } from "node:http";
 import type { Server, ServerResponse } from "node:http";
@@ -154,6 +155,7 @@ export interface StatusData {
   hap: { connections: HapConnection[] };
   bridge: { name: string; version: string };
   devices: DeviceStatus[];
+  vacuums?: ReturnType<typeof vacuumStatus>[];
   curtains?: {
     name: string;
     topic: string;
@@ -701,6 +703,20 @@ function renderStatusContent(data: StatusData): string {
       : null;
     const badge = "zones" in entry ? "heated bedding group" : "heated bedding";
     devicesHtml += `<div class="device"><h2>${escapeHtml(entry.name)} <span class="type-badge">${badge}</span></h2><div class="label">HomeKit</div>${renderHeatedBeddingHomeKit(summary)}${zones.map((zone) => renderHeatedBeddingZone(zone)).join("")}</div>`;
+  }
+
+  for (const vacuum of data.vacuums ?? []) {
+    const rows = (["state", "availability", "bridgeAvailability"] as const)
+      .map(
+        (key) =>
+          `<tr><td class="key">${escapeHtml(vacuum.topics[key])}</td><td>${escapeHtml(vacuum[key] ?? "No report")}</td></tr>`,
+      )
+      .join("");
+    const homeKit =
+      vacuum.on === undefined
+        ? '<span class="na">No Response</span>'
+        : `<table><tbody><tr><td class="key">On</td><td>${String(vacuum.on)}</td></tr></tbody></table>`;
+    devicesHtml += `<div class="device"><h2>${escapeHtml(vacuum.name)} <span class="type-badge">vacuum</span></h2><div class="label">HomeKit</div>${homeKit}<div class="label">MQTT</div><table><tbody>${rows}</tbody></table></div>`;
   }
 
   for (const curtain of data.curtains ?? []) {

@@ -20,6 +20,7 @@ import {
   heatedBeddingIdentity,
   heatedBeddingTopics,
 } from "./heated-bedding-profile.ts";
+import { vacuumTopics, type VacuumConfig } from "./vacuum-profile.ts";
 import { curtainIdentity } from "./curtain-profile.ts";
 import { tucsonTopic } from "./tucson-profile.ts";
 import type { CurtainConfig } from "./curtain-source.ts";
@@ -111,6 +112,7 @@ export interface Config {
   devices: DeviceConfig[];
   heatedBedding?: HeatedBeddingConfig[];
   curtains?: CurtainConfig[];
+  vacuums?: VacuumConfig[];
   metrics?: MetricsConfig;
 }
 
@@ -126,6 +128,7 @@ const CONFIG_FIELDS: Fields<Config> = {
   devices: true,
   heatedBedding: true,
   curtains: true,
+  vacuums: true,
   metrics: true,
 };
 const BRIDGE_FIELDS: Fields<BridgeConfig> = {
@@ -170,6 +173,11 @@ const HEATED_BEDDING_FIELDS: Fields<
   controller: true,
   zone: true,
   zones: true,
+};
+const VACUUM_FIELDS: Fields<VacuumConfig> = {
+  name: true,
+  device: true,
+  prefix: true,
 };
 const CURTAIN_FIELDS: Fields<CurtainConfig> = {
   name: true,
@@ -292,8 +300,13 @@ export function validateConfig(data: unknown): Config {
       : validateHeatedBedding(obj.heatedBedding);
   const curtains =
     obj.curtains === undefined ? undefined : validateCurtains(obj.curtains);
+  const vacuums =
+    obj.vacuums === undefined ? undefined : validateVacuums(obj.vacuums);
   const hasEndpoints =
-    (heatedBedding?.length ?? 0) + (curtains?.length ?? 0) > 0;
+    (heatedBedding?.length ?? 0) +
+      (curtains?.length ?? 0) +
+      (vacuums?.length ?? 0) >
+    0;
   const rawDevices =
     obj.devices === undefined && hasEndpoints ? [] : obj.devices;
   if (
@@ -307,7 +320,12 @@ export function validateConfig(data: unknown): Config {
     validateDevice(d, i),
   );
   if (hasEndpoints)
-    validateTucsonTopics(devices, heatedBedding ?? [], curtains ?? []);
+    validateEndpointTopics(
+      devices,
+      heatedBedding ?? [],
+      curtains ?? [],
+      vacuums ?? [],
+    );
 
   const topics = new Set<string>();
   for (const device of devices) {
@@ -383,6 +401,7 @@ export function validateConfig(data: unknown): Config {
     devices,
     ...(heatedBedding ? { heatedBedding } : {}),
     ...(curtains ? { curtains } : {}),
+    ...(vacuums ? { vacuums } : {}),
     ...(metrics ? { metrics } : {}),
   };
 }
@@ -405,20 +424,43 @@ function validateEntries<T>(
   });
 }
 
+function displayName(name: unknown, label: string): string {
+  if (
+    typeof name !== "string" ||
+    name.trim().length === 0 ||
+    name.length > 256 ||
+    name.includes("\0")
+  )
+    throw new Error(
+      `${label}.name must be a non-empty display name of at most 256 characters`,
+    );
+  return name;
+}
+
+function validateVacuums(data: unknown): VacuumConfig[] {
+  const devices = new Set<string>();
+  return validateEntries(data, "vacuums", VACUUM_FIELDS, (value, label) => {
+    const name = displayName(value.name, label);
+    const prefix = value.prefix === undefined ? "rockville" : value.prefix;
+    if (typeof prefix !== "string" || !prefix || /[+#\s\0]/u.test(prefix))
+      throw new Error(`${label}.prefix must be a Rockville topic prefix`);
+    const device = value.device;
+    if (typeof device !== "string" || !device || /[+/\s#\0]/u.test(device))
+      throw new Error(`${label}.device must be a Rockville device name`);
+    const config = { name, prefix, device };
+    const { base } = vacuumTopics(config);
+    if (devices.has(base))
+      throw new Error(`${label}: duplicate vacuum "${base}"`);
+    devices.add(base);
+    return config;
+  });
+}
+
 function validateEndpointBase(
   value: Record<string, unknown>,
   label: string,
 ): Pick<TucsonEndpointConfig, "name" | "prefix" | "controller"> {
-  if (
-    typeof value.name !== "string" ||
-    value.name.trim().length === 0 ||
-    value.name.length > 256 ||
-    value.name.includes("\0")
-  ) {
-    throw new Error(
-      `${label}.name must be a non-empty display name of at most 256 characters`,
-    );
-  }
+  const name = displayName(value.name, label);
   if (
     typeof value.prefix !== "string" ||
     value.prefix.length > 256 ||
@@ -435,7 +477,7 @@ function validateEndpointBase(
     );
   }
   return {
-    name: value.name,
+    name,
     prefix: value.prefix,
     controller: value.controller,
   };
@@ -526,17 +568,18 @@ function validateCurtains(data: unknown): CurtainConfig[] {
   });
 }
 
-function validateTucsonTopics(
+function validateEndpointTopics(
   devices: DeviceConfig[],
   heatedBedding: readonly HeatedBeddingConfig[],
   curtains: readonly CurtainConfig[],
+  vacuums: readonly VacuumConfig[],
 ): void {
   const owners = new Map<string, string>();
   const claim = (route: string, owner: string): void => {
     const existing = owners.get(route);
     if (existing !== undefined && existing !== owner) {
       throw new Error(
-        `Tucson topic "${route}" is used by both ${existing} and ${owner}`,
+        `MQTT topic "${route}" is used by both ${existing} and ${owner}`,
       );
     }
     owners.set(route, owner);
@@ -570,10 +613,17 @@ function validateTucsonTopics(
     claim(`${topic}/availability`, `curtain ${topic}`);
     claimEndpoint(topic, `curtain ${topic}`);
   }
+  for (const vacuum of vacuums) {
+    const { base, state, availability, bridgeAvailability, command } =
+      vacuumTopics(vacuum);
+    claim(bridgeAvailability, `Rockville bridge ${vacuum.prefix}`);
+    for (const route of [state, availability, command])
+      claim(route, `vacuum ${base}`);
+  }
   for (const device of devices) {
     if (device.topic.includes("+") || device.topic.includes("#")) {
       throw new Error(
-        "wildcard device topics cannot accompany Tucson endpoints",
+        "wildcard device topics cannot accompany configured endpoints",
       );
     }
     const routes =
@@ -586,7 +636,7 @@ function validateTucsonTopics(
           ]
         : [device.topic, `${device.topic}/set`, `${device.topic}/get`];
     if (routes.some((topic) => owners.has(topic))) {
-      throw new Error("device route collides with a Tucson topic");
+      throw new Error("device route collides with an endpoint topic");
     }
   }
 }

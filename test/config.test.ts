@@ -79,6 +79,66 @@ function validConfig() {
 }
 
 describe("validateConfig", () => {
+  test("Rockville defaults, identities, and shared MQTT routes", () => {
+    const vacuum = { name: "Downstairs", device: "down-stairs" };
+    const config = { ...validConfig(), devices: undefined, vacuums: [vacuum] };
+    expect(validateConfig(config)).toMatchObject({
+      devices: [],
+      vacuums: [{ ...vacuum, prefix: "rockville" }],
+    });
+    const separate = { ...vacuum, prefix: "Second/site" };
+    expect(
+      validateConfig({ ...config, vacuums: [vacuum, separate] }).vacuums?.[1],
+    ).toEqual(separate);
+    for (const [entry, problem] of [
+      [{ ...vacuum, name: " " }, ".name"],
+      [{ ...vacuum, device: "" }, ".device"],
+      [{ ...vacuum, device: "bad/name" }, ".device"],
+      [{ ...vacuum, device: "two words" }, ".device"],
+      [{ ...vacuum, device: "bad\0name" }, ".device"],
+      [{ ...vacuum, device: 1 }, ".device"],
+      [{ ...vacuum, device: "bridge" }, "used by both"],
+      [{ ...vacuum, prefix: null }, ".prefix"],
+      [{ ...vacuum, prefix: "" }, ".prefix"],
+      [{ ...vacuum, prefix: "a/+" }, ".prefix"],
+      [{ ...vacuum, prefix: "a b" }, ".prefix"],
+      [{ ...vacuum, prefix: "bad\0prefix" }, ".prefix"],
+      [{ ...vacuum, device: "#" }, ".device"],
+      [{ ...vacuum, typo: true }, "unknown field"],
+    ] as const) {
+      expect(() => validateConfig({ ...config, vacuums: [entry] })).toThrow(
+        problem,
+      );
+    }
+    expect(() =>
+      validateConfig({
+        ...config,
+        vacuums: [vacuum, { ...vacuum, name: "Other", prefix: "rockville" }],
+      }),
+    ).toThrow("duplicate vacuum");
+    for (const topic of [
+      "rockville/bridge/availability",
+      ...["state", "availability", "command/set"].map(
+        (suffix) => `rockville/down-stairs/${suffix}`,
+      ),
+    ]) {
+      expect(() =>
+        validateConfig({
+          ...config,
+          devices: [{ ...validConfig().devices[0], topic }],
+        }),
+      ).toThrow("collides");
+    }
+    expect(() =>
+      validateConfig({
+        ...config,
+        curtains: [
+          { name: "Window", prefix: "rockville", controller: "window" },
+        ],
+      }),
+    ).toThrow("used by both");
+  });
+
   const heatedBedding = {
     name: "Bed Side A",
     prefix: "tuya",
@@ -363,7 +423,7 @@ describe("validateConfig", () => {
         zones: ["result", "side_c"],
       };
       expect(() => validateConfig(groupConfig(heatedBedding, nested))).toThrow(
-        'Tucson topic "tuya/bed/side_a/result" is used by both zone tuya/bed/side_a and zone tuya/bed/side_a/result',
+        'MQTT topic "tuya/bed/side_a/result" is used by both zone tuya/bed/side_a and zone tuya/bed/side_a/result',
       );
     });
 
@@ -376,7 +436,7 @@ describe("validateConfig", () => {
       const data = validConfig();
       data.devices[0]!.topic = topic;
       expect(() => validateConfig({ ...data, heatedBedding: [group] })).toThrow(
-        "collides with a Tucson topic",
+        "collides with an endpoint topic",
       );
     });
 
@@ -384,7 +444,7 @@ describe("validateConfig", () => {
       const data = validConfig();
       data.devices[0]!.topic = "tuya/#";
       expect(() => validateConfig({ ...data, heatedBedding: [group] })).toThrow(
-        "wildcard device topics cannot accompany Tucson endpoints",
+        "wildcard device topics cannot accompany configured endpoints",
       );
     });
 
@@ -482,7 +542,7 @@ describe("validateConfig", () => {
           }),
         ),
       ).toBe(
-        'Tucson topic "tuya/bed/availability" is used by both controller tuya/bed and curtain tuya/bed',
+        'MQTT topic "tuya/bed/availability" is used by both controller tuya/bed and curtain tuya/bed',
       );
     });
 
@@ -499,7 +559,7 @@ describe("validateConfig", () => {
             }),
           ),
         ).toBe(
-          `Tucson topic "${topic}" is used by both zone ${topic} and curtain ${topic}`,
+          `MQTT topic "${topic}" is used by both zone ${topic} and curtain ${topic}`,
         );
       },
     );
@@ -516,7 +576,7 @@ describe("validateConfig", () => {
           }),
         ),
       ).toBe(
-        'Tucson topic "tuya/bed/side_a" is used by both zone tuya/bed/side_a and curtain tuya/bed/side_a',
+        'MQTT topic "tuya/bed/side_a" is used by both zone tuya/bed/side_a and curtain tuya/bed/side_a',
       );
     });
 
@@ -532,7 +592,7 @@ describe("validateConfig", () => {
               { ...curtain, prefix: "tuya/window", controller },
             ],
           }),
-        ).toThrow(`Tucson topic "${topic}"`);
+        ).toThrow(`MQTT topic "${topic}"`);
       },
     );
 
@@ -548,7 +608,7 @@ describe("validateConfig", () => {
       const data = validConfig();
       data.devices[0]!.topic = topic;
       expect(() => validateConfig({ ...data, curtains: [curtain] })).toThrow(
-        "collides with a Tucson topic",
+        "collides with an endpoint topic",
       );
     });
 
@@ -556,7 +616,7 @@ describe("validateConfig", () => {
       const data = validConfig();
       data.devices[0]!.topic = "tuya/#";
       expect(() => validateConfig({ ...data, curtains: [curtain] })).toThrow(
-        "wildcard device topics cannot accompany Tucson endpoints",
+        "wildcard device topics cannot accompany configured endpoints",
       );
     });
   });
@@ -595,7 +655,7 @@ describe("validateConfig", () => {
       data.devices[0]!.topic = topic;
       expect(() =>
         validateConfig({ ...data, heatedBedding: [heatedBedding] }),
-      ).toThrow("collides with a Tucson topic");
+      ).toThrow("collides with an endpoint topic");
     },
   );
 
@@ -619,7 +679,7 @@ describe("validateConfig", () => {
     };
     expect(() =>
       validateConfig({ ...data, heatedBedding: [alternate] }),
-    ).toThrow("collides with a Tucson topic");
+    ).toThrow("collides with an endpoint topic");
   });
 
   test.each([
@@ -640,7 +700,7 @@ describe("validateConfig", () => {
           ...validConfig(),
           heatedBedding: [heatedBedding, nested],
         }),
-      ).toThrow(`Tucson topic "${topic}" is used by both`);
+      ).toThrow(`MQTT topic "${topic}" is used by both`);
     },
   );
 
@@ -651,7 +711,7 @@ describe("validateConfig", () => {
       data.devices[0]!.topic = topic;
       expect(() =>
         validateConfig({ ...data, heatedBedding: [heatedBedding] }),
-      ).toThrow("wildcard device topics cannot accompany Tucson endpoints");
+      ).toThrow("wildcard device topics cannot accompany configured endpoints");
     },
   );
 
@@ -1335,7 +1395,8 @@ describe("validateConfig", () => {
     }[] = [
       {
         path: "config",
-        fields: "bridge, mqtt, devices, heatedBedding, curtains, and metrics",
+        fields:
+          "bridge, mqtt, devices, heatedBedding, curtains, vacuums, and metrics",
         required: "devices",
         build: (changes) => patched(validConfig(), changes),
       },
