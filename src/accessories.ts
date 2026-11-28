@@ -17,11 +17,16 @@ import {
   AdaptiveLightingController,
   Categories,
   Characteristic,
+  type CharacteristicChange,
   HAPStatus,
   HapStatusError,
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
+import {
+  restoredTransition,
+  type SavedSchedule,
+} from "./adaptive-lighting-restore.ts";
 import { hasAdaptiveLighting } from "./adaptive-lighting.ts";
 import type { Capability, DeviceConfig, SceneConfig } from "./config.ts";
 import {
@@ -30,6 +35,7 @@ import {
   colorTempToHueSaturation,
   FAN_SPEED_STEP,
   type HomeKitState,
+  isSiriWhite,
 } from "./convert.ts";
 // "adaptive-lighting" is the controller's update; "adaptive-lighting-now" is
 // the remembered temperature of a light that someone turned on elsewhere.
@@ -43,6 +49,20 @@ export type GetStateFn = (topic: string) => HomeKitState | undefined;
 // Called with each temperature that Adaptive Lighting sets, which the callee
 // may record. Returns whether to publish it.
 export type AdaptiveTemperatureFn = (temperature: number) => boolean;
+
+// What lets Siri's white turn Adaptive Lighting back on: the light's last
+// schedule from the home hub, kept by accessory UUID because HAP-NodeJS erases
+// its own copy whenever Adaptive Lighting goes off.
+export interface AdaptiveWhite {
+  load(id: string): SavedSchedule | undefined;
+  save(id: string, saved: SavedSchedule): void;
+  forget(id: string): void;
+  // Takes the temperature of a restored schedule, which the white's own write
+  // carries, without publishing it.
+  remember(temperature: number): void;
+  restored(): void;
+  failed(error: unknown): void;
+}
 
 type SetPayloadFn = (
   payload: Record<string, unknown>,
@@ -58,6 +78,14 @@ export function adaptiveLightingController(
   accessory: Accessory,
 ): AdaptiveLightingController | undefined {
   return adaptiveLightingControllers.get(accessory);
+}
+
+const turnOffs = new WeakMap<Accessory, () => void>();
+
+// Turns Adaptive Lighting off for a reason that leaves the saved schedule in
+// place, as a HomeKit write of a color does.
+export function turnOffAdaptiveLighting(accessory: Accessory): void {
+  turnOffs.get(accessory)?.();
 }
 
 function setByAdaptiveLighting(context: unknown): boolean {
@@ -149,6 +177,7 @@ export function createLightAccessory(
   getState: GetStateFn,
   prePublishCheck?: () => void,
   adaptiveTemperature?: AdaptiveTemperatureFn,
+  white?: AdaptiveWhite,
 ): Accessory {
   const accessory = new Accessory(
     device.name,
@@ -159,6 +188,55 @@ export function createLightAccessory(
   const service = new Service.Lightbulb(device.name);
   accessory.addService(service);
   let controller: AdaptiveLightingController | undefined;
+  let saved = white?.load(accessory.UUID);
+  let restoring = false;
+  // Set while Adaptive Lighting goes off for a write or for the bridge, which
+  // leave the saved schedule in place.
+  let expected = false;
+  const armed = new Set<Characteristic>();
+
+  const save = (next: SavedSchedule) => {
+    saved = next;
+    try {
+      white?.save(accessory.UUID, next);
+    } catch (error) {
+      white?.failed(error);
+    }
+  };
+
+  const restore = (schedule: SavedSchedule) => {
+    const transition = restoredTransition(schedule.schedule, Date.now());
+    if (!transition) return;
+    restoring = true;
+    // The controller takes the schedule before the first await.
+    void (async () => {
+      try {
+        await service
+          .getCharacteristic(
+            Characteristic.CharacteristicValueTransitionControl,
+          )
+          .handleSetRequest(transition);
+      } catch (error) {
+        white?.failed(error);
+      }
+    })();
+    restoring = false;
+    const active = controller?.serialize()?.activeTransition;
+    if (!active) return;
+    save({ ...schedule, restored: active.transitionStartBuffer });
+    white?.restored();
+  };
+
+  // HAP-NodeJS turns Adaptive Lighting off for any HomeKit write of Hue or
+  // Saturation, after the write is published. Siri's white goes out as
+  // Adaptive Lighting's temperature, so its changes count as the controller's.
+  const keepAdaptiveLighting = () => {
+    if (!controller) return;
+    if (!controller.isAdaptiveLightingActive() && saved) restore(saved);
+    armed.add(service.getCharacteristic(Characteristic.Hue));
+    armed.add(service.getCharacteristic(Characteristic.Saturation));
+  };
+
   const setPayload = createCoalescingPublish(
     device.topic,
     (topic, payload, source) => {
@@ -167,11 +245,32 @@ export function createLightAccessory(
       // is flushed after the same request's color or temperature has turned
       // Adaptive Lighting off.
       if (source && controller?.isAdaptiveLightingActive() !== true) return;
+      if (white && isSiriWhite(payload)) keepAdaptiveLighting();
       if (source) publish(topic, payload, source);
       else publish(topic, payload);
     },
     prePublishCheck,
   );
+
+  const onAdaptiveTemperature =
+    adaptiveTemperature &&
+    ((temperature: number) => {
+      if (restoring && white) {
+        white.remember(temperature);
+        return false;
+      }
+      const accepted = adaptiveTemperature(temperature);
+      const active = controller?.serialize()?.activeTransition;
+      if (
+        white &&
+        active &&
+        active.transitionStartBuffer !== saved?.restored &&
+        (active.transitionId !== saved?.schedule.transitionId ||
+          active.transitionStartBuffer !== saved.schedule.transitionStartBuffer)
+      )
+        save({ schedule: active });
+      return accepted;
+    });
 
   addSimpleCharacteristic(
     service,
@@ -203,7 +302,7 @@ export function createLightAccessory(
       getState,
       device.topic,
       (v) => clampColorTemp(Number(v)),
-      adaptiveTemperature,
+      onAdaptiveTemperature,
     );
     // HAP-NodeJS warns when a new range excludes the value that is there.
     colorTemperature.updateValue(minValue);
@@ -230,11 +329,49 @@ export function createLightAccessory(
   }
 
   if (hasAdaptiveLighting(device)) {
-    controller = new AdaptiveLightingController(service);
+    // Ahead of the controller's listeners, which it adds each time Adaptive
+    // Lighting goes on.
+    for (const type of [
+      Characteristic.Hue,
+      Characteristic.Saturation,
+      Characteristic.ColorTemperature,
+    ]) {
+      if (!service.testCharacteristic(type)) continue;
+      const characteristic = service.getCharacteristic(type);
+      characteristic.on("change", (change: CharacteristicChange) => {
+        if ((change.reason as string) !== "write") return;
+        if (armed.delete(characteristic)) {
+          change.context = { controller };
+          return;
+        }
+        expected = true;
+        queueMicrotask(() => {
+          expected = false;
+        });
+      });
+    }
+    const lightController = new AdaptiveLightingController(service);
+    controller = lightController;
     // HAP-NodeJS restores a persisted transition when the bridge publishes, so
     // the controller joins the accessory before that.
-    accessory.configureController(controller);
-    adaptiveLightingControllers.set(accessory, controller);
+    accessory.configureController(lightController);
+    adaptiveLightingControllers.set(accessory, lightController);
+    turnOffs.set(accessory, () => {
+      expected = true;
+      lightController.disableAdaptiveLighting();
+      expected = false;
+    });
+    // Off for any other reason is the Home app's switch, the hub's, or the end
+    // of the schedule, so white stays a fixed white until it is on again.
+    service
+      .getCharacteristic(
+        Characteristic.CharacteristicValueActiveTransitionCount,
+      )
+      .on("change", (change: CharacteristicChange) => {
+        if (change.newValue !== 0 || expected || !white || !saved) return;
+        saved = undefined;
+        white.forget(accessory.UUID);
+      });
   }
 
   return accessory;

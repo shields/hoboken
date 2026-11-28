@@ -111,6 +111,17 @@ make demo               # Serve the status page with sample data
   writes are flushed before the changes they cause are emitted. A test of what
   follows a write, such as the temperature that Adaptive Lighting recomputes
   for a Brightness, must start the writes inside `process.nextTick`.
+- The bridge's `change` listeners on Hue, Saturation, and ColorTemperature,
+  which keep Adaptive Lighting on for Siri's white and tell a deliberate off
+  from a write, must be added before `configureController`, so that they run
+  ahead of the controller's. The one on ActiveTransitionCount, which forgets
+  the saved schedule on a deliberate off, must be added after it, because
+  `configureController` sets that characteristic to 0, which the listener
+  would read as a deliberate off. The bridge turns Adaptive Lighting off only
+  through `turnOffAdaptiveLighting`, which keeps the saved schedule; a bare
+  `disableAdaptiveLighting` reads as the Home app's switch and forgets it.
+- A restored schedule is never saved as the light's schedule from the hub.
+  Rotating a rotated one again would grow it by an entry each time.
 - HAP-NodeJS checks a controller's write against a characteristic's range but
   not its `minStep`. A `fan_speed` device's `RotationSpeed` off the
   `FAN_SPEED_STEP` grid reaches `onSet` and stays on the characteristic until

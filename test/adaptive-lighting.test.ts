@@ -27,6 +27,7 @@ import {
   showsColor,
   turnsLightOn,
   withAdaptiveTemperature,
+  withAdaptiveWhite,
   writtenState,
   zigbeeOffTemperatureMessage,
 } from "../src/adaptive-lighting.ts";
@@ -201,6 +202,20 @@ describe("adaptive lighting decisions", () => {
     expect(withAdaptiveTemperature(brightness, 350, true, { on: true })).toBe(
       brightness,
     );
+  });
+
+  test("Siri's white is Adaptive Lighting's temperature while it is on", () => {
+    const white = { hue: 0, saturation: 0, brightness: 100, on: true };
+    expect(withAdaptiveWhite(white, 350, true)).toEqual({
+      brightness: 100,
+      on: true,
+      color_temp: 350,
+    });
+    expect(white).toEqual({ hue: 0, saturation: 0, brightness: 100, on: true });
+    expect(withAdaptiveWhite(white, 350, false)).toBe(white);
+    expect(withAdaptiveWhite(white, undefined, true)).toBe(white);
+    const swatch = { hue: 228, saturation: 56 };
+    expect(withAdaptiveWhite(swatch, 350, true)).toBe(swatch);
   });
 
   test("a color is the minimum temperature without that temperature's own color", () => {
@@ -552,6 +567,20 @@ describe("a light with Adaptive Lighting", () => {
     );
     await flush();
     expect(controller!.isAdaptiveLightingActive()).toBe(true);
+  });
+
+  test("without the bridge's memory of schedules Siri's white turns it off", async () => {
+    const { accessory, controller, characteristic } = setup();
+    await hubStartsAdaptiveLighting(accessory);
+    process.nextTick(() => {
+      void characteristic(Characteristic.Hue).handleSetRequest(0, {} as never);
+      void characteristic(Characteristic.Saturation).handleSetRequest(
+        0,
+        {} as never,
+      );
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(controller!.isAdaptiveLightingActive()).toBe(false);
   });
 
   test("without a hook a temperature that Adaptive Lighting sets is published like a write", async () => {

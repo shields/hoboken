@@ -28,6 +28,7 @@ import {
   Characteristic,
   HAPStatus,
   HapStatusError,
+  HAPStorage,
   Service,
   uuid,
 } from "@homebridge/hap-nodejs";
@@ -69,7 +70,9 @@ import {
   zigbeeOffTemperatureMessage,
   fadeTemperature,
   withAdaptiveTemperature,
+  withAdaptiveWhite,
 } from "./adaptive-lighting.ts";
+import { parseSavedSchedule } from "./adaptive-lighting-restore.ts";
 import {
   BRIGHTNESS_SETTLE_MS,
   decideBrightnessHold,
@@ -92,10 +95,11 @@ import {
   createFanAccessory,
   createLightAccessory,
   createSceneAccessory,
+  turnOffAdaptiveLighting,
   updateAccessoryState,
   updateFanAccessoryState,
 } from "./accessories.ts";
-import type { PublishFn } from "./accessories.ts";
+import type { AdaptiveWhite, PublishFn } from "./accessories.ts";
 import {
   type HomeKitState,
   type RawState,
@@ -602,8 +606,13 @@ export async function startBridge(
         adaptive && cachedRaw
           ? protocols[device.type].toHomeKit(cachedRaw, cachedRaw, device)
           : undefined;
-      const payload = withAdaptiveTemperature(
+      const white = withAdaptiveWhite(
         written,
+        adaptiveTemperatures.get(topic),
+        adaptive,
+      );
+      const payload = withAdaptiveTemperature(
+        white,
         adaptiveTemperatures.get(topic),
         adaptive,
         adaptive ? { ...reported, ...recentlyWritten(topic) } : {},
@@ -622,7 +631,7 @@ export async function startBridge(
         ? `Adaptive Lighting for "${device.name}"`
         : `HomeKit write for "${device.name}"`;
       log.log(
-        `${origin}: ${JSON.stringify(written)}${payload === written ? "" : " with the temperature of Adaptive Lighting"} published to ${mqttTopic(topic)} as ${message}`,
+        `${origin}: ${JSON.stringify(written)}${white === written ? "" : " as Adaptive Lighting's white"}${payload === white ? "" : " with the temperature of Adaptive Lighting"} published to ${mqttTopic(topic)} as ${message}`,
       );
       // What the light showed for a temperature that Adaptive Lighting asked
       // for says nothing once HomeKit has set its color or temperature.
@@ -642,8 +651,11 @@ export async function startBridge(
       if (raw && cached) stateCache.set(topic, { ...cached, ...raw });
       // The controller's own values stand for what it wrote: a white is
       // published as a temperature, but the write was a hue and saturation.
+      // The temperature that a turn-on carries stays unshown until the light
+      // reports it, because a bulb may clamp it.
+      const shown = white === written ? payload : written;
       const state = Object.fromEntries(
-        Object.entries(homeKit).filter(([key]) => !(key in payload)),
+        Object.entries(homeKit).filter(([key]) => !(key in shown)),
       );
       entry.updateState(entry.accessory, state, device.capabilities);
     };
@@ -734,7 +746,7 @@ export async function startBridge(
     const adaptive = adaptiveLightingController(entry.accessory);
     if (adaptive?.isAdaptiveLightingActive() !== true) return;
     log.log(`Adaptive Lighting off for "${entry.device.name}": ${reason}`);
-    adaptive.disableAdaptiveLighting();
+    turnOffAdaptiveLighting(entry.accessory);
   }
   const wledTopicMap = new Map<string, { device: string; sub: string }>();
 
@@ -811,6 +823,43 @@ export async function startBridge(
       return accepted;
     };
 
+    const white: AdaptiveWhite = {
+      load: (id) => {
+        const stored: unknown = HAPStorage.storage().getItem(scheduleKey(id));
+        if (stored === undefined) return;
+        const saved = parseSavedSchedule(stored);
+        if (!saved)
+          log.error(
+            `Adaptive Lighting for "${device.name}": the saved schedule is invalid and is ignored`,
+          );
+        return saved;
+      },
+      save: (id, saved) => {
+        HAPStorage.storage().setItemSync(scheduleKey(id), saved);
+        if (saved.restored === undefined)
+          log.log(
+            `Adaptive Lighting schedule for "${device.name}" from the home hub`,
+          );
+      },
+      forget: (id) => {
+        HAPStorage.storage().removeItemSync(scheduleKey(id));
+        log.log(
+          `Adaptive Lighting for "${device.name}" was switched off; white is fixed until it is switched on again`,
+        );
+      },
+      remember: (temperature) => {
+        adaptiveTemperatures.set(device.topic, temperature);
+      },
+      restored: () => {
+        log.log(`Adaptive Lighting restored for "${device.name}"`);
+      },
+      failed: (error) => {
+        log.error(
+          `Adaptive Lighting for "${device.name}": ${error instanceof Error ? error.message : `HAP status ${String(error)}`}`,
+        );
+      },
+    };
+
     const isFan = device.capabilities.includes("fan");
     const accessory = isFan
       ? createFanAccessory(device, publish, getState, prePublishCheck)
@@ -820,6 +869,7 @@ export async function startBridge(
           getState,
           prePublishCheck,
           adaptiveTemperature,
+          device.capabilities.includes("color_hs") ? white : undefined,
         );
     setAccessoryInfo(accessory, "Hoboken", device.topic, device.topic, version);
     bridge.addBridgedAccessory(accessory);
@@ -1308,6 +1358,10 @@ export async function startBridge(
       log.log("Shutdown complete");
     },
   };
+}
+
+function scheduleKey(id: string): string {
+  return `hoboken.adaptive-lighting.${id}`;
 }
 
 function setAccessoryInfo(

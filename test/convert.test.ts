@@ -23,8 +23,8 @@ import {
   colorTempToHueSaturation,
   DEFAULT_WHITE_COLOR_TEMP,
   hueSaturationToColorTemp,
-  WARM_WHITE_COLOR_TEMP,
   z2mWriteToHomeKit,
+  isSiriWhite,
   isWhite,
   homeKitBrightnessToZ2M,
   homeKitBrightnessToWled,
@@ -70,6 +70,27 @@ describe("isWhite", () => {
   test("a hue without a saturation is not white", () => {
     expect(isWhite(0, undefined)).toBe(false);
     expect(isWhite(228, undefined)).toBe(false);
+  });
+});
+
+describe("isSiriWhite", () => {
+  test("Hue 0 with Saturation 0 is Siri's white", () => {
+    expect(isSiriWhite({ hue: 0, saturation: 0 })).toBe(true);
+    expect(
+      isSiriWhite({ on: true, brightness: 78, hue: 0, saturation: 0 }),
+    ).toBe(true);
+  });
+
+  test("other whites are not Siri's", () => {
+    expect(isSiriWhite({ saturation: 0 })).toBe(false);
+    expect(isSiriWhite({ hue: 0 })).toBe(false);
+    expect(isSiriWhite({ hue: 30, saturation: 0 })).toBe(false);
+    expect(isSiriWhite({ hue: 0, saturation: 1 })).toBe(false);
+    expect(isSiriWhite({ hue: 228, saturation: 56 })).toBe(false);
+  });
+
+  test("a write with a temperature as well is not Siri's white", () => {
+    expect(isSiriWhite({ hue: 0, saturation: 0, color_temp: 250 })).toBe(false);
   });
 });
 
@@ -545,7 +566,7 @@ describe("a WLED device with white segments", () => {
 
   test.each([
     ["white", 0, 0, [167, 255, 167, 255]],
-    ["warm white", 31, 33, [0, 255, 0, 255]],
+    ["warm white", 31, 33, [167, 255, 167, 255]],
     ["cool white", 208, 17, [255, 199, 255, 199]],
     ["a Home app temperature swatch", 30, 48, [255, 249, 255, 249]],
   ])("%s lights the white segments", (_, hue, saturation, col) => {
@@ -1122,11 +1143,10 @@ describe("homeKitToZ2m", () => {
     ).toEqual({ color: { hue: 30, saturation: 5 } });
   });
 
-  test("warm white (H=31/S=33) sends 2200 K", () => {
-    expect(WARM_WHITE_COLOR_TEMP).toBe(454);
+  test("warm white (H=31/S=33) sends 2700 K", () => {
     expect(
       homeKitToZ2m({ hue: 31, saturation: 33 }, { color_temp: 300 }),
-    ).toEqual({ color_temp: WARM_WHITE_COLOR_TEMP });
+    ).toEqual({ color_temp: 370 });
   });
 
   test("cool white (H=208/S=17) sends 4000 K", () => {
@@ -1210,7 +1230,7 @@ describe("homeKitToZ2m", () => {
       homeKitToZ2m({ hue: 31, saturation: 33 }, undefined, {
         whiteColorTemp: 250,
       }),
-    ).toEqual({ color_temp: WARM_WHITE_COLOR_TEMP });
+    ).toEqual({ color_temp: DEFAULT_WHITE_COLOR_TEMP });
   });
 
   test("warm white without white LEDs stays a color", () => {
@@ -1225,7 +1245,7 @@ describe("homeKitToZ2m", () => {
       color_temp: DEFAULT_WHITE_COLOR_TEMP,
     });
     expect(homeKitToZ2m({ hue: 31, saturation: 33 }, undefined, light)).toEqual(
-      { color_temp: WARM_WHITE_COLOR_TEMP },
+      { color_temp: DEFAULT_WHITE_COLOR_TEMP },
     );
   });
 

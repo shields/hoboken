@@ -68,10 +68,14 @@ capabilities of its most capable member.
 "Set the lights to white" arrives from HomeKit as a color. For a Zigbee2MQTT
 light that reports a `color_temp`, or that has `whiteColorTemp` or the
 `color_temp` capability, Hoboken publishes a color temperature instead, so that
-the bulb uses its white LEDs. White is the device's `whiteColorTemp` in mireds
-(1,000,000 / kelvins, from 140 to 500), or 370 (2700 K) without one; Siri's
-"warm white" is 454 (2200 K) and "cool white" 250 (4000 K), and its halogen
-and fluorescents are temperatures too. The Home app's Temperature tab and
+the bulb uses its white LEDs. On a light with Adaptive Lighting, Siri's white
+is Adaptive Lighting's temperature: it keeps Adaptive Lighting on, and turns
+it back on after a color, unless it was switched off in the Home app
+([doc/adaptive-lighting.md](doc/adaptive-lighting.md#siris-white)).
+Otherwise white is the device's `whiteColorTemp` in mireds (1,000,000 /
+kelvins, from 140 to 500), or 370 (2700 K) without one. Siri's "warm white" is
+370 (2700 K) too and "cool white" 250 (4000 K), and its halogen and
+fluorescents are temperatures as well. The Home app's Temperature tab and
 white swatches become the temperature they stand for.
 
 A Zigbee2MQTT light can have `color_temp` and `color_hs` together, which the
@@ -118,7 +122,9 @@ schedule. A light that is off is kept at the current temperature, so that it
 comes on at that temperature however it is turned on. A Zigbee2MQTT light
 that is on fades to each new temperature over 5 seconds. Setting a color or a
 temperature from HomeKit, or a color anywhere else, turns Adaptive Lighting
-off. It survives a restart if `PERSIST_PATH` is persistent.
+off, except Siri's white, which keeps it on and turns it back on. Adaptive
+Lighting, and the last schedule from the hub that the white restores it from,
+survive a restart if `PERSIST_PATH` is persistent.
 [doc/adaptive-lighting.md](doc/adaptive-lighting.md) has the detail.
 
 ### Scenes
@@ -242,7 +248,7 @@ devices:
   - name: "Bedroom Light"
     topic: "zigbee2mqtt/bedroom_light"
     capabilities: [on_off, brightness, color_hs]
-    # whiteColorTemp: 250 # optional: mireds for "white"; defaults to 370 (2700 K)
+    # whiteColorTemp: 250 # optional: mireds for "white" without Adaptive Lighting; defaults to 370 (2700 K)
 
   - name: "Ceiling Fan"
     topic: "zigbee2mqtt/ceiling_fan"

@@ -12,16 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Zigbee2MQTT's "cool", "neutral", and "warm" presets: 4000 K, 2700 K, and
-// 2200 K in mireds.
+// 4000 K and 2700 K in mireds, Zigbee2MQTT's "cool" and "neutral" presets.
+// Siri's "warm white" is its 100 W tungsten, and the Home app's warm white is
+// 366 mireds, so it is 2700 K too.
 export const COOL_WHITE_COLOR_TEMP = 250;
 export const DEFAULT_WHITE_COLOR_TEMP = 370;
-export const WARM_WHITE_COLOR_TEMP = 454;
 
 // Siri's "white" is zero saturation, where hue has no meaning. Apple Home
 // sends H=228 S=56 when selecting "white" on a color_hs light.
 export function isWhite(h: number | undefined, s: number | undefined): boolean {
   return s === 0 || (h === 228 && s === 56);
+}
+
+// Siri's "white", "bright white", "soft white", and the rest, and the center of
+// the Home app's color wheel, which Adaptive Lighting answers when it can. The
+// Home app's white swatch has another saturation; a write with a temperature
+// as well is a scene's.
+export function isSiriWhite(payload: Record<string, unknown>): boolean {
+  return (
+    payload.hue === 0 && payload.saturation === 0 && !("color_temp" in payload)
+  );
 }
 
 // The Home app's color for a color temperature, which is what it writes to a
@@ -117,7 +127,7 @@ const NAMED_WHITES: readonly {
     name: "warm white",
     hue: 31,
     saturation: 33,
-    mireds: WARM_WHITE_COLOR_TEMP,
+    mireds: DEFAULT_WHITE_COLOR_TEMP,
   },
   {
     name: "cool white",

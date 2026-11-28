@@ -24,7 +24,7 @@ devices:
   - name: "Bedroom Light"
     topic: "zigbee2mqtt/bedroom_light"
     capabilities: [on_off, brightness, color_hs]
-    # whiteColorTemp: 250 # optional: mireds for "white"; defaults to 370 (2700 K)
+    # whiteColorTemp: 250 # optional: mireds for "white" without Adaptive Lighting; defaults to 370 (2700 K)
 
   # WLED device example (uses WLED's MQTT JSON API):
   # - name: "LED Strip"

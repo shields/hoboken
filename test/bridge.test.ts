@@ -33,13 +33,19 @@ import {
   HAPStatus,
   HAPStorage,
   Service,
+  uuid,
 } from "@homebridge/hap-nodejs";
 import type { Config, MQTTCredentials } from "../src/config.ts";
 import { INVALID_MQTT_URL, MALFORMED_MQTT_URLS, SECRET } from "./mqtt-urls.ts";
 import { HeatedBeddingSource } from "../src/heated-bedding-source.ts";
 import { adaptiveLightingController } from "../src/accessories.ts";
 import { colorTempToHueSaturation } from "../src/convert.ts";
-import { hubStartsAdaptiveLighting } from "./adaptive-lighting-hub.ts";
+import {
+  DAILY_CURVE,
+  HUB_CONTEXT,
+  hubStartsAdaptiveLighting,
+  hubStopsAdaptiveLighting,
+} from "./adaptive-lighting-hub.ts";
 import type {
   ClientSubscribeCallback,
   IClientOptions,
@@ -1680,7 +1686,7 @@ describe("startBridge", () => {
       service.getCharacteristic(Characteristic.Saturation).setValue(33);
       await flush();
 
-      expect(sets()).toEqual([{ color_temp: 370 }, { color_temp: 454 }]);
+      expect(sets()).toEqual([{ color_temp: 370 }, { color_temp: 370 }]);
 
       await shutdown();
     });
@@ -4956,6 +4962,29 @@ describe("Adaptive Lighting", () => {
     await shutdown();
   });
 
+  test("a turn-on write that carries the temperature leaves the one that a clamping bulb reported", async () => {
+    jest.useFakeTimers();
+    const { report, sent, start, characteristic, shutdown } = await startLamp();
+    report(OFF);
+    await start();
+    await flush();
+    report({ ...OFF, color_temp: 370 });
+    await flush();
+    const seen: unknown[] = [];
+    characteristic(Characteristic.ColorTemperature).on("change", (change) => {
+      if (change.oldValue !== change.newValue) seen.push(change.newValue);
+    });
+
+    characteristic(Characteristic.On).setValue(true);
+    await flush();
+    jest.advanceTimersByTime(2000);
+    await flush();
+    expect(sent()).toEqual([{ state: "ON", color_temp: 350 }]);
+    expect(characteristic(Characteristic.ColorTemperature).value).toBe(370);
+    expect(seen).toEqual([]);
+    await shutdown();
+  });
+
   test("a light turned on at another brightness is sent the temperature for that brightness", async () => {
     jest.useFakeTimers();
     const { report, sent, start, characteristic, shutdown } = await startLamp();
@@ -6305,6 +6334,481 @@ describe("Adaptive Lighting", () => {
       expect(controller.isAdaptiveLightingActive()).toBe(false);
       await shutdown();
     }
+  });
+
+  describe("Siri's white", () => {
+    const KEY = `hoboken.adaptive-lighting.${uuid.generate(`hoboken:light:${TOPIC}`)}`;
+    const DAILY = { entries: DAILY_CURVE, context: HUB_CONTEXT };
+    const BLUE = {
+      ...ON,
+      color_mode: "hs",
+      color: { hue: 240, saturation: 100 },
+      color_temp: 574,
+    };
+    const WHITE: [typeof Characteristic.Hue, number | boolean][] = [
+      [Characteristic.Hue, 0],
+      [Characteristic.Saturation, 0],
+      [Characteristic.Brightness, 100],
+      [Characteristic.On, true],
+    ];
+
+    afterEach(() => {
+      HAPStorage.storage().removeItemSync(KEY);
+    });
+
+    const stored = () => HAPStorage.storage().getItem(KEY) as unknown;
+
+    // A controller's request, whose writes HAP-NodeJS handles in one tick.
+    async function request(
+      characteristic: (type: typeof Characteristic.Hue) => Characteristic,
+      writes: [typeof Characteristic.Hue, number | boolean][],
+    ) {
+      process.nextTick(() => {
+        for (const [type, value] of writes)
+          void characteristic(type).handleSetRequest(value, {} as never);
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    function transitionCounts(accessory: Accessory) {
+      const counts: unknown[] = [];
+      accessory
+        .getService(Service.Lightbulb)!
+        .getCharacteristic(
+          Characteristic.CharacteristicValueActiveTransitionCount,
+        )
+        .on("change", (change: { newValue: unknown }) =>
+          counts.push(change.newValue),
+        );
+      return counts;
+    }
+
+    async function lampWithSchedule() {
+      const lamp = await startLamp();
+      lamp.report(ON);
+      await lamp.start(DAILY);
+      await flush();
+      lamp.report({ ...ON, color_temp: 350 });
+      return lamp;
+    }
+
+    async function blue(lamp: Awaited<ReturnType<typeof startLamp>>) {
+      await request(lamp.characteristic, [
+        [Characteristic.Hue, 240],
+        [Characteristic.Saturation, 100],
+      ]);
+      lamp.report(BLUE);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+    }
+
+    test("keeps Adaptive Lighting on and sends its temperature", async () => {
+      const lamp = await lampWithSchedule();
+      lamp.report({ ...ON, color_temp: 250 });
+      const counts = transitionCounts(lamp.accessory);
+      const hueUpdates: unknown[] = [];
+      lamp
+        .characteristic(Characteristic.Hue)
+        .on("change", (change: { reason: string }) =>
+          hueUpdates.push(change.reason),
+        );
+      await request(lamp.characteristic, WHITE);
+
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      expect(counts).toEqual([]);
+      expect(hueUpdates).toEqual(["write"]);
+      expect(lamp.sent().slice(1)).toEqual([
+        { brightness: 254, state: "ON", color_temp: 350 },
+      ]);
+      expect(logged("HomeKit write for")).toEqual([
+        `HomeKit write for "Lamp": {"hue":0,"saturation":0,"brightness":100,"on":true} as Adaptive Lighting's white published to ${TOPIC}/set as {"state":"ON","brightness":254,"color_temp":350}`,
+      ]);
+      expect(lamp.characteristic(Characteristic.ColorTemperature).value).toBe(
+        350,
+      );
+      await lamp.shutdown();
+    });
+
+    test("sends the temperature to a light that reports it already", async () => {
+      const lamp = await lampWithSchedule();
+      await request(lamp.characteristic, WHITE);
+      expect(lamp.sent().slice(1)).toEqual([
+        { brightness: 254, state: "ON", color_temp: 350 },
+      ]);
+      await lamp.shutdown();
+    });
+
+    test("is followed by the temperature for its brightness", async () => {
+      const lamp = await lampWithSchedule();
+      await request(lamp.characteristic, [[Characteristic.Brightness, 60]]);
+      lamp.report({ ...ON, brightness: 152, color_temp: 370 });
+      await request(lamp.characteristic, WHITE);
+      expect(lamp.sent().slice(3)).toEqual([
+        { brightness: 254, state: "ON", color_temp: 370 },
+        fade(350),
+      ]);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      await lamp.shutdown();
+    });
+
+    test("turns Adaptive Lighting back on after a color", async () => {
+      const lamp = await lampWithSchedule();
+      const hub = structuredClone(stored());
+      await blue(lamp);
+      const counts = transitionCounts(lamp.accessory);
+      const before = lamp.sent().length;
+
+      await request(lamp.characteristic, WHITE);
+
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      expect(counts).toEqual([1]);
+      expect(lamp.sent().slice(before)).toEqual([
+        { brightness: 254, state: "ON", color_temp: 350 },
+      ]);
+      expect(logged("Adaptive Lighting restored for")).toEqual([
+        'Adaptive Lighting restored for "Lamp"',
+      ]);
+      const restored = lamp.controller.serialize()!.activeTransition;
+      expect(stored()).toEqual({
+        ...(hub as object),
+        restored: restored.transitionStartBuffer,
+      });
+
+      expect(stored()).toBeDefined();
+      expect(logged("Adaptive Lighting for")).not.toContainEqual(
+        expect.stringContaining("was switched off"),
+      );
+
+      lamp.report({ ...ON, color_temp: 350 });
+      await request(lamp.characteristic, WHITE);
+      expect(logged("Adaptive Lighting restored for")).toHaveLength(1);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      await lamp.shutdown();
+    });
+
+    test("does not save the schedule it restored", async () => {
+      jest.useFakeTimers();
+      const lamp = await lampWithSchedule();
+      const hub = structuredClone(stored()) as { schedule: unknown };
+      await blue(lamp);
+      jest.advanceTimersByTime(1000);
+      await request(lamp.characteristic, WHITE);
+      lamp.report({ ...ON, color_temp: 350 });
+      jest.advanceTimersByTime(60000);
+      await flush();
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      expect((stored() as { schedule: unknown }).schedule).toEqual(
+        hub.schedule,
+      );
+      expect(logged("Adaptive Lighting schedule for")).toHaveLength(1);
+      await lamp.shutdown();
+    });
+
+    test("saves a schedule that the hub sends after a restore", async () => {
+      const lamp = await lampWithSchedule();
+      await blue(lamp);
+      await request(lamp.characteristic, WHITE);
+      await lamp.start({ ...DAILY, startMs: Date.now() + 1000 });
+      await flush();
+      const hub = lamp.controller.serialize()!.activeTransition;
+      expect(stored()).toEqual({ schedule: hub });
+      expect(logged("Adaptive Lighting schedule for")).toEqual([
+        'Adaptive Lighting schedule for "Lamp" from the home hub',
+        'Adaptive Lighting schedule for "Lamp" from the home hub',
+      ]);
+      await lamp.shutdown();
+    });
+
+    test("saves the schedule of another transition that starts at the same time", async () => {
+      const lamp = await lampWithSchedule();
+      const first = lamp.controller.serialize()!.activeTransition;
+      await lamp.start({
+        ...DAILY,
+        startMs: first.transitionStartMillis,
+        transitionId: uuid.generate("another"),
+      });
+      await flush();
+      const second = lamp.controller.serialize()!.activeTransition;
+      expect(second.transitionId).not.toBe(first.transitionId);
+      expect(second.transitionStartBuffer).toBe(first.transitionStartBuffer);
+      expect(stored()).toEqual({ schedule: second });
+      await lamp.shutdown();
+    });
+
+    test("turns Adaptive Lighting back on after a restart", async () => {
+      const first = await lampWithSchedule();
+      await blue(first);
+      await first.shutdown();
+
+      const lamp = await startLamp();
+      lamp.report(BLUE);
+      await request(lamp.characteristic, WHITE);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      expect(lamp.sent()).toEqual([
+        { brightness: 254, state: "ON", color_temp: 350 },
+      ]);
+      await lamp.shutdown();
+    });
+
+    test("keeps the schedule when the light shows a color or a scene is recalled", async () => {
+      const lamp = await lampWithSchedule();
+      lamp.report(BLUE);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+      await request(lamp.characteristic, WHITE);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      await lamp.shutdown();
+
+      const config = lampConfig();
+      config.devices[0]!.scenes = [{ name: "Movie", id: 3 }];
+      const scenes = await startLamp(config);
+      scenes.report(ON);
+      await scenes.start(DAILY);
+      scenes.bridge.bridgedAccessories
+        .find((a) => a.displayName === "Movie")!
+        .getService(Service.Switch)!
+        .getCharacteristic(Characteristic.On)
+        .setValue(true);
+      await flush();
+      expect(scenes.controller.isAdaptiveLightingActive()).toBe(false);
+      await request(scenes.characteristic, WHITE);
+      expect(scenes.controller.isAdaptiveLightingActive()).toBe(true);
+      await scenes.shutdown();
+    });
+
+    test("forgets the schedule when the Home app switches it off after a color", async () => {
+      for (const written of [true, false]) {
+        const lamp = await lampWithSchedule();
+        if (written) await blue(lamp);
+        else lamp.report(BLUE);
+        await request(lamp.characteristic, WHITE);
+        lamp.report({ ...ON, color_temp: 350 });
+        expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+        await hubStopsAdaptiveLighting(lamp.accessory);
+        expect(stored()).toBeUndefined();
+        await lamp.shutdown();
+      }
+    });
+
+    test("forgets the schedule when the Home app switches it off while a color shows", async () => {
+      const lamp = await lampWithSchedule();
+      lamp.report(BLUE);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+      expect(stored()).toBeDefined();
+      await hubStopsAdaptiveLighting(lamp.accessory);
+      expect(stored()).toBeUndefined();
+      await lamp.shutdown();
+    });
+
+    test("is a fixed white after the Home app switches Adaptive Lighting off", async () => {
+      const lamp = await lampWithSchedule();
+      await hubStopsAdaptiveLighting(lamp.accessory);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+      expect(stored()).toBeUndefined();
+      expect(logged("Adaptive Lighting for")).toContain(
+        'Adaptive Lighting for "Lamp" was switched off; white is fixed until it is switched on again',
+      );
+
+      await request(lamp.characteristic, WHITE);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+      expect(lamp.sent().at(-1)).toEqual({
+        state: "ON",
+        brightness: 254,
+        color_temp: 370,
+      });
+      await lamp.shutdown();
+    });
+
+    test("is a fixed white for a light that never had a daily schedule", async () => {
+      for (const options of [undefined, {}]) {
+        const lamp = await startLamp();
+        lamp.report(BLUE);
+        if (options) {
+          await lamp.start(options);
+          lamp.report(BLUE);
+        }
+        await request(lamp.characteristic, WHITE);
+        expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+        expect(lamp.sent().at(-1)).toEqual({
+          state: "ON",
+          brightness: 254,
+          color_temp: 370,
+        });
+        expect(output.lines()).not.toContainEqual(
+          expect.stringContaining("HAP status"),
+        );
+        await lamp.shutdown();
+      }
+    });
+
+    test.each<
+      [string, [typeof Characteristic.Hue, number][], Record<string, unknown>]
+    >([
+      [
+        "a white with a temperature",
+        [
+          [Characteristic.Hue, 0],
+          [Characteristic.Saturation, 0],
+          [Characteristic.ColorTemperature, 250],
+        ],
+        { color_temp: 250 },
+      ],
+      [
+        "the Home app's white swatch",
+        [
+          [Characteristic.Hue, 228],
+          [Characteristic.Saturation, 56],
+        ],
+        { color_temp: 370 },
+      ],
+      [
+        "Saturation 0 at another hue",
+        [
+          [Characteristic.Hue, 30],
+          [Characteristic.Saturation, 0],
+        ],
+        { color_temp: 370 },
+      ],
+      [
+        "warm white",
+        [
+          [Characteristic.Hue, 31],
+          [Characteristic.Saturation, 33],
+        ],
+        { color_temp: 370 },
+      ],
+    ])("%s turns Adaptive Lighting off", async (_, writes, message) => {
+      const lamp = await lampWithSchedule();
+      await request(lamp.characteristic, writes);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+      expect(lamp.sent().at(-1)).toEqual(message);
+      expect(stored()).toBeDefined();
+      await lamp.shutdown();
+    });
+
+    test("an invalid saved schedule is reported and ignored", async () => {
+      HAPStorage.storage().setItemSync(KEY, { schedule: "bogus" });
+      const lamp = await startLamp();
+      lamp.report(BLUE);
+      await request(lamp.characteristic, WHITE);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+      expect(lamp.sent().at(-1)).toEqual({
+        state: "ON",
+        brightness: 254,
+        color_temp: 370,
+      });
+      expect(logged("Adaptive Lighting for")).toEqual([
+        'Adaptive Lighting for "Lamp": the saved schedule is invalid and is ignored',
+      ]);
+      await lamp.shutdown();
+    });
+
+    test("a schedule that HAP-NodeJS refuses is reported and gives a fixed white", async () => {
+      const first = await lampWithSchedule();
+      const saved = structuredClone(stored()) as {
+        schedule: { iid: number };
+      };
+      await first.shutdown();
+      HAPStorage.storage().setItemSync(KEY, {
+        schedule: { ...saved.schedule, iid: 9999 },
+      });
+
+      const lamp = await startLamp();
+      lamp.report(BLUE);
+      await request(lamp.characteristic, WHITE);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+      expect(lamp.sent().at(-1)).toEqual({
+        state: "ON",
+        brightness: 254,
+        color_temp: 370,
+      });
+      expect(logged("Adaptive Lighting for").at(-1)).toBe(
+        `Adaptive Lighting for "Lamp": HAP status ${String(HAPStatus.INVALID_VALUE_IN_REQUEST)}`,
+      );
+      await lamp.shutdown();
+    });
+
+    test("a schedule that cannot be saved is reported and the temperature is still sent", async () => {
+      const lamp = await startLamp();
+      lamp.report(ON);
+      jest
+        .spyOn(HAPStorage.storage(), "setItemSync")
+        .mockImplementationOnce(() => {
+          throw new Error("disk full");
+        });
+      await lamp.start(DAILY);
+      await flush();
+      expect(lamp.sent()).toEqual([fade(350)]);
+      expect(logged("Adaptive Lighting for")).toContain(
+        'Adaptive Lighting for "Lamp": disk full',
+      );
+      expect(stored()).toBeUndefined();
+      await lamp.shutdown();
+    });
+
+    test("a later write of a color still turns Adaptive Lighting off", async () => {
+      const lamp = await lampWithSchedule();
+      await request(lamp.characteristic, WHITE);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      await request(lamp.characteristic, [[Characteristic.Saturation, 0]]);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+      expect(stored()).toBeDefined();
+      await lamp.shutdown();
+    });
+
+    test("a temperature that HomeKit writes alone turns Adaptive Lighting off and keeps the schedule", async () => {
+      const lamp = await lampWithSchedule();
+      await request(lamp.characteristic, [
+        [Characteristic.ColorTemperature, 250],
+      ]);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
+      expect(stored()).toBeDefined();
+      await lamp.shutdown();
+    });
+
+    test("the center of the color wheel keeps Adaptive Lighting on", async () => {
+      const lamp = await lampWithSchedule();
+      await request(lamp.characteristic, [
+        [Characteristic.Hue, 0],
+        [Characteristic.Saturation, 0],
+      ]);
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      expect(lamp.sent().at(-1)).toEqual({ color_temp: 350 });
+      await lamp.shutdown();
+    });
+
+    test("a light without Hue and Saturation keeps no schedule", async () => {
+      const config = lampConfig();
+      const lamp = await startLamp({
+        ...config,
+        devices: config.devices.map((device) => ({
+          ...device,
+          capabilities: ["on_off", "brightness", "color_temp"],
+        })),
+      });
+      lamp.report(ON);
+      await lamp.start(DAILY);
+      await flush();
+      expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
+      expect(stored()).toBeUndefined();
+      await hubStopsAdaptiveLighting(lamp.accessory);
+      expect(
+        logged("Adaptive Lighting").filter(
+          (line) => !line.includes("published"),
+        ),
+      ).toEqual([]);
+      await lamp.shutdown();
+    });
+
+    test("a second switch-off does not forget the schedule again", async () => {
+      const lamp = await lampWithSchedule();
+      await hubStopsAdaptiveLighting(lamp.accessory);
+      await hubStopsAdaptiveLighting(lamp.accessory);
+      expect(
+        logged("Adaptive Lighting for").filter((line) =>
+          line.includes("was switched off"),
+        ),
+      ).toHaveLength(1);
+      await lamp.shutdown();
+    });
   });
 
   test("a write while MQTT is down neither throws nor publishes, and the temperature is remembered", async () => {

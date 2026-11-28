@@ -191,7 +191,9 @@ A test of this must start its writes inside `process.nextTick`.
 ## What turns it off
 
 HAP-NodeJS turns Adaptive Lighting off when a controller writes Hue,
-Saturation, or ColorTemperature, which includes Siri's "white".
+Saturation, or ColorTemperature. Siri's white is the exception, as the next
+section describes; "warm white", the Home app's white swatch, and any other
+color or temperature still turn it off.
 
 A report that reaches HomeKit turns it off when it shows a color
 (`showsColor`), so that a color set in the Hue app or in WLED is not
@@ -215,6 +217,77 @@ reach lights that are configured as devices of their own.
 A temperature changed elsewhere does not turn it off, and neither do the
 bridge's own `updateValue` calls.
 
+## Siri's white
+
+Siri's "white", "bright white", "soft white", and the rest write Hue 0 and
+Saturation 0 in one request (`isSiriWhite`), with a Brightness and On. The
+center of the Home app's color wheel writes the same Hue and Saturation, so it
+is Siri's white too. On a
+light with Adaptive Lighting and `color_hs`, that white means Adaptive
+Lighting. A light with `color_temp` alone has no Hue or Saturation, so Siri's
+white reaches it only as the Brightness, and a write of a temperature turns
+Adaptive Lighting off.
+
+- **While Adaptive Lighting is on,** the write is published with the
+  temperature that it last set (`withAdaptiveWhite`), even to a light that
+  reports that temperature already: a light with white strips reports a color
+  as its minimum temperature, which Adaptive Lighting reaches at midday on a
+  narrow range. Hue and Saturation are dropped from the message. The
+  controller then sets the temperature for the written Brightness, which
+  takes its value only after the write is published, so a light at another
+  brightness fades to that temperature over the next 5 s.
+- **Keeping it on.** HAP-NodeJS turns Adaptive Lighting off from a `change`
+  listener on Hue and Saturation, which it adds each time Adaptive Lighting
+  goes on, and it skips a change whose context names the controller.
+  `createLightAccessory` adds listeners of its own when it creates the
+  accessory, which therefore run first, and when the white is published it
+  marks the next change of each to 0 as the controller's. The change object is
+  shared by the listeners and copied before notifications are built, so this
+  changes nothing that controllers are told.
+- **After a color or temperature,** which turned Adaptive Lighting off, the
+  white turns it back on from the light's last schedule from the home hub, and
+  then keeps it on as above. HAP-NodeJS erases the schedule when Adaptive
+  Lighting goes off, so the bridge keeps its own copy (`controller.serialize()`)
+  in the HAP storage directory, one file per light named
+  `hoboken.adaptive-lighting.<accessory UUID>`, which survives a restart. The
+  copy is taken whenever the controller sets a temperature from a schedule
+  that it has not seen, and a copy that cannot be written is logged as an
+  error while Adaptive Lighting goes on without it. The log says
+  `Adaptive Lighting schedule for … from the home hub` for each new one and
+  `Adaptive Lighting restored for …` when a white restores it.
+- **Restoring.** HAP-NodeJS starts any schedule written to TransitionControl
+  at its first entry, so the bridge writes the saved schedule rotated to the
+  present (`restoredTransition`): the hub's schedules are the same every day by
+  the local clock and end, after 24 hours, where they start, so the rotated
+  curve starts at the point where the saved schedule's own clock is now and
+  runs a full day back to it. A schedule that is not such a loop is not
+  restored. The write goes through the public path, so HAP-NodeJS notifies
+  ActiveTransitionCount 1 and persists the transition as if the hub had sent
+  it, and the temperature that the controller sets at once is the white's,
+  published in the same message. The rotated schedule is never saved over the
+  hub's: the saved copy records the start of the one that the bridge made. A
+  daylight saving change makes a restored schedule an hour off until the hub
+  replaces it.
+- **The hub.** The schedule keeps the hub's transition id and the controller
+  context, in which the hub marks its own schedules, and starts at the present.
+  The change in ActiveTransitionCount makes the hub read TransitionControl, so
+  the Home app shows Adaptive Lighting on, and a start time that disagrees with
+  the context should make the hub write a fresh schedule of its own, which is
+  saved in turn. This comes from reading the hub's code, not from a home hub
+  observed doing it.
+- **A deliberate off.** Adaptive Lighting going off for any reason other than
+  a HomeKit write of Hue, Saturation, or ColorTemperature, a color that the
+  light shows, or a scene recalled through the bridge, is the Home app's
+  switch, the hub's own, or the end of the schedule. The bridge then forgets
+  the saved schedule and logs `Adaptive Lighting for … was switched off; white
+is fixed until it is switched on again`, and white is a fixed white until the
+  hub sends a schedule again.
+- **Without a schedule,** a light that has never had one, or whose saved
+  schedule is unreadable, which is logged as an error, gets the fixed white of
+  [color-coalescing.md](color-coalescing.md#hobokens-approach), and Adaptive
+  Lighting stays off. So does a restore that HAP-NodeJS refuses, which is
+  logged as an error too.
+
 ## Hue and Saturation
 
 Before it sets a temperature, the controller sets Hue and Saturation from
@@ -230,7 +303,9 @@ bridge's next update corrects them.
 
 HAP-NodeJS persists the transition in `ControllerStorage` under the HAP
 storage path and restores it when the bridge publishes, before MQTT connects.
-That first temperature is remembered and not published.
+That first temperature is remembered and not published. The bridge's copy of
+each light's last schedule from the hub, for [Siri's white](#siris-white), is
+kept in the same directory.
 
 Shutdown never calls `disableAdaptiveLighting` or `removeController`, because
 both erase the persisted transition. `process.exit` ends the schedule's timer.

@@ -17,6 +17,7 @@ import {
   colorTempRange,
   colorTempToHueSaturation,
   type HomeKitState,
+  isSiriWhite,
   type WledLight,
   wledUnrememberedWhite,
 } from "./convert.ts";
@@ -159,6 +160,25 @@ export function withAdaptiveTemperature(
     "color_temp" in payload
     ? payload
     : { ...payload, color_temp: temperature };
+}
+
+// Siri's white while Adaptive Lighting is on is its temperature, sent even to
+// a light that seems to show it already: a light with white strips reports a
+// color as the minimum temperature, where Adaptive Lighting may be at midday.
+export function withAdaptiveWhite(
+  payload: Record<string, unknown>,
+  temperature: number | undefined,
+  active: boolean,
+): Record<string, unknown> {
+  if (!active || temperature === undefined || !isSiriWhite(payload))
+    return payload;
+  const white: Record<string, unknown> = {
+    ...payload,
+    color_temp: temperature,
+  };
+  delete white.hue;
+  delete white.saturation;
+  return white;
 }
 
 // A color set at the device or in Zigbee2MQTT ends Adaptive Lighting, as a

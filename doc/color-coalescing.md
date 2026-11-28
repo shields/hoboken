@@ -184,25 +184,32 @@ any hue, and when Saturation arrives without Hue.
 For `color_hs` devices, when HomeKit asks for a white, `homeKitToZ2m`
 converts the write to `color_temp`. This causes Z2M to switch to CT mode
 so the bulb uses its WW/CW LEDs instead of mixing RGB to approximate
-white. Siri's three whites get the temperatures of Z2M's `cool`,
-`neutral`, and `warm` presets, and any other hue and saturation on the
-Home app's temperature curve gets the temperature it stands for. Four
+white. Siri's white, on a light with Adaptive Lighting, is Adaptive
+Lighting's temperature, as
+[adaptive-lighting.md](adaptive-lighting.md#siris-white) describes. Any
+other white is 370 mireds (2700 K), Z2M's `neutral` preset, unless the
+device has `whiteColorTemp`. Siri's "warm white" is its 100 W tungsten,
+and the Home app's warm white is 366 mireds, so it is 370 too, whatever the
+device's `whiteColorTemp`; "cool white" is Z2M's `cool` preset. Any other
+hue and saturation on the Home app's temperature curve gets the
+temperature it stands for. Four
 light sources that Siri names, in the table below, get the temperature of
 the source. Incandescent (45, 100) and sunlight (45, 80) stay colors,
 because amber and fluorescent orange write the first pair and saffron and
 sunglow the second. Candle (30, 84) is on the curve, at 460.
 
-| Request                          | Hue          | Sat | `color_temp`                      |
-| -------------------------------- | ------------ | --- | --------------------------------- |
-| Siri "white"                     | any          | 0   | `whiteColorTemp`, or 370 (2700 K) |
-| Home app white swatch            | 228          | 56  | `whiteColorTemp`, or 370 (2700 K) |
-| Siri "warm white"                | 31           | 33  | 454 (2200 K)                      |
-| Siri "cool white"                | 208          | 17  | 250 (4000 K)                      |
-| Siri "halogen"                   | 33           | 12  | 313 (3200 K)                      |
-| Siri "warm fluorescent"          | 35           | 10  | 333 (3000 K)                      |
-| Siri "fluorescent"               | 153          | 4   | 250 (4000 K)                      |
-| Siri "full spectrum fluorescent" | 9            | 5   | 200 (5000 K)                      |
-| Home app temperature or swatch   | on the curve |     | the curve's, from 140 to 500      |
+| Request                          | Hue          | Sat | `color_temp`                                              |
+| -------------------------------- | ------------ | --- | --------------------------------------------------------- |
+| Siri "white", color wheel center | 0            | 0   | Adaptive Lighting's, or `whiteColorTemp`, or 370 (2700 K) |
+| Any other hue at saturation 0    | any other    | 0   | `whiteColorTemp`, or 370 (2700 K)                         |
+| Home app white swatch            | 228          | 56  | `whiteColorTemp`, or 370 (2700 K)                         |
+| Siri "warm white"                | 31           | 33  | 370 (2700 K)                                              |
+| Siri "cool white"                | 208          | 17  | 250 (4000 K)                                              |
+| Siri "halogen"                   | 33           | 12  | 313 (3200 K)                                              |
+| Siri "warm fluorescent"          | 35           | 10  | 333 (3000 K)                                              |
+| Siri "fluorescent"               | 153          | 4   | 250 (4000 K)                                              |
+| Siri "full spectrum fluorescent" | 9            | 5   | 200 (5000 K)                                              |
+| Home app temperature or swatch   | on the curve |     | the curve's, from 140 to 500                              |
 
 `hueSaturationToColorTemp` finds the nearest point of the curve from 100
 to 500 mireds, treating hue and saturation as polar coordinates, because
@@ -388,7 +395,7 @@ does not report passing values.
 ### Other named whites
 
 Siri's table has whites that are neither on the Home app's curve nor
-mapped here, such as halogen (33, 12) and antique white (34, 14). They
+mapped here, such as antique white (34, 14) and floral white (40, 6). They
 are published as colors.
 
 ### WLED white channel
@@ -428,7 +435,8 @@ within 140 to 500, HomeKit's, because the rest of the bridge limits
   alone. A request outside the range gets the nearer end.
 - **A color** lights the color segments and darkens the white segments.
 - **A white by name**, or a hue and saturation on the Home app's curve,
-  is a temperature as for Zigbee2MQTT, and `whiteColorTemp` applies.
+  is a temperature as for Zigbee2MQTT, Adaptive Lighting's for Siri's
+  white, and `whiteColorTemp` applies.
 - **Gamma**: WLED raises a channel's value to its color gamma before
   output, so 128 is about a fifth of full with the usual 2.2. `gamma`
   tells the bridge that setting, and it sends `level ** (1 / gamma)`.
