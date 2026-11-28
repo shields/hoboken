@@ -361,8 +361,8 @@ export function createLightAccessory(
       lightController.disableAdaptiveLighting();
       expected = false;
     });
-    // Off for any other reason is the Home app's switch, the hub's, or the end
-    // of the schedule, so white stays a fixed white until it is on again.
+    // Off for any other reason is the hub's own stop or the end of the
+    // schedule, so white stays a fixed white until the hub starts it again.
     service
       .getCharacteristic(
         Characteristic.CharacteristicValueActiveTransitionCount,

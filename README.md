@@ -70,7 +70,7 @@ light that reports a `color_temp`, or that has `whiteColorTemp` or the
 `color_temp` capability, Hoboken publishes a color temperature instead, so that
 the bulb uses its white LEDs. On a light with Adaptive Lighting, Siri's white
 is Adaptive Lighting's temperature: it keeps Adaptive Lighting on, and turns
-it back on after a color, unless it was switched off in the Home app
+it back on after a color or temperature
 ([doc/adaptive-lighting.md](doc/adaptive-lighting.md#siris-white)).
 Otherwise white is the device's `whiteColorTemp` in mireds (1,000,000 /
 kelvins, from 140 to 500), or 370 (2700 K) without one. Siri's "warm white" is

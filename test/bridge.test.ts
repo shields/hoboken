@@ -6499,7 +6499,7 @@ describe("Adaptive Lighting", () => {
 
       expect(stored()).toBeDefined();
       expect(logged("Adaptive Lighting for")).not.toContainEqual(
-        expect.stringContaining("was switched off"),
+        expect.stringContaining("ended; white is fixed"),
       );
 
       lamp.report({ ...ON, color_temp: 350 });
@@ -6598,7 +6598,7 @@ describe("Adaptive Lighting", () => {
       await scenes.shutdown();
     });
 
-    test("forgets the schedule when the Home app switches it off after a color", async () => {
+    test("forgets the schedule when the hub stops it after a color", async () => {
       for (const written of [true, false]) {
         const lamp = await lampWithSchedule();
         if (written) await blue(lamp);
@@ -6612,7 +6612,7 @@ describe("Adaptive Lighting", () => {
       }
     });
 
-    test("forgets the schedule when the Home app switches it off while a color shows", async () => {
+    test("forgets the schedule when the hub stops it while a color shows", async () => {
       const lamp = await lampWithSchedule();
       lamp.report(BLUE);
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
@@ -6622,13 +6622,13 @@ describe("Adaptive Lighting", () => {
       await lamp.shutdown();
     });
 
-    test("is a fixed white after the Home app switches Adaptive Lighting off", async () => {
+    test("is a fixed white after the hub stops Adaptive Lighting", async () => {
       const lamp = await lampWithSchedule();
       await hubStopsAdaptiveLighting(lamp.accessory);
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
       expect(stored()).toBeUndefined();
       expect(logged("Adaptive Lighting for")).toContain(
-        'Adaptive Lighting for "Lamp" was switched off; white is fixed until it is switched on again',
+        'Adaptive Lighting for "Lamp" ended; white is fixed until the home hub starts it again',
       );
 
       await request(lamp.characteristic, WHITE);
@@ -6822,13 +6822,13 @@ describe("Adaptive Lighting", () => {
       await lamp.shutdown();
     });
 
-    test("a second switch-off does not forget the schedule again", async () => {
+    test("a second stop does not forget the schedule again", async () => {
       const lamp = await lampWithSchedule();
       await hubStopsAdaptiveLighting(lamp.accessory);
       await hubStopsAdaptiveLighting(lamp.accessory);
       expect(
         logged("Adaptive Lighting for").filter((line) =>
-          line.includes("was switched off"),
+          line.includes("ended; white is fixed"),
         ),
       ).toHaveLength(1);
       await lamp.shutdown();

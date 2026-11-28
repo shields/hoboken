@@ -854,7 +854,7 @@ export async function startBridge(
       forget: (id) => {
         HAPStorage.storage().removeItemSync(scheduleKey(id));
         log.log(
-          `Adaptive Lighting for "${device.name}" was switched off; white is fixed until it is switched on again`,
+          `Adaptive Lighting for "${device.name}" ended; white is fixed until the home hub starts it again`,
         );
       },
       remember: (temperature) => {

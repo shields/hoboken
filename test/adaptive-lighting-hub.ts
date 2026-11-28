@@ -128,8 +128,8 @@ export function hubStartsAdaptiveLighting(
     .handleSetRequest(encode(2, encode(1, configuration)).toString("base64"));
 }
 
-// The hub's write that switches Adaptive Lighting off, as the Home app's
-// switch does: the characteristic's instance id alone.
+// The hub's write that stops Adaptive Lighting: the characteristic's
+// instance id alone.
 export function hubStopsAdaptiveLighting(
   accessory: Accessory,
 ): Promise<unknown> {

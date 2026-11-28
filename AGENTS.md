@@ -119,7 +119,7 @@ make demo               # Serve the status page with sample data
   `configureController` sets that characteristic to 0, which the listener
   would read as a deliberate off. The bridge turns Adaptive Lighting off only
   through `turnOffAdaptiveLighting`, which keeps the saved schedule; a bare
-  `disableAdaptiveLighting` reads as the Home app's switch and forgets it.
+  `disableAdaptiveLighting` reads as the hub's own stop and forgets it.
 - A restored schedule is never saved as the light's schedule from the hub.
   Rotating a rotated one again would grow it by an entry each time.
 - HAP-NodeJS checks a controller's write against a characteristic's range but
