@@ -423,8 +423,23 @@ describe("a light with Adaptive Lighting", () => {
     await flush();
     await flush();
     expect(publish.mock.calls).toEqual([
-      [TOPIC, { brightness: 30, color_temp: accept.mock.calls[1]![0] }],
+      [
+        TOPIC,
+        { brightness: 30, color_temp: accept.mock.calls[1]![0] },
+        "homekit-with-adaptive-temperature",
+      ],
     ]);
+  });
+
+  test("stopping the schedule before a batch is published still delivers its HomeKit power write", async () => {
+    const { accessory, characteristic, controller, publish } = setup();
+    const schedule = hubStartsAdaptiveLighting(accessory);
+    characteristic(Characteristic.On).setValue(false);
+    controller!.disableAdaptiveLighting();
+    await schedule;
+    await flush();
+    expect(publish.mock.calls).toHaveLength(1);
+    expect(publish.mock.calls[0]![1]).toMatchObject({ on: false });
   });
 
   test("a HomeKit color or temperature in the tick of a recomputed temperature wins", async () => {

@@ -39,7 +39,10 @@ import {
 } from "./convert.ts";
 // "adaptive-lighting" is the controller's update; "adaptive-lighting-now" is
 // the remembered temperature of a light that someone turned on elsewhere.
-export type PublishSource = "adaptive-lighting" | "adaptive-lighting-now";
+export type PublishSource =
+  | "adaptive-lighting"
+  | "adaptive-lighting-now"
+  | "homekit-with-adaptive-temperature";
 export type PublishFn = (
   topic: string,
   payload: Record<string, unknown>,
@@ -65,7 +68,7 @@ export interface AdaptiveWhite {
 
 type SetPayloadFn = (
   payload: Record<string, unknown>,
-  source?: PublishSource,
+  source?: "adaptive-lighting",
 ) => void;
 
 const adaptiveLightingControllers = new WeakMap<
@@ -119,7 +122,9 @@ function createCoalescingPublish(
   const flush = () => {
     if (!pending) return;
     const payload = pending;
-    const flushedSource = source;
+    const flushedSource =
+      source ??
+      (adaptiveTemperature ? "homekit-with-adaptive-temperature" : undefined);
     pending = undefined;
     source = undefined;
     adaptiveTemperature = false;
@@ -232,7 +237,11 @@ export function createLightAccessory(
       // a temperature that Adaptive Lighting recomputes for a Brightness write
       // is flushed after the same request's color or temperature has turned
       // Adaptive Lighting off.
-      if (source && controller?.isAdaptiveLightingActive() !== true) return;
+      if (
+        source === "adaptive-lighting" &&
+        controller?.isAdaptiveLightingActive() !== true
+      )
+        return;
       if (white && isSiriWhite(payload)) keepAdaptiveLighting();
       if (source) publish(topic, payload, source);
       else publish(topic, payload);

@@ -1331,7 +1331,7 @@ describe("startBridge", () => {
       mockClient.published.some(
         (p) =>
           p.topic === "zigbee2mqtt/living_room/set" &&
-          p.message === JSON.stringify({ brightness: 126 }),
+          p.message === JSON.stringify({ brightness: 126, transition: 1 }),
       ),
     ).toBe(true);
 
@@ -1366,7 +1366,7 @@ describe("startBridge", () => {
       mockClient.published.some(
         (p) =>
           p.topic === "zigbee2mqtt/ct_light/set" &&
-          p.message === JSON.stringify({ color_temp: 370 }),
+          p.message === JSON.stringify({ color_temp: 370, transition: 1 }),
       ),
     ).toBe(true);
     expect(service.testCharacteristic(Characteristic.Hue)).toBe(false);
@@ -1453,7 +1453,10 @@ describe("startBridge", () => {
       (p) => p.topic === "zigbee2mqtt/color_light/set",
     );
     expect(setMsg).toBeDefined();
-    expect(JSON.parse(setMsg!.message)).toEqual({ color_temp: 370 });
+    expect(JSON.parse(setMsg!.message)).toEqual({
+      color_temp: 370,
+      transition: 1,
+    });
 
     await shutdown();
   });
@@ -1493,8 +1496,8 @@ describe("startBridge", () => {
       .filter((p) => p.topic.endsWith("/set"))
       .map((p) => [p.topic, JSON.parse(p.message) as unknown]);
     expect(sets).toEqual([
-      ["zigbee2mqtt/cool_light/set", { color_temp: 250 }],
-      ["zigbee2mqtt/warm_light/set", { color_temp: 400 }],
+      ["zigbee2mqtt/cool_light/set", { color_temp: 250, transition: 1 }],
+      ["zigbee2mqtt/warm_light/set", { color_temp: 400, transition: 1 }],
     ]);
 
     await shutdown();
@@ -1586,7 +1589,7 @@ describe("startBridge", () => {
       service.getCharacteristic(Characteristic.ColorTemperature).setValue(250);
       await flush();
 
-      expect(sets()).toEqual([{ color_temp: 250 }]);
+      expect(sets()).toEqual([{ color_temp: 250, transition: 1 }]);
       expect(value(Characteristic.ColorTemperature)).toBe(250);
       expect(value(Characteristic.Hue)).toBe(29);
       expect(value(Characteristic.Saturation)).toBe(36);
@@ -1601,7 +1604,9 @@ describe("startBridge", () => {
       service.getCharacteristic(Characteristic.Saturation).setValue(100);
       await flush();
 
-      expect(sets()).toEqual([{ color: { hue: 240, saturation: 100 } }]);
+      expect(sets()).toEqual([
+        { color: { hue: 240, saturation: 100 }, transition: 1 },
+      ]);
       expect(value(Characteristic.ColorTemperature)).toBe(140);
       expect(value(Characteristic.Hue)).toBe(240);
       expect(value(Characteristic.Saturation)).toBe(100);
@@ -1615,7 +1620,7 @@ describe("startBridge", () => {
       service.getCharacteristic(Characteristic.Saturation).setValue(0);
       await flush();
 
-      expect(sets()).toEqual([{ color_temp: 370 }]);
+      expect(sets()).toEqual([{ color_temp: 370, transition: 1 }]);
       expect(value(Characteristic.ColorTemperature)).toBe(370);
       expect(value(Characteristic.Hue)).toBe(0);
       expect(value(Characteristic.Saturation)).toBe(0);
@@ -1646,7 +1651,9 @@ describe("startBridge", () => {
       service.getCharacteristic(Characteristic.Saturation).setValue(100);
       await flush();
 
-      expect(sets()).toEqual([{ color: { hue: 240, saturation: 100 } }]);
+      expect(sets()).toEqual([
+        { color: { hue: 240, saturation: 100 }, transition: 1 },
+      ]);
 
       await shutdown();
     });
@@ -1660,7 +1667,10 @@ describe("startBridge", () => {
       service.getCharacteristic(Characteristic.Saturation).setValue(67);
       await flush();
 
-      expect(sets()).toEqual([{ color_temp: 250 }, { color_temp: 372 }]);
+      expect(sets()).toEqual([
+        { color_temp: 250, transition: 1 },
+        { color_temp: 372, transition: 1 },
+      ]);
 
       await shutdown();
     });
@@ -1672,7 +1682,7 @@ describe("startBridge", () => {
       service.getCharacteristic(Characteristic.ColorTemperature).setValue(250);
       await flush();
 
-      expect(sets()).toEqual([{ color_temp: 250 }]);
+      expect(sets()).toEqual([{ color_temp: 250, transition: 1 }]);
 
       await shutdown();
     });
@@ -1686,7 +1696,10 @@ describe("startBridge", () => {
       service.getCharacteristic(Characteristic.Saturation).setValue(33);
       await flush();
 
-      expect(sets()).toEqual([{ color_temp: 370 }, { color_temp: 370 }]);
+      expect(sets()).toEqual([
+        { color_temp: 370, transition: 1 },
+        { color_temp: 370, transition: 1 },
+      ]);
 
       await shutdown();
     });
@@ -1750,7 +1763,7 @@ describe("startBridge", () => {
         .setValue(true);
 
       expect(output.lines().map((line) => line.replace(/^\S+ /, ""))).toEqual([
-        'HomeKit write for "Color Light": {"hue":0,"saturation":0} published to zigbee2mqtt/color_light/set as {"color_temp":250}',
+        'HomeKit write for "Color Light": {"hue":0,"saturation":0} published to zigbee2mqtt/color_light/set as {"color_temp":250,"transition":1}',
         'HomeKit write for "Color Light": {"scene_recall":3} published to zigbee2mqtt/color_light/set as {"scene_recall":3}',
       ]);
     } finally {
@@ -2487,6 +2500,7 @@ describe("a WLED device with white segments", () => {
         .filter((p) => p.topic === `${TOPIC}/api`)
         .map((p) => JSON.parse(p.message) as unknown);
     const white = (col: number[]) => ({
+      tt: 10,
       seg: [
         { id: 0, on: false, sel: false },
         { id: 1, on: true, sel: true, col: [col], fx: 0 },
@@ -2521,6 +2535,25 @@ describe("a WLED device with white segments", () => {
       controllers.push(adaptiveLightingController(started.accessory)!);
       return started;
     }
+
+    test("a power write batched with the hub's temperature uses WLED's power transition and keeps its effect", async () => {
+      const { accessory, characteristic, report, sent, shutdown } =
+        await startAdaptive();
+      report("g", "255");
+      const schedule = hubStartsAdaptiveLighting(accessory);
+      characteristic(Characteristic.On).setValue(false);
+      await schedule;
+      await flush();
+
+      expect(sent()).toHaveLength(1);
+      expect(sent()[0]).toMatchObject({
+        on: false,
+        seg: [{ id: 0 }, { id: 1 }, { id: 2 }],
+      });
+      expect(JSON.stringify(sent()[0])).not.toMatch(/"tt"|"transition"|"fx"/);
+      expect(output.lines().join("\n")).toContain('HomeKit write for "Nook"');
+      await shutdown();
+    });
 
     test("a brightness that WLED reports once HomeKit has turned it on is shown at once, with its temperature", async () => {
       const { accessory, characteristic, report, shutdown } =
@@ -2657,6 +2690,7 @@ describe("a WLED device with white segments", () => {
     await flush();
 
     expect(sent()[1]).toEqual({
+      tt: 10,
       seg: [
         { id: 1, on: false, sel: false },
         { id: 2, on: false, sel: false },
@@ -2926,7 +2960,7 @@ describe("WLED device support", () => {
     );
     expect(apiMsg).toBeDefined();
     const parsed = JSON.parse(apiMsg!.message) as Record<string, unknown>;
-    expect(parsed.bri).toBe(255);
+    expect(parsed).toEqual({ bri: 255, tt: 10 });
 
     await shutdown();
   });
@@ -2950,7 +2984,7 @@ describe("WLED device support", () => {
     );
     expect(apiMsg).toBeDefined();
     const parsed = JSON.parse(apiMsg!.message) as Record<string, unknown>;
-    expect(parsed.seg).toEqual([{ col: [[255, 0, 0]], fx: 0 }]);
+    expect(parsed).toEqual({ seg: [{ col: [[255, 0, 0]], fx: 0 }], tt: 10 });
 
     await shutdown();
   });
@@ -4213,7 +4247,7 @@ describe("startBridge with metrics", () => {
       await flush();
       expect(output.lines().map((line) => line.replace(/^\S+ /, ""))).toEqual([
         'HAP write from 192.168.1.50: "Color Light" Hue=400, "Color Light" Saturation=20, 999.7="x\\ny"',
-        'HomeKit write for "Color Light": {"saturation":20} published to zigbee2mqtt/color_light/set as {"color":{"saturation":20}}',
+        'HomeKit write for "Color Light": {"saturation":20} published to zigbee2mqtt/color_light/set as {"color":{"saturation":20},"transition":1}',
       ]);
     } finally {
       output.restore();
@@ -4939,7 +4973,10 @@ describe("Adaptive Lighting", () => {
       );
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(sent().slice(1)).toEqual([{ brightness: 152 }, fade(370)]);
+    expect(sent().slice(1)).toEqual([
+      { brightness: 152, transition: 1 },
+      fade(370),
+    ]);
     report({ ...ON, brightness: 203, color_temp: 370 });
     jest.advanceTimersByTime(9999);
     await flush();
@@ -5030,7 +5067,7 @@ describe("Adaptive Lighting", () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
     expect(sent()).toEqual([
-      { state: "ON", brightness: 50, color_temp: 350 },
+      { state: "ON", brightness: 50, color_temp: 350, transition: 1 },
       { color_temp: 390 },
     ]);
     await shutdown();
@@ -5076,7 +5113,7 @@ describe("Adaptive Lighting", () => {
     }
     jest.advanceTimersByTime(10000);
     expect(sent()).toEqual([
-      { state: "ON", brightness: 152, color_temp: 350 },
+      { state: "ON", brightness: 152, color_temp: 350, transition: 1 },
       { color_temp: 370 },
     ]);
     expect(seen).toEqual([]);
@@ -5136,7 +5173,7 @@ describe("Adaptive Lighting", () => {
       characteristic(Characteristic.On).setValue(true);
       for (const [type, value] of writes) characteristic(type).setValue(value);
       await flush();
-      expect(sent()).toEqual([{ state: "ON", ...expected }]);
+      expect(sent()).toEqual([{ state: "ON", ...expected, transition: 1 }]);
       await shutdown();
     }
   });
@@ -5206,7 +5243,7 @@ describe("Adaptive Lighting", () => {
     expect(sent()).toEqual([
       fade(350),
       fade(350),
-      { color_temp: 370 },
+      { color_temp: 370, transition: 1 },
       fade(350),
     ]);
     await shutdown();
@@ -5302,7 +5339,7 @@ describe("Adaptive Lighting", () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
     expect(sent()).toEqual([
-      { brightness: 50, color_temp: 350 },
+      { brightness: 50, color_temp: 350, transition: 1 },
       { color_temp: 390 },
     ]);
     await shutdown();
@@ -5322,7 +5359,11 @@ describe("Adaptive Lighting", () => {
       );
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(sent()).toEqual([fade(350), { brightness: 50 }, fade(390)]);
+    expect(sent()).toEqual([
+      fade(350),
+      { brightness: 50, transition: 1 },
+      fade(390),
+    ]);
     await shutdown();
   });
 
@@ -5351,7 +5392,7 @@ describe("Adaptive Lighting", () => {
       );
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(sent()).toEqual([{ brightness: 0 }]);
+    expect(sent()).toEqual([{ brightness: 0, transition: 1 }]);
     await shutdown();
   });
 
@@ -5947,7 +5988,7 @@ describe("Adaptive Lighting", () => {
       );
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(sent()).toEqual([{ brightness: 50 }, fade(390)]);
+    expect(sent()).toEqual([{ brightness: 50, transition: 1 }, fade(390)]);
     report({ ...ON, brightness: 50, color_temp: 390 });
     jest.advanceTimersByTime(10000);
     await flush();
@@ -5994,7 +6035,7 @@ describe("Adaptive Lighting", () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
     expect(sent()).toEqual([
-      { brightness: 50, color_temp: 350 },
+      { brightness: 50, color_temp: 350, transition: 1 },
       { color_temp: 390 },
     ]);
 
@@ -6072,7 +6113,7 @@ describe("Adaptive Lighting", () => {
       );
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(sent()).toEqual([fade(350), { brightness: 0 }]);
+    expect(sent()).toEqual([fade(350), { brightness: 0, transition: 1 }]);
     await shutdown();
   });
 
@@ -6441,10 +6482,10 @@ describe("Adaptive Lighting", () => {
       expect(counts).toEqual([]);
       expect(hueUpdates).toEqual(["write"]);
       expect(lamp.sent().slice(1)).toEqual([
-        { brightness: 254, state: "ON", color_temp: 350 },
+        { brightness: 254, state: "ON", color_temp: 350, transition: 1 },
       ]);
       expect(logged("HomeKit write for")).toEqual([
-        `HomeKit write for "Lamp": {"hue":0,"saturation":0,"brightness":100,"on":true} as Adaptive Lighting's white published to ${TOPIC}/set as {"state":"ON","brightness":254,"color_temp":350}`,
+        `HomeKit write for "Lamp": {"hue":0,"saturation":0,"brightness":100,"on":true} as Adaptive Lighting's white published to ${TOPIC}/set as {"state":"ON","brightness":254,"color_temp":350,"transition":1}`,
       ]);
       expect(lamp.characteristic(Characteristic.ColorTemperature).value).toBe(
         350,
@@ -6456,7 +6497,7 @@ describe("Adaptive Lighting", () => {
       const lamp = await lampWithSchedule();
       await request(lamp.characteristic, WHITE);
       expect(lamp.sent().slice(1)).toEqual([
-        { brightness: 254, state: "ON", color_temp: 350 },
+        { brightness: 254, state: "ON", color_temp: 350, transition: 1 },
       ]);
       await lamp.shutdown();
     });
@@ -6467,7 +6508,7 @@ describe("Adaptive Lighting", () => {
       lamp.report({ ...ON, brightness: 152, color_temp: 370 });
       await request(lamp.characteristic, WHITE);
       expect(lamp.sent().slice(3)).toEqual([
-        { brightness: 254, state: "ON", color_temp: 370 },
+        { brightness: 254, state: "ON", color_temp: 370, transition: 1 },
         fade(350),
       ]);
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
@@ -6486,7 +6527,7 @@ describe("Adaptive Lighting", () => {
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
       expect(counts).toEqual([1]);
       expect(lamp.sent().slice(before)).toEqual([
-        { brightness: 254, state: "ON", color_temp: 350 },
+        { brightness: 254, state: "ON", color_temp: 350, transition: 1 },
       ]);
       expect(logged("Adaptive Lighting restored for")).toEqual([
         'Adaptive Lighting restored for "Lamp"',
@@ -6563,7 +6604,7 @@ describe("Adaptive Lighting", () => {
       await request(lamp.characteristic, WHITE);
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
       expect(lamp.sent()).toEqual([
-        { brightness: 254, state: "ON", color_temp: 350 },
+        { brightness: 254, state: "ON", color_temp: 350, transition: 1 },
       ]);
       await lamp.shutdown();
     });
@@ -6610,6 +6651,7 @@ describe("Adaptive Lighting", () => {
         await request(lamp.characteristic, WHITE);
         expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
         expect(lamp.sent().at(-1)).toEqual({
+          transition: 1,
           state: "ON",
           brightness: 254,
           color_temp: 350,
@@ -6629,6 +6671,7 @@ describe("Adaptive Lighting", () => {
         await request(lamp.characteristic, WHITE);
         expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
         expect(lamp.sent().at(-1)).toEqual({
+          transition: 1,
           state: "ON",
           brightness: 254,
           color_temp: 370,
@@ -6680,7 +6723,7 @@ describe("Adaptive Lighting", () => {
       const lamp = await lampWithSchedule();
       await request(lamp.characteristic, writes);
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
-      expect(lamp.sent().at(-1)).toEqual(message);
+      expect(lamp.sent().at(-1)).toEqual({ ...message, transition: 1 });
       expect(stored()).toBeDefined();
       await lamp.shutdown();
     });
@@ -6692,6 +6735,7 @@ describe("Adaptive Lighting", () => {
       await request(lamp.characteristic, WHITE);
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
       expect(lamp.sent().at(-1)).toEqual({
+        transition: 1,
         state: "ON",
         brightness: 254,
         color_temp: 370,
@@ -6717,6 +6761,7 @@ describe("Adaptive Lighting", () => {
       await request(lamp.characteristic, WHITE);
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(false);
       expect(lamp.sent().at(-1)).toEqual({
+        transition: 1,
         state: "ON",
         brightness: 254,
         color_temp: 370,
@@ -6772,7 +6817,7 @@ describe("Adaptive Lighting", () => {
         [Characteristic.Saturation, 0],
       ]);
       expect(lamp.controller.isAdaptiveLightingActive()).toBe(true);
-      expect(lamp.sent().at(-1)).toEqual({ color_temp: 350 });
+      expect(lamp.sent().at(-1)).toEqual({ color_temp: 350, transition: 1 });
       await lamp.shutdown();
     });
 
@@ -6918,7 +6963,7 @@ describe("Adaptive Lighting", () => {
     )!.message;
     expect(turnOn).toMatch(/"on":true/);
     expect(turnOn).toMatch(/"col"/);
-    expect(turnOn).not.toMatch(/"fx"/);
+    expect(turnOn).not.toMatch(/"fx"|"tt"|transition/);
 
     process.nextTick(() => {
       void service

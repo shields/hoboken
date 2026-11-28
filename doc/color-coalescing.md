@@ -59,6 +59,14 @@ This matches homebridge-z2m's approach but without the flag-based "wait
 for both H+S" limitation. We simply flush whatever has accumulated by the
 time `nextTick` fires.
 
+When the HomeKit request includes brightness, hue, saturation, or color
+temperature, Hoboken requests a one-second fade for the combined write.
+Zigbee2MQTT takes `"transition": 1` in seconds. WLED takes `"tt": 10`
+in tenths of a second for this request, including all segment changes.
+Plain on/off and scene recalls use the device's usual timing. A power
+write batched with an Adaptive Lighting temperature also keeps that timing
+and preserves a running WLED effect.
+
 ## Deep Merge for Color Objects
 
 Z2M expects color writes as `{ color: { hue: H, saturation: S } }`.

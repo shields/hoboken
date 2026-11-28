@@ -63,6 +63,10 @@ Commands are broadcast to all group members at the Zigbee level, and devices
 that don't support a given cluster ignore it, so give the group the
 capabilities of its most capable member.
 
+HomeKit brightness, color, and color temperature writes request a one-second
+fade on Zigbee2MQTT and WLED lights. A plain on/off request uses the light's
+usual power transition.
+
 ### White on color lights
 
 "Set the lights to white" arrives from HomeKit as a color. For a Zigbee2MQTT

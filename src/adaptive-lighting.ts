@@ -90,8 +90,7 @@ export const ADAPTIVE_TRANSITION_SECONDS = 5;
 
 // The controller updates a lit light about once a minute, and a switch's
 // brightness reaches HomeKit 10 s late, so a temperature that steps is
-// visible; a fade makes the shift gradual. A message that also changes power
-// or brightness is a turn-on or a dim, which must not fade.
+// visible; a fade makes the shift gradual.
 export function fadeTemperature(
   message: Record<string, unknown>,
 ): Record<string, unknown> {

@@ -123,6 +123,7 @@ import type {
 const GET_RETRY_INITIAL_MS = 2000;
 const GET_RETRY_MAX_MS = 1_024_000;
 const GET_JITTER_FRACTION = 0.25;
+const HOMEKIT_TRANSITION_SECONDS = 1;
 const SUBACK_FAILURE = 0x80;
 
 // A SUBACK carries one code per requested topic, in request order, so its
@@ -620,14 +621,17 @@ export async function startBridge(
       offTemperatures.delete(topic);
       // A WLED effect ends only for a color or temperature that HomeKit
       // asked for, not for one that Adaptive Lighting adds or updates.
-      const converted = convert(
-        payload,
-        cachedRaw,
+      const homeKitColor =
         !source &&
-          ("hue" in written ||
-            "saturation" in written ||
-            "color_temp" in written),
-      );
+        ("hue" in written ||
+          "saturation" in written ||
+          "color_temp" in written);
+      const converted = convert(payload, cachedRaw, homeKitColor);
+      if (homeKitColor || "brightness" in written) {
+        if (device.type === "wled")
+          converted.tt = HOMEKIT_TRANSITION_SECONDS * 10;
+        else converted.transition = HOMEKIT_TRANSITION_SECONDS;
+      }
       // A light that has not yet reported that it is on was turned on by a
       // write a moment ago, and takes its temperature at once.
       const message = JSON.stringify(
@@ -636,9 +640,10 @@ export async function startBridge(
           : converted,
       );
       rawPublish(mqttTopic(topic), message);
-      const origin = source
-        ? `Adaptive Lighting for "${device.name}"`
-        : `HomeKit write for "${device.name}"`;
+      const origin =
+        !source || source === "homekit-with-adaptive-temperature"
+          ? `HomeKit write for "${device.name}"`
+          : `Adaptive Lighting for "${device.name}"`;
       log.log(
         `${origin}: ${JSON.stringify(written)}${white === written ? "" : " as Adaptive Lighting's white"}${payload === white ? "" : " with the temperature of Adaptive Lighting"} published to ${mqttTopic(topic)} as ${message}`,
       );
